@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useRoom } from "@/lib/useRoom";
 import { introDone, markIntroDone } from "@/lib/session";
-import { OpeningSequenceStub } from "@/components/OpeningSequenceStub";
+import { OpeningSequence } from "@/components/OpeningSequence";
 import { JoinScreen } from "@/components/JoinScreen";
 import { LobbyScreen } from "@/components/LobbyScreen";
 import { PlayScreen } from "@/components/play/PlayScreen";
@@ -56,7 +56,7 @@ export default function PlayPage() {
   }
 
   if (intro === "show") {
-    return <OpeningSequenceStub onComplete={finishIntro} />;
+    return <OpeningSequence onComplete={finishIntro} />;
   }
 
   const view = room.view;

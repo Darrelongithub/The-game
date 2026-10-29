@@ -61,18 +61,28 @@ Both runners use `npx -y tsx` so **no extra dependency** was added.
 | `src/components/ConnectionLostOverlay.tsx` | auto-retry + manual retry |
 | `src/components/play/*` | phase router + placeholder beat screens |
 
-## Placeholders to be replaced at merge (Agent Z: read this)
+## Merged wiring (Agent Z: read this)
 
-These files are **Agent A placeholders**, deliberately kept in their own paths
-so they never collide with the owning agent's canonical file:
+Agent A's placeholders were **removed** once the owning agents' real screens
+landed; `src/components/play/PlayScreen.tsx` now routes to them:
 
-- `src/components/OpeningSequenceStub.tsx` — B2 owns `OpeningSequence.tsx`.
-  Swap the single import in `src/app/page.tsx`. The stub already applies
-  ui-system-FIXES #2 (tap-to-skip), #4 (viewport-scaled wipe) and #5 (timer
-  cleanup + `onComplete` fires once).
-- `src/components/play/RoundPanel.tsx`, `BeatPanels.tsx`, `FinalePanel.tsx`,
-  `SecretDeck.tsx` — B2 owns the produced round/interlude/finale/secret
-  screens. These are contract-correct and fully driveable, not final art.
+| Beat | Rendered by |
+|---|---|
+| intro | `components/OpeningSequence.tsx` (B2) — gated once per session by Agent A (`intro-done`) |
+| round | `screens/PromptScreen.tsx` — all 9 kinds + `onlyPlayers` spectator |
+| interlude | `screens/InterludeScreen.tsx` |
+| reveal | `screens/RevealScreen.tsx` |
+| finale | `components/FinaleScreen.tsx` (B2) — broadcast-safe slides, GroupAnnouncement, ShareCard, press-and-hold secret deck |
+| secrets | passed to `FinaleScreen` as `deck` — **only** from the per-socket `secrets` event |
+
+Agent A keeps: the transport seam, `useRoom`, the phase order, session/resume,
+and the guarantee that the private deck is never rendered publicly.
+`screens/WaitingScreen.tsx` is available but unused — `PromptScreen` already
+renders its own waiting/spectator states.
+
+`src/components/__tests__/` is B2's standalone jsdom harness (run with
+`npx tsx`); it is excluded from this workspace's `tsconfig` typecheck because
+`jsdom` is not a vendored dependency.
 
 ## Deliberate deviations (documented, not accidental)
 

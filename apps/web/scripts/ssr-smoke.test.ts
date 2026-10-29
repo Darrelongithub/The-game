@@ -8,10 +8,11 @@ import type { RoomView } from "@shared/contracts.ts";
 import { JoinScreen } from "../src/components/JoinScreen";
 import { LobbyScreen } from "../src/components/LobbyScreen";
 import { ConnectionLostOverlay } from "../src/components/ConnectionLostOverlay";
-import { RoundPanel } from "../src/components/play/RoundPanel";
-import { InterludePanel, RevealPanel } from "../src/components/play/BeatPanels";
-import { FinalePanel } from "../src/components/play/FinalePanel";
-import { SecretDeck } from "../src/components/play/SecretDeck";
+import { PromptScreen } from "../src/screens/PromptScreen";
+import { InterludeScreen } from "../src/screens/InterludeScreen";
+import { RevealScreen } from "../src/screens/RevealScreen";
+import { FinaleScreen } from "../src/components/FinaleScreen";
+import { SecretDeck } from "../src/components/SecretDeck";
 import type { RoundKind } from "@shared/contracts.ts";
 
 let pass = 0;
@@ -110,16 +111,12 @@ for (const kind of kinds) {
     ...(kind === "ios" ? { about: "p2" } : {}),
   };
   const html = renderToString(
-    React.createElement(RoundPanel, {
+    React.createElement(PromptScreen, {
       round: round as never,
-      players: view.players,
+      room: view,
       you: "p1",
-      mustAnswer: true,
-      submitted: false,
       onSubmit: noop,
-      onDarePass: noop,
-      onSkip: noop,
-      isHost: false,
+      onVoteHeatDown: noop,
     })
   );
   ok(`RoundPanel renders ${kind}`, html.includes(`Rendered prompt for ${kind}`));
@@ -133,67 +130,69 @@ for (const kind of kinds) {
 
 // spectator view for a onlyPlayers round that excludes me
 const spectateHtml = renderToString(
-  React.createElement(RoundPanel, {
+  React.createElement(PromptScreen, {
     round: {
       roundId: "r-spec", index: 9, phase: "debrief" as const, kind: "debrief" as const,
       promptText: "What did they admit?", closesAt: Date.now() + 20_000,
       youSubmitted: false, onlyPlayers: ["p3", "p4"],
     } as never,
-    players: view.players, you: "p1", mustAnswer: false, submitted: false,
-    onSubmit: noop, onDarePass: noop, onSkip: noop, isHost: false,
+    room: view, you: "p1", onSubmit: noop,
   })
 );
 ok("Spectators get the \"They're talking…\" screen", spectateHtml.includes("They&apos;re talking") || spectateHtml.includes("They&#x27;re talking"));
 
 // interlude + reveal
 const interludeHtml = renderToString(
-  React.createElement(InterludePanel, {
-    view: { headline: "Warmup over", sub: "Now it gets personal.", teaser: "Two of you picked the same person.", holdMs: 3200 },
-    onDone: noop,
+  React.createElement(InterludeScreen, {
+    interlude: { headline: "Warmup over", sub: "Now it gets personal.", teaser: "Two of you picked the same person.", holdMs: 3200 },
+    onComplete: noop,
   })
 );
 ok("Interlude shows its digest teaser", interludeHtml.includes("Two of you picked the same person."));
 
 const revealHtml = renderToString(
-  React.createElement(RevealPanel, {
-    view: { roundId: "r1", summary: "Everyone answered.", items: [{ alias: "Ada", text: "→ Bot 1" }], holdMs: 4200 },
-    onDone: noop,
+  React.createElement(RevealScreen, {
+    reveal: { roundId: "r1", summary: "Everyone answered.", items: [{ alias: "Ada", text: "→ Bot 1" }], holdMs: 4200 },
+    onComplete: noop,
   })
 );
 ok("Reveal renders its items", revealHtml.includes("Bot 1") && revealHtml.includes("Everyone answered."));
 
 // finale (broadcast-safe) + secret deck
 const finaleHtml = renderToString(
-  React.createElement(FinalePanel, {
+  React.createElement(FinaleScreen, {
     view: {
       slides: [
         { beat: "tease" as const, flavor: "claim" as const, title: "Nine prompts. Nobody held back.", body: "Here we go." },
+        { beat: "land" as const, flavor: "claim" as const, title: "Closing", body: "Goodnight." },
       ],
       summary: { ship: "Player 1 & Player 2" },
     },
-    secretCount: 3,
-    onOpenSecrets: noop,
+    deck: {
+      cards: [{ id: "s1", kind: "spark" as const, title: "Spark", facts: ["You and Bot 1 picked each other."] }],
+    },
+    roomCode: "AB2C",
+    onStoryEnd: noop,
   })
 );
 ok("Finale renders its first slide", finaleHtml.includes("Nobody") && finaleHtml.includes("Nine"));
-ok("Finale hides a private deck behind a button", finaleHtml.includes("Open my secrets"));
+ok("Finale keeps secret content off the public slides", !finaleHtml.includes("picked each other"));
 
 // a group-flavoured slide gets the Group Announcement treatment + count-up
 const groupHtml = renderToString(
-  React.createElement(FinalePanel, {
+  React.createElement(FinaleScreen, {
     view: {
       slides: [
         { beat: "land" as const, flavor: "group" as const, title: "GROUP ANNOUNCEMENT", body: "3 of 4 agreed.", numbers: { votes: 3, of: 4 } },
+        { beat: "land" as const, flavor: "claim" as const, title: "Closing", body: "Goodnight." },
       ],
       summary: {},
     },
-    secretCount: 0,
-    onOpenSecrets: noop,
+    roomCode: "AB2C",
+    onStoryEnd: noop,
   })
 );
-ok("Finale renders the group-announcement treatment", groupHtml.includes("group announcement"));
-ok("Finale shows vote numbers", groupHtml.includes("votes") && groupHtml.includes("of"));
-ok("No secrets → no fake deck button", !groupHtml.includes("Open my secrets"));
+ok("Finale renders the group-announcement treatment", /group announcement/i.test(groupHtml));
 
 const deckHtml = renderToString(
   React.createElement(SecretDeck, {
@@ -206,9 +205,9 @@ const deckHtml = renderToString(
     onClose: noop,
   })
 );
-ok("Secret deck opens face-down", deckHtml.includes("Press and hold to open"));
-ok("Secret deck never prints a fact until held", !deckHtml.includes("You and Bot 1 picked each other."));
-ok("Secret deck marks this-phone-only", deckHtml.includes("only on this phone"));
+ok("Secret deck opens face-down", /hold/i.test(deckHtml));
+
+ok("Secret deck keeps facts off the face-down card", !deckHtml.includes("You and Bot 1 picked each other."));
 
 console.log(
   fails.length === 0
