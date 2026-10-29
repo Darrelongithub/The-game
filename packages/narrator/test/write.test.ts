@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { FinaleSlide, PlayerId, SecretCard } from "../../shared/src/contracts.ts";
 import { PROVIDERS } from "../../shared/src/contracts.ts";
-import { buildSkeleton } from "../src/slides.ts";
+import { buildSkeleton, sourceOf } from "../src/slides.ts";
 import { narrateNight, writeFinale } from "../src/write.ts";
 import { applyAliasesToDecks, applyAliasesToSlides } from "../src/index.ts";
 import { parseJsonLoose } from "../src/gemini.ts";
@@ -59,8 +59,14 @@ const validCopy = {
   body: "This is the story of the night, told by the numbers.",
 };
 
+/** Quote / dodge slides must keep their verbatim material (see keepsVerbatim). */
+const bodyFor = (slide: FinaleSlide): string => {
+  const verbatim = sourceOf(slide)?.verbatim;
+  return verbatim ? `${verbatim} — and that is on record.` : validCopy.body;
+};
+
 const fullResponse = (slides: readonly FinaleSlide[]) => ({
-  slides: slides.map((_, index) => ({ i: index, ...validCopy })),
+  slides: slides.map((slide, index) => ({ i: index, title: validCopy.title, body: bodyFor(slide) })),
   cards: [],
 });
 
@@ -218,10 +224,10 @@ describe("validation on every response", () => {
       fetchImpl: impl,
       roster: ROSTER,
     });
-    for (const slide of out.slides) {
+    out.slides.forEach((slide, index) => {
       assert.equal(slide.title, validCopy.title);
-      assert.equal(slide.body, validCopy.body);
-    }
+      assert.equal(slide.body, bodyFor(skeleton[index] as FinaleSlide));
+    });
   });
 
   it("falls back per slide when the model invents a number", async () => {
@@ -238,7 +244,7 @@ describe("validation on every response", () => {
     });
 
     assert.equal(out.slides[blind]?.body, skeleton[blind]?.body);
-    assert.equal(out.slides[blind + 1]?.body, validCopy.body);
+    assert.equal(out.slides[blind + 1]?.body, bodyFor(skeleton[blind + 1] as FinaleSlide));
   });
 
   it("falls back when the model names a player outside the roster", async () => {
@@ -284,7 +290,7 @@ describe("validation on every response", () => {
     assert.equal(out.slides[1]?.body, skeleton[1]?.body);
     assert.equal(out.slides[2]?.body, skeleton[2]?.body);
     assert.equal(out.slides[3]?.title, skeleton[3]?.title);
-    assert.equal(out.slides[3]?.body, validCopy.body);
+    assert.equal(out.slides[3]?.body, bodyFor(skeleton[3] as FinaleSlide));
   });
 
   it("rejects an alias and a refusal in model copy", async () => {
@@ -300,6 +306,42 @@ describe("validation on every response", () => {
     });
     assert.equal(out.slides[4]?.body, skeleton[4]?.body);
     assert.equal(out.slides[5]?.body, skeleton[5]?.body);
+  });
+
+  it("rejects a paraphrase of verbatim digest material", async () => {
+    const { skeleton, decks, night: data } = READY();
+    const quote = skeleton.findIndex((slide) => slide.flavor === "quote");
+    const dodge = skeleton.findIndex((slide) => slide.flavor === "dodge");
+    const response = fullResponse(skeleton);
+    (response.slides[quote] as { body: string }).body = "They said they would fight a bus for this group.";
+    (response.slides[dodge] as { body: string }).body = "\"My mum was watching.\" — Player 2";
+
+    const { impl } = mockFetch(() => envelope(response));
+    const out = await writeFinale(skeleton, decks, data.results, data.digest, {
+      apiKey: "k",
+      fetchImpl: impl,
+      roster: ROSTER,
+    });
+
+    assert.equal(out.slides[quote]?.body, skeleton[quote]?.body);
+    assert.equal(out.slides[dodge]?.body, skeleton[dodge]?.body);
+  });
+
+  it("accepts a verbatim quote with new framing around it", async () => {
+    const { skeleton, decks, night: data } = READY();
+    const quote = skeleton.findIndex((slide) => slide.flavor === "quote");
+    const response = fullResponse(skeleton);
+    (response.slides[quote] as { body: string }).body =
+      "Player 1, mid-round: \"I would fight a bus for this group, and I would lose.\"";
+
+    const { impl } = mockFetch(() => envelope(response));
+    const out = await writeFinale(skeleton, decks, data.results, data.digest, {
+      apiKey: "k",
+      fetchImpl: impl,
+      roster: ROSTER,
+    });
+
+    assert.equal(out.slides[quote]?.body, response.slides[quote]?.body);
   });
 
   it("ignores entries that try to rewrite the beat or the numbers", async () => {
@@ -341,7 +383,7 @@ describe("validation on every response", () => {
       fetchImpl: impl,
       roster: ROSTER,
     });
-    assert.equal(out.slides[0]?.body, validCopy.body);
+    assert.equal(out.slides[0]?.body, bodyFor(skeleton[0] as FinaleSlide));
     for (let index = 1; index < skeleton.length; index += 1) {
       assert.deepEqual(out.slides[index], skeleton[index]);
     }

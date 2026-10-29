@@ -301,6 +301,24 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
 
 const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
+/** Lowercased, whitespace-collapsed, typographic quotes folded — for the
+ *  "this must appear verbatim" check only. */
+const normalizeForQuote = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+
+/** A quote/dodge slide must still contain its verbatim digest material. */
+const keepsVerbatim = (body: string, verbatim: string | undefined): boolean => {
+  if (!verbatim) return true;
+  const needle = normalizeForQuote(verbatim).replace(/^"|"$/g, "");
+  if (needle.length === 0) return true;
+  return normalizeForQuote(body).includes(needle);
+};
+
 function mergeSlides(
   slides: FinaleSlide[],
   raw: unknown,
@@ -334,7 +352,9 @@ function mergeSlides(
     if (title.ok) target.title = title.text;
 
     const body = validateBody(record["body"], limits);
-    if (body.ok) target.body = body.text;
+    // QUOTE OF THE NIGHT and the Dodge Report are quoted material: a
+    // paraphrase is an invented quote, so it falls back to the engine line.
+    if (body.ok && keepsVerbatim(body.text, source.verbatim)) target.body = body.text;
   }
   return slides;
 }

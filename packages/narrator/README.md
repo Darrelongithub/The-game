@@ -86,7 +86,9 @@ Never throws, never returns empty text, never blocks the show.
 - banned: `toxic person`, `red flag`, `soulmate`, `science says`,
   `love language`, `diagnos*`, `narcissis*`, `therapy` + clinical extensions;
 - title ≤ 6 words, body ≤ 140 chars, card fact ≤ 120 chars, 1–4 facts per card;
-- no refusals pretending to be copy.
+- no refusals pretending to be copy;
+- quoted material stays verbatim: a QUOTE OF THE NIGHT / Dodge Report body that
+  no longer contains the digest text is an invented quote and falls back.
 
 A rejected string falls back to the engine's own line — traceable to
 claims/digest by construction.
@@ -106,7 +108,7 @@ node --import tsx --test test/*.test.ts     # Node 20 / repo convention
 npm run typecheck                          # tsc --noEmit, strict
 ```
 
-81 tests, zero network: the fetch is always mocked.
+83 tests, zero network: the fetch is always mocked.
 
 ## Known gaps
 
