@@ -71,6 +71,7 @@ Announcement animates them; nothing is ever recomputed here.
 |---|---|
 | no `GEMINI_API_KEY` | engine skeleton + engine decks, byte for byte |
 | timeout (10 s), 429, network error | same |
+| endpoint rejects the safety field (400) | retries once with the literal `SAFETY_OFF` values, then falls back |
 | junk JSON, prose refusal, empty text | same |
 | one bad slide / card | that slide/card keeps the engine line; the rest merge |
 
@@ -108,7 +109,7 @@ node --import tsx --test test/*.test.ts     # Node 20 / repo convention
 npm run typecheck                          # tsc --noEmit, strict
 ```
 
-83 tests, zero network: the fetch is always mocked.
+86 tests, zero network: the fetch is always mocked.
 
 ## Known gaps
 

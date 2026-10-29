@@ -1,0 +1,180 @@
+[
+  {
+    "id": "d1",
+    "phase": "deep",
+    "kind": "text",
+    "text": "What do people in this room get wrong about you in the first five minutes?",
+    "measures": [
+      "vulnerability",
+      "room perception"
+    ],
+    "coding": "trust",
+    "asksTarget": false
+  },
+  {
+    "id": "d2",
+    "phase": "deep",
+    "kind": "ios",
+    "text": "Pick the person you trust most in this room. Circles.",
+    "measures": [
+      "trust map"
+    ],
+    "coding": "trust",
+    "asksTarget": true
+  },
+  {
+    "id": "d3",
+    "phase": "deep",
+    "kind": "rating",
+    "text": "How honest have you been tonight? 1–10.",
+    "measures": [
+      "trait:honesty",
+      "honesty self-check",
+      "blind-spot fuel"
+    ],
+    "coding": "neutral",
+    "asksTarget": false
+  },
+  {
+    "id": "d4",
+    "phase": "deep",
+    "kind": "text",
+    "text": "What are you proud of that nobody in this room knows about?",
+    "measures": [
+      "hidden pride"
+    ],
+    "coding": "trust",
+    "asksTarget": false
+  },
+  {
+    "id": "d5",
+    "phase": "deep",
+    "kind": "pick",
+    "text": "Who here has changed the most since you met them? Point.",
+    "measures": [
+      "growth witness"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "d6",
+    "phase": "deep",
+    "kind": "text",
+    "text": "A fear you've never said out loud in this group.",
+    "measures": [
+      "fear reveal",
+      "vulnerability"
+    ],
+    "coding": "trust",
+    "asksTarget": false
+  },
+  {
+    "id": "d7",
+    "phase": "deep",
+    "kind": "rating",
+    "text": "Rate {P4}'s warmth 1–10. They'll see it eventually.",
+    "measures": [
+      "trait:warmth",
+      "peer warmth read",
+      "trait agreement"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "d8",
+    "phase": "deep",
+    "kind": "text",
+    "text": "When did this group last genuinely surprise you?",
+    "measures": [
+      "group history"
+    ],
+    "coding": "friendship",
+    "asksTarget": false
+  },
+  {
+    "id": "d9",
+    "phase": "deep",
+    "kind": "ios",
+    "text": "Where do you actually want to be with {P5} a year from now? Circles.",
+    "measures": [
+      "trajectory"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "d10",
+    "phase": "deep",
+    "kind": "text",
+    "text": "Kindest thing someone here has ever done for you.",
+    "measures": [
+      "gratitude",
+      "affection tags"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "d11",
+    "phase": "deep",
+    "kind": "pick",
+    "text": "Who here would you want beside you at a funeral? Point.",
+    "measures": [
+      "trust network",
+      "values reveal"
+    ],
+    "coding": "trust",
+    "asksTarget": true
+  },
+  {
+    "id": "d12",
+    "phase": "deep",
+    "kind": "text",
+    "text": "What's something you've never told anyone here, but they've probably guessed?",
+    "measures": [
+      "vulnerability tags",
+      "quote material"
+    ],
+    "coding": "trust",
+    "asksTarget": false
+  },
+  {
+    "id": "d13",
+    "phase": "deep",
+    "kind": "rating",
+    "text": "Rate {P6}'s honesty, 1–10. They'll see your guess at the finale.",
+    "measures": [
+      "trait:honesty",
+      "trait agreement",
+      "blind-spot fuel"
+    ],
+    "coding": "trust",
+    "asksTarget": true
+  },
+  {
+    "id": "d14",
+    "phase": "deep",
+    "kind": "pick",
+    "text": "Who here would you trust to tell you the truth when it hurts? Point.",
+    "measures": [
+      "trust network",
+      "honesty read"
+    ],
+    "coding": "trust",
+    "asksTarget": true
+  },
+  {
+    "id": "d15",
+    "phase": "deep",
+    "kind": "text",
+    "text": "What's the nicest thing anyone in this room has said about you behind your back?",
+    "measures": [
+      "affection tags",
+      "room perception"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  }
+]

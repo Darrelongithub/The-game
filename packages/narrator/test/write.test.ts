@@ -132,6 +132,62 @@ describe("no key — the whole show runs on the engine", () => {
 });
 
 describe("one call, right lane", () => {
+  it("sends the classic BLOCK_NONE thresholds on the classic endpoint", async () => {
+    const { skeleton, decks, night: data } = READY();
+    const { impl, calls } = mockFetch(() => envelope(fullResponse(skeleton)));
+    await writeFinale(skeleton, decks, data.results, data.digest, {
+      apiKey: "test-key",
+      fetchImpl: impl,
+      roster: ROSTER,
+    });
+    const body = JSON.parse(String((calls[0] as Call).init.body)) as {
+      safetySettings: { category: string; threshold: string }[];
+    };
+    assert.equal(calls.length, 1);
+    assert.ok(
+      body.safetySettings.every((setting) => setting.threshold === "BLOCK_NONE"),
+      "classic v1beta expects BLOCK_NONE, not the literal OFF",
+    );
+  });
+
+  it("retries once with the literal contract thresholds when the field is rejected", async () => {
+    const { skeleton, decks, night: data } = READY();
+    let call = 0;
+    const { impl, calls } = mockFetch(() => {
+      call += 1;
+      return call === 1
+        ? new Response(JSON.stringify({ error: { message: "Invalid safetySetting" } }), {
+            status: 400,
+          })
+        : envelope(fullResponse(skeleton));
+    });
+
+    const out = await writeFinale(skeleton, decks, data.results, data.digest, {
+      apiKey: "test-key",
+      fetchImpl: impl,
+      roster: ROSTER,
+    });
+
+    assert.equal(calls.length, 2, "exactly one retry, never a loop");
+    const retry = JSON.parse(String((calls[1] as Call).init.body)) as {
+      safetySettings: { threshold: string }[];
+    };
+    assert.ok(retry.safetySettings.every((setting) => setting.threshold === "OFF"));
+    assert.equal(out.slides[0]?.body, bodyFor(skeleton[0] as FinaleSlide));
+  });
+
+  it("does not retry on a non-400 failure", async () => {
+    const { skeleton, decks, night: data } = READY();
+    const { impl, calls } = mockFetch(() => new Response("rate limited", { status: 429 }));
+    const out = await writeFinale(skeleton, decks, data.results, data.digest, {
+      apiKey: "test-key",
+      fetchImpl: impl,
+      roster: ROSTER,
+    });
+    assert.equal(calls.length, 1);
+    assert.deepEqual(out.slides, skeleton);
+  });
+
   it("calls PROVIDERS.gemini.reveal exactly once, with SAFETY_OFF", async () => {
     const { skeleton, decks, night: data } = READY();
     const { impl, calls } = mockFetch(() => envelope(fullResponse(skeleton)));
@@ -151,7 +207,7 @@ describe("one call, right lane", () => {
       generationConfig: { responseMimeType: string };
     };
     assert.equal(body.safetySettings.length, 4);
-    assert.ok(body.safetySettings.every((setting) => setting.threshold === "OFF"));
+    assert.ok(body.safetySettings.every((setting) => setting.threshold.length > 0));
     assert.equal(body.generationConfig.responseMimeType, "application/json");
     assert.match(body.systemInstruction.parts[0]?.text ?? "", /Player N/);
     assert.match(body.systemInstruction.parts[0]?.text ?? "", /140/);
