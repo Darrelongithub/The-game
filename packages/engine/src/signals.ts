@@ -1,0 +1,144 @@
+// packages/engine/src/signals.ts
+// computeSignals — spec §5 pair components, every one in 0..1.
+// Pure function of (log, meta). Pairs are emitted a < b in sorted-id order.
+import {
+  DEFAULT_WEIGHTS,
+  TRAITS,
+  type LogRecord,
+  type PairSignal,
+  type PlayerId,
+  type RoomMeta,
+} from "../../shared/src/contracts.ts";
+import {
+  assertScorableMeta,
+  buildDebriefSims,
+  buildIosIndex,
+  buildRatingIndex,
+  clamp01,
+  getPicks,
+  meanOf,
+  pairKey,
+  playerIdsSorted,
+  pooledPairRate,
+  NEGATIVE_CODINGS,
+  POSITIVE_CODINGS,
+  type RatingIndex,
+} from "./internal.ts";
+
+export interface PairWeights {
+  pickOverlap: number;
+  mutualPick: number;
+  debriefSim: number;
+  iosMean: number;
+  traitAgreement: number;
+}
+
+/** Weighted pair_score from raw components (spec §5 formula). */
+export function pairScoreOf(
+  s: Pick<PairSignal, "pickOverlap" | "mutualPick" | "debriefSim" | "iosMean" | "traitAgreement">,
+  weights: PairWeights = DEFAULT_WEIGHTS,
+): number {
+  return clamp01(
+    weights.pickOverlap * s.pickOverlap +
+      weights.mutualPick * s.mutualPick +
+      weights.debriefSim * s.debriefSim +
+      weights.iosMean * s.iosMean +
+      weights.traitAgreement * s.traitAgreement,
+  );
+}
+
+/** One direction of trait agreement: self-ratings of `of` vs peer ratings of `of` written by `by`. */
+function traitAgreementDirection(index: RatingIndex, of: PlayerId, by: PlayerId): number | undefined {
+  const selfMap = index.self.get(of);
+  const peerMap = index.peerByRater.get(of);
+  if (!selfMap || !peerMap) return undefined;
+  const scores: number[] = [];
+  for (const trait of TRAITS) {
+    const self = selfMap.get(trait);
+    const peer = peerMap.get(trait)?.get(by);
+    if (self !== undefined && peer !== undefined) scores.push(1 - Math.abs(self - peer) / 9);
+  }
+  return scores.length === 0 ? undefined : meanOf(scores);
+}
+
+export function computeSignals(log: LogRecord[], meta: RoomMeta): PairSignal[] {
+  assertScorableMeta(meta);
+  const ids = playerIdsSorted(meta);
+  const picks = getPicks(log);
+  const ratings = buildRatingIndex(log);
+  const ios = buildIosIndex(log);
+  const debriefSims = buildDebriefSims(log);
+
+  // pickOverlap needs, per round, who picked whom.
+  const picksByRound = new Map<string, Map<PlayerId, PlayerId>>();
+  for (const p of picks) {
+    let round = picksByRound.get(p.roundId);
+    if (!round) { round = new Map(); picksByRound.set(p.roundId, round); }
+    round.set(p.picker, p.target);
+  }
+
+  const out: PairSignal[] = [];
+  for (let i = 0; i < ids.length; i++) {
+    for (let j = i + 1; j < ids.length; j++) {
+      const a = ids[i] as PlayerId;
+      const b = ids[j] as PlayerId;
+
+      // pickOverlap: share of rounds (both picked, neither picked the other)
+      // where they chose the same third target. 0 when no such round.
+      let eligible = 0;
+      let same = 0;
+      for (const round of picksByRound.values()) {
+        const ta = round.get(a);
+        const tb = round.get(b);
+        if (ta === undefined || tb === undefined) continue;
+        if (ta === b || tb === a) continue; // rounds where they chose each other are excluded
+        eligible++;
+        if (ta === tb) same++;
+      }
+      const pickOverlap = eligible === 0 ? 0 : same / eligible;
+
+      const mutualPick = pooledPairRate(picks, a, b, (c) => POSITIVE_CODINGS.has(c));
+      const coupleEvidence = pooledPairRate(picks, a, b, (c) => c === "couple");
+      const friendEvidence = pooledPairRate(picks, a, b, (c) => c === "friendship");
+      const negativeMutual = pooledPairRate(picks, a, b, (c) => NEGATIVE_CODINGS.has(c));
+
+      const debriefSim = debriefSims.get(pairKey(a, b)) ?? 0.5;
+
+      // iosMean: (ios(a→b) + ios(b→a)) / 14 — i.e. mean of directional means / 7.
+      // A direction with no IOS records simply doesn't vote; none at all → 0.
+      const iosDirs: number[] = [];
+      const iab = ios.get(a)?.get(b);
+      const iba = ios.get(b)?.get(a);
+      if (iab !== undefined) iosDirs.push(iab);
+      if (iba !== undefined) iosDirs.push(iba);
+      const iosMean = iosDirs.length === 0 ? 0 : meanOf(iosDirs) / 7;
+
+      // traitAgreement: 1 − |self − peer|/9 per shared trait, both directions.
+      const dirs: number[] = [];
+      const dab = traitAgreementDirection(ratings, a, b);
+      const dba = traitAgreementDirection(ratings, b, a);
+      if (dab !== undefined) dirs.push(dab);
+      if (dba !== undefined) dirs.push(dba);
+      const traitAgreement = dirs.length === 0 ? 0 : meanOf(dirs);
+
+      const components = {
+        pickOverlap: clamp01(pickOverlap),
+        mutualPick: clamp01(mutualPick),
+        debriefSim: clamp01(debriefSim),
+        iosMean: clamp01(iosMean),
+        traitAgreement: clamp01(traitAgreement),
+      };
+      out.push({
+        room: meta.roomId,
+        a,
+        b,
+        ...components,
+        pairScore: pairScoreOf(components, DEFAULT_WEIGHTS),
+        coupleEvidence: clamp01(coupleEvidence),
+        friendEvidence: clamp01(friendEvidence),
+        negativeMutual: clamp01(negativeMutual),
+      });
+    }
+  }
+  return out;
+}
