@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test:mock": "npx -y tsx --tsconfig scripts/tsconfig.test.json scripts/mock-flow.test.ts",
     "test:ssr": "npx -y tsx --tsconfig scripts/tsconfig.test.json scripts/ssr-smoke.test.ts",
-    "test": "npm run typecheck && npm run test:ssr"
+    "test": "npm run typecheck && npm run test:ssr",
+    "test:live": "node scripts/live-socket-smoke.mjs"
   },
   "dependencies": {
     "canvas-confetti": "1.9.4",

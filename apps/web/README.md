@@ -30,6 +30,8 @@ reach it; `allowedDevOrigins` in `next.config.mjs` lists the preview hosts.
 npm run typecheck     # tsc --noEmit (strict)
 npm run test:ssr      # 41 server-render smoke checks over every screen
 npm run test:mock     # 53 checks: the full scripted night, headless
+npm run test:live     # optional: same-contract smoke against a running server
+                      # (run `npm run host` at the repo root first)
 ```
 
 `test:mock` drives `MockTransport` end-to-end and asserts: all nine round
