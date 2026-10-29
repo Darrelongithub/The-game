@@ -1,0 +1,213 @@
+[
+  {
+    "id": "w1",
+    "phase": "warmup",
+    "kind": "pick",
+    "text": "Who here would survive the longest in a horror movie? Point at them.",
+    "measures": [
+      "early-favorite signals"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "w2",
+    "phase": "warmup",
+    "kind": "pick",
+    "text": "Who's getting us lost on the road trip? Point.",
+    "measures": [
+      "status reads"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "w3",
+    "phase": "warmup",
+    "kind": "text",
+    "text": "Most chaotic thing you did this year — and who here was the accomplice? One line.",
+    "measures": [
+      "chaos baseline"
+    ],
+    "coding": "neutral",
+    "asksTarget": true
+  },
+  {
+    "id": "w4",
+    "phase": "warmup",
+    "kind": "pick",
+    "text": "Who would forget their own birthday? Point.",
+    "measures": [
+      "teasing baseline"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "w5",
+    "phase": "warmup",
+    "kind": "rating",
+    "text": "How warm are you, honestly? 1–10.",
+    "measures": [
+      "trait:warmth",
+      "self-image baseline",
+      "blind-spot fuel"
+    ],
+    "coding": "neutral",
+    "asksTarget": false
+  },
+  {
+    "id": "w6",
+    "phase": "warmup",
+    "kind": "shout",
+    "text": "One word for this group's energy tonight.",
+    "measures": [
+      "group vibe snapshot",
+      "running gag seed"
+    ],
+    "coding": "neutral",
+    "asksTarget": false
+  },
+  {
+    "id": "w7",
+    "phase": "warmup",
+    "kind": "pick",
+    "text": "First person you'd call with good news? Point.",
+    "measures": [
+      "trust network"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "w8",
+    "phase": "warmup",
+    "kind": "text",
+    "text": "What's a hill you'd die on that everyone here finds ridiculous?",
+    "measures": [
+      "values reveal"
+    ],
+    "coding": "trust",
+    "asksTarget": false
+  },
+  {
+    "id": "w9",
+    "phase": "warmup",
+    "kind": "rating",
+    "text": "Rate {P2}'s chaos level 1–10. They can take it.",
+    "measures": [
+      "trait:chaos",
+      "peer chaos read",
+      "trait agreement"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "w10",
+    "phase": "warmup",
+    "kind": "minigame",
+    "text": "Tap war: fastest fingers wins. Ready…",
+    "measures": [
+      "tap-war champion"
+    ],
+    "coding": "neutral",
+    "asksTarget": false
+  },
+  {
+    "id": "w11",
+    "phase": "warmup",
+    "kind": "pick",
+    "text": "Who here would you trust with your unlocked phone for five minutes? Point.",
+    "measures": [
+      "trust network",
+      "risk read"
+    ],
+    "coding": "trust",
+    "asksTarget": true
+  },
+  {
+    "id": "w12",
+    "phase": "warmup",
+    "kind": "pick",
+    "text": "Who here is secretly the most competitive? Point at them.",
+    "measures": [
+      "status reads",
+      "competition tags"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "w13",
+    "phase": "warmup",
+    "kind": "rating",
+    "text": "Rate how good {P3} is at keeping a secret, 1–10.",
+    "measures": [
+      "trait:loyalty",
+      "peer loyalty read",
+      "trait agreement"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "w14",
+    "phase": "warmup",
+    "kind": "shout",
+    "text": "Shout one word for how this night ends.",
+    "measures": [
+      "group vibe snapshot",
+      "running gag seed"
+    ],
+    "coding": "neutral",
+    "asksTarget": false
+  },
+  {
+    "id": "w15",
+    "phase": "warmup",
+    "kind": "text",
+    "text": "Who here would you fight over the last slice, and why them?",
+    "measures": [
+      "friction tags",
+      "dyadic tension"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "w16",
+    "phase": "warmup",
+    "kind": "pick",
+    "text": "Who here would you call at 3am with a crisis? Point.",
+    "measures": [
+      "trust network",
+      "crisis support"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "w17",
+    "phase": "warmup",
+    "kind": "ios",
+    "text": "How close are you and {P4}, really? Circles.",
+    "measures": [
+      "closeness map"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "w18",
+    "phase": "warmup",
+    "kind": "pick",
+    "text": "Who here would you set up with someone else in this room? Point at the match you'd make.",
+    "measures": [
+      "couple-coding seed",
+      "matchmaker reads"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  }
+]
