@@ -5,6 +5,9 @@ export default {
     './src/app/**/*.{ts,tsx}',
     './src/components/**/*.{ts,tsx}',
     './src/lib/**/*.{ts,tsx}',
+    // screens contributed by other agents (apps/web/src/screens) — without
+    // this their utility classes never reach the stylesheet.
+    './src/screens/**/*.{ts,tsx}',
   ],
   theme: {
     extend: {
