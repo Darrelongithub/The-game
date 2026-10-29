@@ -1,4 +1,4 @@
-// lib/motion.ts — shared motion variants, verbatim from reference/ui-system.md §3.
+// lib/motion.ts — verbatim from reference/ui-system.md §3
 import { Variants, Transition } from 'framer-motion'
 
 export const easeOutExpo = [0.16, 1, 0.3, 1] as const
@@ -25,6 +25,7 @@ export const pageVariants: Variants = {
 export const staggerContainer: Variants = {
   animate: { transition: { staggerChildren: 0.07, delayChildren: 0.1 } },
 }
+
 export const staggerItem: Variants = {
   initial: { opacity: 0, y: 16, filter: 'blur(4px)' },
   animate: {

@@ -1,0 +1,157 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-base: #0d0617;
+  --purple-primary: #8b2fe0;
+  --purple-deep: #4c1d95;
+  --blue-secondary: #2f5fe0;
+  --blue-glow: #3b82f6;
+  --lime-accent: #b6ff3c;
+  --white-text: #f5f3ff;
+  --muted-text: rgba(245, 243, 255, 0.65);
+
+  /* game layer (spec §12): dare phase + "most toxic" moments */
+  --red-alert: #ff4d6d;
+  /* heat mapping — value lives in a var so the whole shell can re-skin per phase */
+  --heat-warmup: #3b82f6;
+  --heat-spicy: #b6ff3c;
+  --heat-deep: #8b2fe0;
+  --heat-dare: #ff4d6d;
+  --heat-current: var(--heat-warmup);
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-smooth: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+html, body {
+  background: var(--bg-base);
+  /* dvh fixes iOS Safari's broken 100vh with the address bar */
+  min-height: 100dvh;
+}
+
+body {
+  font-family: var(--font-body), sans-serif;
+}
+
+h1, h2, h3, .font-display {
+  font-family: var(--font-display), sans-serif;
+  font-feature-settings: 'ss01' 1, 'cv05' 1;
+}
+
+/* Tabular numerals for vote counts/percentages */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Grain overlay — the single biggest "expensive app" trick */
+.grain-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Drifting ambient blobs */
+@keyframes drift1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(5%, -8%) scale(1.1); }
+  66% { transform: translate(-6%, 4%) scale(0.95); }
+}
+@keyframes drift2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-8%, 6%) scale(1.15); }
+}
+
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  will-change: transform;
+}
+
+/* Glass card base — reused everywhere */
+.glass-card {
+  background: linear-gradient(145deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%); /* iOS Safari requires prefix */
+  border: 1px solid rgba(255,255,255,0.12);
+  border-top: 1px solid rgba(255,255,255,0.25);
+  box-shadow:
+    0 20px 60px -10px rgba(76,29,149,0.5),
+    inset 0 1px 0 rgba(255,255,255,0.1);
+  border-radius: 28px;
+}
+
+/* Perf: lower-end Android chokes on heavy blur. Reduce it there. */
+@media (max-width: 768px) {
+  .glass-card {
+    backdrop-filter: blur(14px) saturate(130%);
+    -webkit-backdrop-filter: blur(14px) saturate(130%);
+  }
+  .blob {
+    filter: blur(50px); /* cheaper blur radius on mobile GPUs */
+  }
+}
+
+/* Respect accessibility setting, also doubles as a low-power-mode fallback */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Game shell additions (Agent A) — small, token-driven, cross-platform */
+/* ------------------------------------------------------------------ */
+
+/* Full-screen containers: dvh only, never vh (iOS Safari address bar). */
+.screen {
+  min-height: 100dvh;
+}
+
+/* Cross-platform item 12: hold-to-reveal must not raise the iOS long-press
+   callout / text-selection menu. */
+.no-callout {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Heat gradient used by secret cards / verdict moments. */
+.heat-gradient {
+  background-image: linear-gradient(
+    135deg,
+    var(--heat-warmup) 0%,
+    var(--heat-spicy) 35%,
+    var(--heat-deep) 70%,
+    var(--heat-dare) 100%
+  );
+}
+
+/* Thin, glassy field style so inputs look like the rest of the system. */
+.field {
+  width: 100%;
+  min-height: 52px;
+  border-radius: 18px;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--white-text);
+  font-size: 16px; /* prevents iOS Safari zoom-on-focus */
+}
+.field::placeholder {
+  color: rgba(245, 243, 255, 0.4);
+}
+.field:focus {
+  outline: none;
+  border-color: rgba(182, 255, 60, 0.6);
+  box-shadow: 0 0 0 3px rgba(182, 255, 60, 0.12);
+}

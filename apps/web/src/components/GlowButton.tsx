@@ -1,29 +1,36 @@
-// components/GlowButton.tsx — verbatim from reference/ui-system.md §8.
 'use client'
+// components/GlowButton.tsx — verbatim from reference/ui-system.md §8
 import { motion } from 'framer-motion'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { clsx } from 'clsx'
 
 export function GlowButton({
-  children, onClick, variant = 'primary', disabled, className,
+  children, onClick, variant = 'primary', disabled, className, type = 'button',
 }: {
   children: React.ReactNode
   onClick?: () => void
   variant?: 'primary' | 'accent'
   disabled?: boolean
   className?: string
+  type?: 'button' | 'submit'
 }) {
   const [ripple, setRipple] = useState(false)
+  const rippleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // timer cleanup: never leave a pending setState on an unmounted button
+  useEffect(() => () => { if (rippleTimer.current) clearTimeout(rippleTimer.current) }, [])
 
   const handleTap = () => {
     if (disabled) return
     setRipple(true)
-    setTimeout(() => setRipple(false), 400)
+    if (rippleTimer.current) clearTimeout(rippleTimer.current)
+    rippleTimer.current = setTimeout(() => setRipple(false), 400)
     onClick?.()
   }
 
   return (
     <motion.button
+      type={type}
       onClick={handleTap}
       disabled={disabled}
       whileTap={!disabled ? { scale: 0.96 } : undefined}

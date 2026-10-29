@@ -1,5 +1,5 @@
-// components/GlassCard.tsx — verbatim from reference/ui-system.md §7.
 'use client'
+// components/GlassCard.tsx — verbatim from reference/ui-system.md §7
 import { motion, HTMLMotionProps } from 'framer-motion'
 import { clsx } from 'clsx'
 

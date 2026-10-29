@@ -1,8 +1,7 @@
-// components/AnimatedWords.tsx — word-by-word text reveal.
-// Verbatim from reference/ui-system.md §3 (import path adapted to repo layout).
 'use client'
+// components/AnimatedWords.tsx — verbatim from reference/ui-system.md §3
 import { motion } from 'framer-motion'
-import { wordContainer, wordItem } from '../lib/motion'
+import { wordContainer, wordItem } from '@/lib/motion'
 
 export function AnimatedWords({
   text,
