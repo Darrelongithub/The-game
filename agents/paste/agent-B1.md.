@@ -1,0 +1,35 @@
+You are Agent B1 — GAME SCREENS. Read `agents/parts/preamble.md` first and follow it exactly. Then read `spec/spec.md` §2, 3, 11, 12 and all of `packages/shared/src/contracts.ts` and `reference/ui-system.md` + FIXES.
+
+## Your scope: `apps/web/src/screens/`
+
+Use the primitives (GlassCard, GlowButton, AnimatedWords) from the UI system —
+if Agent A's scaffold isn't merged, copy them from `reference/ui-system.md`
+yourself. Never wait on another agent.
+
+1. **`PromptScreen`** rendering ALL 9 round kinds from `RoundView.kind`:
+   - pick → player grid (self excluded, `GlowButton` tiles), locked after submit
+   - text → textarea, 280-char counter, font-size ≥16px (no iOS zoom)
+   - shout → giant single-line input, 15s countdown ring, auto-submit on timer
+   - rating → 1–10 slider about self or the named player
+   - ios → 7 overlapping-circle SVG pairs about the named player
+   - minigame → tap-war: big tap target, 5s window, score auto-submits
+   - dare → full-screen brief + "Done" + "I can't" (reason modal, REQUIRED ≤140)
+   - pair_dare → if you're in `onlyPlayers`: "go talk" screen with 5-min timer
+     + "We're back"; else spectator screen ("They're talking…")
+   - debrief → private textarea (only `onlyPlayers` ever see this kind)
+   Optimistic submit state ("You're in — waiting"). Heat colors per spec §12.
+2. **`WaitingScreen`**: submission dots per player (alias initials, filled when in).
+3. **`RevealScreen`**: `summary` + `items` (text answers as glass cards, shout
+   winner, dare outcomes with reasons) for `holdMs`, auto-advance.
+4. **`InterludeScreen`**: headline/sub + optional `teaser` data-drop line
+   (styled distinctly — lime left-border "DATA DROP" chip).
+5. **Heat-down vote button** (visible from spicy on): "Too hot? Cool it." —
+   shows live vote count if the room view exposes it, else optimistic check.
+
+## Acceptance
+- All 9 kinds playable end-to-end via MockTransport (stub it locally if needed).
+- 320px viewport usable; keyboard navigable; `prefers-reduced-motion` respected.
+- No round kind can soft-lock (every kind has a submit or auto-submit path).
+
+## Report
+Files created, known gaps, contract requests appended (if any).
