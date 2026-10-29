@@ -1,0 +1,15 @@
+// components/index.ts — Agent B2's signature + finale barrel export.
+// Agent A/Z can import everything from '@/components'.
+export { AnimatedWords } from './AnimatedWords'
+export { Flame } from './Flame'
+export { GlassCard } from './GlassCard'
+export { GlowButton } from './GlowButton'
+export { OpeningSequence } from './OpeningSequence'
+export { FinaleScreen } from './FinaleScreen'
+export { GroupAnnouncement } from './GroupAnnouncement'
+export { SecretDeck } from './SecretDeck'
+export { HoldToReveal } from './HoldToReveal'
+export { ShareCard } from './ShareCard'
+export { SoundToggle, useMuted } from './SoundToggle'
+export { haptic, fireConfettiBurst, fireConfettiSides, prefersReducedMotion, usePrefersReducedMotion } from './feedback'
+export { play, sfx, unlockAudio, isMuted, setMuted, subscribeMuted, type Sting } from './sound'
