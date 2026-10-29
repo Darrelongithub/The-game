@@ -1,0 +1,175 @@
+[
+  {
+    "id": "s1",
+    "phase": "spicy",
+    "kind": "pick",
+    "text": "Who's been performing calm all night? Point at the best actor.",
+    "measures": [
+      "social awareness"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "s2",
+    "phase": "spicy",
+    "kind": "pick",
+    "text": "Who flirts their way out of trouble? Point.",
+    "measures": [
+      "flirt-pattern signal"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "s3",
+    "phase": "spicy",
+    "kind": "text",
+    "text": "What did you hear about someone in this room BEFORE you met them?",
+    "measures": [
+      "past-meets-present tags"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "s4",
+    "phase": "spicy",
+    "kind": "rating",
+    "text": "How spicy are you, really? 1–10.",
+    "measures": [
+      "trait:spice",
+      "self-spice baseline",
+      "blind-spot fuel"
+    ],
+    "coding": "neutral",
+    "asksTarget": false
+  },
+  {
+    "id": "s5",
+    "phase": "spicy",
+    "kind": "pick",
+    "text": "Two people here must date to survive the apocalypse. Point at one of them.",
+    "measures": [
+      "couple-coding seed"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "s6",
+    "phase": "spicy",
+    "kind": "text",
+    "text": "Your worst first-impression moment involving someone in this room. Go.",
+    "measures": [
+      "first-impression tags"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "s7",
+    "phase": "spicy",
+    "kind": "pick",
+    "text": "Who wins a staring contest against you? Point at your rival.",
+    "measures": [
+      "rivalry seed"
+    ],
+    "coding": "rivalry",
+    "asksTarget": true
+  },
+  {
+    "id": "s8",
+    "phase": "spicy",
+    "kind": "ios",
+    "text": "How close are you and {P3}, really? Circles.",
+    "measures": [
+      "closeness map"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "s9",
+    "phase": "spicy",
+    "kind": "pick",
+    "text": "Who here has the most rizz and is wasting it? Point.",
+    "measures": [
+      "rizz ranking"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "s10",
+    "phase": "spicy",
+    "kind": "text",
+    "text": "Last lie you told to dodge plans with someone in this room. What did you say?",
+    "measures": [
+      "harmless-confession tags"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "s11",
+    "phase": "spicy",
+    "kind": "pick",
+    "text": "Who here is the biggest people-pleaser? Point at them.",
+    "measures": [
+      "status reads",
+      "friction tags"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "s12",
+    "phase": "spicy",
+    "kind": "rating",
+    "text": "Rate {P5}'s flirting, 1–10 — technique only. They will see it.",
+    "measures": [
+      "trait:spice",
+      "peer spice read",
+      "trait agreement"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "s13",
+    "phase": "spicy",
+    "kind": "text",
+    "text": "Whose opinion in this room do you pretend not to care about? Name them.",
+    "measures": [
+      "grievance tags",
+      "status reads"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "s14",
+    "phase": "spicy",
+    "kind": "pick",
+    "text": "Who here talks the most and says the least? Point at them.",
+    "measures": [
+      "status reads",
+      "criticism tags"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "s15",
+    "phase": "spicy",
+    "kind": "rating",
+    "text": "Rate how well {P7} actually listens, 1–10. They will see it.",
+    "measures": [
+      "trait:warmth",
+      "peer warmth read"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  }
+]
