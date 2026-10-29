@@ -6,6 +6,10 @@ merge — Z is the only agent allowed to touch `packages/shared`.
 
 | Agent | File | What | Why |
 |---|---|---|---|
+| AGENT-C | packages/shared/src/contracts.ts | add a stable `id` to `LogRecord` (or bless a composite recordId) | the toxic `tagOf(recordId)` seam has no id to key on; engine exports `logRecordId()` = roomId:roundId:promptId:playerId:at meanwhile |
+| AGENT-C | packages/shared/src/contracts.ts | add optional pair grouping for debrief records (e.g. `pairId` or `onlyPlayers` on `LogRecord`) | `debriefSim` must infer pair_dare partners; engine falls back to roundId -> promptId -> exactly-two-writers heuristics |
+| AGENT-C | packages/shared/src/contracts.ts | clarify whether `RoomMeta.revealOptIn` gates the whole secret deck or only spark/one-sided | engine gates spark (both players) + onesided card (picker); blindspot/roomnote/stat cards are ungated meanwhile |
+| AGENT-C | packages/engine/package.json | NEW DEV DEPS ONLY: `typescript`, `tsx`, `@types/node` (zero runtime dependencies) | strict typecheck + node:test suite for the engine package, standalone before Agent G's root workspaces land |
 | AGENT-D | packages/shared/src/contracts.ts | add optional `trait?: TraitId` to `Prompt` (and to `RoundView` for rating rounds) | the client cannot render a 1–10 rating about "a trait" without knowing WHICH trait; today we stamp a `trait:<id>` measure on every rating prompt as a stopgap, which B1/F must read |
 | AGENT-D | packages/shared/src/contracts.ts | add optional `callback?: boolean` (or `quote?: string`) to `Prompt` | the server/engine cannot tell which generated prompts are verbatim Night-Digest callbacks; today we re-detect by substring-matching the prompt text against the digest quotes |
 | AGENT-D | packages/shared/src/contracts.ts | confirm `PROVIDERS.grok.generate = "grok-4-1-fast"` before game night (docs.x.ai was unreachable from the build sandbox) | a 404 on the model id degrades silently to bank-only; we added an `XAI_MODEL` env override as a stopgap so the host can fix it without a contract edit |

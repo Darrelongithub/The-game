@@ -1,0 +1,19 @@
+{
+  "name": "@reveal/engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Reveal Game scoring engine — pure deterministic functions, zero I/O, zero network, zero runtime dependencies.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "tsx --test test/engine.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}
