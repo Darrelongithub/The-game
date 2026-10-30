@@ -105,6 +105,9 @@ test("a demo room plays a whole night to a finale from one laptop", { timeout: 6
   assert.equal(state.players.length, 4);
 
   const finale = event<FinaleView>(host, "finale", () => true);
+  // Nothing internal rides a demo night either: same invisibility rule as §6a.
+  const emitted: unknown[] = [];
+  host.onAny((_name: string, payload: unknown) => emitted.push(payload));
   const errors: { code: string; message: string }[] = [];
   host.on("error", (error) => errors.push(error));
   // The host answers their own seat; the three puppets are auto and answer
@@ -136,6 +139,8 @@ test("a demo room plays a whole night to a finale from one laptop", { timeout: 6
     assert.equal(record.impersonatedBy, undefined, "auto puppets answer for themselves, not as the host");
   }
   assert.ok(!JSON.stringify(view).includes("puppet"), "no puppet material in the finale");
+  const leakMarkers = /hypothes|suspect|coverage|"priors"|"director"|openedAt|impersonatedBy/iu;
+  for (const payload of emitted) assert.ok(!leakMarkers.test(JSON.stringify(payload)), "a demo night leaks no internal material");
 });
 
 test("demo_answer_as writes an ordinary record and the engine ignores the metadata (parity)", { timeout: 40_000 }, async (t) => {

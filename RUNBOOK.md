@@ -56,6 +56,18 @@ log records plus `impersonatedBy` metadata that nothing scores, so a rehearsal
 produces the same claims and finale as the same answers from real phones. Demo
 controls are refused outside a demo room and by anyone who is not the host.
 
+### Rehearsal smoke test
+
+```sh
+npm run host          # in one terminal
+npm run smoke:demo    # in another: plays a whole night alone at 0.1x speed
+```
+
+`scripts/demo-smoke.ts` creates a real demo room on the running server,
+puppets three seats, walks the entire game, and asserts the ready gate, the
+broadcast-safe finale and that no internal material (hypotheses, the director,
+the impersonation metadata) ever reaches a client.
+
 ## Reveals wait for everyone
 
 Every round's reveal is **pending** until each connected player taps **I'm
