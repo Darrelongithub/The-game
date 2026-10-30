@@ -7,26 +7,27 @@ import {
   MAX_PLAYERS, MIN_PLAYERS, RETENTION_HOURS, REVEAL_HOLD_MS, ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH, ROUNDS_PER_PHASE, ROUND_TIMERS_MS, SECRET_DECK_MAX, TRAITS, pseudonym,
   type ClientToServerEvents, type Consent, type FinaleSlide, type FinaleView, type InterludeView,
-  type JoinReply, type LogRecord, type NightDigest, type Phase, type PlayerId, type Prompt,
+  type JoinReply, type LogRecord, type ProfileAnswers, type NightDigest, type Phase, type PlayerId, type Prompt,
   type ResponseValue, type RevealView, type RoomMeta, type RoomView, type RoundKind,
   type RoundView, type SecretCard, type SecretDeckView, type ServerToClientEvents,
 } from "../../../packages/shared/src/contracts.ts";
 import { isAlias, isRoomCode, playerCountOk, validSubmit } from "../../../packages/shared/src/validate.ts";
 import { BankPromptProvider, fallbackServices, type GameServices, type HeatPhase, type PromptProvider } from "./services.ts";
 import { checkBanned, checkHardBlocked } from "../../../packages/prompts/src/filter.ts";
+import { pseudonymizeText as pseudonymizeAliasText, restoreAliases } from "./pseudonyms.ts";
 
 type SocketData = { roomCode?: string; playerId?: string };
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 type GameIO = Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 type Stage = "lobby" | "round" | "reveal" | "interlude" | "finale-building" | "finale" | "deleted";
-interface Player { id: string; alias: string; consent: Consent; secret: string; isBot: boolean; connected: boolean; socketId?: string; }
-interface Definition { prompt: Prompt; phase: Phase; kind: RoundKind; text: string; onlyPlayers?: string[]; }
-interface LiveRound extends Definition { id: string; index: number; startedAt: number; closesAt: number; responses: Map<string, ResponseValue>; }
+interface Player { id: string; alias: string; consent: Consent; profile: ProfileAnswers; secret: string; isBot: boolean; connected: boolean; socketId?: string; }
+interface Definition { prompt: Prompt; phase: Phase; kind: RoundKind; text: string; onlyPlayers?: string[]; performer?: string; }
+interface LiveRound extends Definition { id: string; index: number; startedAt: number; closesAt: number; responses: Map<string, ResponseValue>; targets?: Map<string, string>; trait?: typeof TRAITS[number]; pairPassed?: boolean; }
 interface SeenSubmit { roundId: string; fingerprint: string; }
 interface TimedEvent<T> { value: T; endsAt: number; }
 interface Room {
   id: string; code: string; createdAt: number; lastActivity: number; file: string; hostId: string;
-  players: Player[]; phase: Phase; stage: Stage; seq: number; nextPlayer: number; roundIndex: number;
+  players: Player[]; phase: Phase; stage: Stage; seq: number; nextPlayer: number; roundIndex: number; dareCount: number;
   provider: PromptProvider; prepared: boolean; usedIds: Set<string>; custom: Prompt[]; log: LogRecord[];
   currentHeat?: HeatPhase; queue: Definition[]; round: LiveRound | null; pair?: [string, string];
   interactions: Map<string, number>; seen: Map<string, SeenSubmit>; votes: Set<string>;
@@ -58,6 +59,15 @@ const safeEqual = (a: string, b: string): boolean => {
   const x = Buffer.from(a), y = Buffer.from(b);
   return x.length === y.length && timingSafeEqual(x, y);
 };
+const validProfile = (v: unknown): v is ProfileAnswers => {
+  if (!v || typeof v !== "object") return false;
+  const p = v as ProfileAnswers;
+  return Number.isInteger(p.age) && p.age >= 18 && p.age <= 120 &&
+    ["single", "dating", "committed", "married", "complicated"].includes(p.relationship) &&
+    Number.isInteger(p.partnersToDate) && p.partnersToDate >= 0 && p.partnersToDate <= 200 &&
+    Number.isInteger(p.longestMonths) && p.longestMonths >= 0 && p.longestMonths <= 1200 &&
+    typeof p.crushingHere === "boolean" && ["chaos", "vibes", "feelings", "mission"].includes(p.tonight);
+};
 const validConsent = (v: unknown): v is Consent => !!v && typeof v === "object" &&
   (v as Consent).age === true && (v as Consent).terms === true && typeof (v as Consent).revealOptIn === "boolean";
 const validAlias = (v: unknown): v is string => typeof v === "string" && isAlias(v) && !/[\u0000-\u001f\u007f]/u.test(v);
@@ -66,17 +76,12 @@ const seedRng = (id: string): (() => number) => {
   let seed = createHash("sha256").update(id).digest().readUInt32LE(0);
   return () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t ^= t + Math.imul(t ^ (t >>> 7), 61 | t); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 };
-const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
 /** Replace aliases in arbitrary free text before a service can see the data. */
 function pseudonymizeText(text: string, players: Player[]): string {
-  const names = players.map((p, i) => ({ alias: p.alias, pseudo: pseudonym(i) })).sort((a, b) => b.alias.length - a.alias.length);
-  if (!names.length) return text;
-  const re = new RegExp(names.map((n) => escapeRegExp(n.alias)).join("|"), "giu");
-  return text.replace(re, (match) => names.find((n) => n.alias.toLocaleLowerCase() === match.toLocaleLowerCase())?.pseudo ?? match);
+  return pseudonymizeAliasText(text, players);
 }
 function displayText(text: string, players: Player[]): string {
-  return text.replace(/\bPlayer (1[01]|[1-9])\b/g, (match, n: string) => players[Number(n) - 1]?.alias ?? match);
+  return restoreAliases(text, players);
 }
 /** Strip uncontracted properties before logging or handing an answer to any service. */
 function canonicalValue(value: ResponseValue): ResponseValue {
@@ -107,7 +112,7 @@ function asSafePrompt(x: unknown, phase: HeatPhase): x is Prompt {
     ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare"].includes(p.kind) &&
     typeof p.text === "string" && p.text.trim().length > 0 && p.text.length <= 160 && validPlaceholders(p.text) &&
     Array.isArray(p.measures) && p.measures.length > 0 && p.measures.every((m) => typeof m === "string" && m.length > 0) &&
-    ["couple", "friendship", "trust", "friction", "rivalry", "status", "neutral"].includes(p.coding) && p.asksTarget === true;
+    ["couple", "friendship", "trust", "friction", "tease", "rivalry", "status", "neutral"].includes(p.coding) && p.asksTarget === true;
 }
 
 export class RoomManager {
@@ -175,7 +180,7 @@ export class RoomManager {
   }
   private roundView(round: LiveRound, playerId: string): RoundView {
     return { roundId: round.id, index: round.index, phase: round.phase, kind: round.kind, promptText: round.text,
-      closesAt: round.closesAt, youSubmitted: round.responses.has(playerId), ...(round.onlyPlayers ? { onlyPlayers: [...round.onlyPlayers] } : {}) };
+      closesAt: round.closesAt, youSubmitted: round.responses.has(playerId), ...(round.onlyPlayers ? { onlyPlayers: [...round.onlyPlayers] } : {}), ...(round.targets?.has(playerId) ? { about: round.targets.get(playerId) } : {}), ...(round.kind === "rating" && round.trait ? { trait: round.trait } : {}), ...(round.performer ? { performer: round.performer } : {}), submitted: [...round.responses.keys()] };
   }
   private eachSocket(room: Room, fn: (socket: GameSocket, player: Player) => void): void {
     for (const p of room.players) if (!p.isBot && p.connected && p.socketId) {
@@ -199,14 +204,14 @@ export class RoomManager {
     socket.on("create", (input, reply) => {
       const ack = typeof reply === "function" ? reply : () => {};
       if (socket.data.playerId) return ack({ ok: false, error: "Already joined a room." });
-      if (!input || !validAlias(input.alias) || !validConsent(input.consent)) return ack({ ok: false, error: "Enter a 2–14 character alias and accept the 18+ and terms consent." });
+      if (!input || !validAlias(input.alias) || !validConsent(input.consent) || !validProfile(input.profile)) return ack({ ok: false, error: "Enter an alias, complete the adult profile, and accept consent." });
       const code = this.code(), now = this.now(), id = randomBytes(16).toString("hex");
       const file = join(this.options.dataDir, `${now}-${id}.jsonl`);
       try { writeFileSync(file, "", { flag: "wx", mode: 0o600 }); } catch { return ack({ ok: false, error: "Unable to create room storage." }); }
-      const player: Player = { id: "p1", alias: input.alias.trim(), consent: { ...input.consent }, secret: secret(), isBot: false, connected: true, socketId: socket.id };
+      const player: Player = { id: "p1", alias: input.alias.trim(), consent: { ...input.consent }, profile: { ...input.profile }, secret: secret(), isBot: false, connected: true, socketId: socket.id };
       let provider: PromptProvider;
       try { provider = this.services.createPromptProvider(id); } catch { provider = new BankPromptProvider(); }
-      const room: Room = { id, code, createdAt: now, lastActivity: now, file, hostId: player.id, players: [player], phase: "lobby", stage: "lobby", seq: 1, nextPlayer: 2, roundIndex: 0,
+      const room: Room = { id, code, createdAt: now, lastActivity: now, file, hostId: player.id, players: [player], phase: "lobby", stage: "lobby", seq: 1, nextPlayer: 2, roundIndex: 0, dareCount: 0,
         provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set() };
       this.rooms.set(code, room); socket.data = { roomCode: code, playerId: player.id }; void socket.join(code);
       ack({ ok: true, code, you: player.id, secret: player.secret, state: this.view(room, player.id) });
@@ -223,18 +228,20 @@ export class RoomManager {
         const candidate = room.players.find((p) => p.id === input.resume?.playerId && !p.isBot);
         if (!candidate || typeof input.resume.secret !== "string" || !safeEqual(candidate.secret, input.resume.secret)) return ack({ ok: false, error: "Invalid or expired session." });
         player = candidate;
-        if (player.socketId && player.socketId !== socket.id) {
-          const old = this.io.sockets.sockets.get(player.socketId);
-          if (old) { old.data = {}; void old.leave(room.code); this.err(old, "SESSION_REPLACED", "This session reconnected elsewhere."); old.disconnect(true); }
-        }
-        // Rotate on every successful re-join; previously issued tokens cannot be replayed.
-        player.secret = secret(); player.connected = true; player.socketId = socket.id;
+        if (player.connected && player.socketId && player.socketId !== socket.id) return ack({ ok: false, error: "This player session is already connected." });
+        player.connected = true; player.socketId = socket.id;
       } else {
-        if (room.stage !== "lobby") return ack({ ok: false, error: "The game has already started." });
-        if (room.players.length >= MAX_PLAYERS) return ack({ ok: false, error: "Room is full." });
-        if (room.players.some((p) => p.alias.toLocaleLowerCase() === input.alias.trim().toLocaleLowerCase())) return ack({ ok: false, error: "That alias is already in use." });
-        player = { id: `p${room.nextPlayer++}`, alias: input.alias.trim(), consent: { ...input.consent }, secret: secret(), isBot: false, connected: true, socketId: socket.id };
-        room.players.push(player);
+        if (room.stage !== "lobby") {
+          const reclaimed = room.players.find((p) => !p.isBot && !p.connected && p.alias.toLocaleLowerCase() === input.alias.trim().toLocaleLowerCase());
+          if (!reclaimed) return ack({ ok: false, error: "The game has already started." });
+          player = reclaimed; player.connected = true; player.socketId = socket.id;
+        } else {
+          if (!validProfile(input.profile)) return ack({ ok: false, error: "An adult profile is required before joining." });
+          if (room.players.length >= MAX_PLAYERS) return ack({ ok: false, error: "Room is full." });
+          if (room.players.some((p) => p.alias.toLocaleLowerCase() === input.alias.trim().toLocaleLowerCase())) return ack({ ok: false, error: "That alias is already in use." });
+          player = { id: `p${room.nextPlayer++}`, alias: input.alias.trim(), consent: { ...input.consent }, profile: { ...input.profile }, secret: secret(), isBot: false, connected: true, socketId: socket.id };
+          room.players.push(player);
+        }
       }
       room.lastActivity = this.now(); socket.data = { roomCode: room.code, playerId: player.id }; void socket.join(room.code);
       room.seq++;
@@ -254,7 +261,7 @@ export class RoomManager {
       if (room.stage !== "lobby") return this.err(socket, "BAD_PHASE", "Bots can only be added in the lobby.");
       if (room.players.length >= MAX_PLAYERS) return this.err(socket, "PLAYER_COUNT", "Room is full.");
       let n = 1; while (room.players.some((p) => p.alias.toLocaleLowerCase() === `🤖 Bot ${n}`.toLocaleLowerCase())) n++;
-      room.players.push({ id: `p${room.nextPlayer++}`, alias: `🤖 Bot ${n}`, consent: { age: true, terms: true, revealOptIn: true }, secret: "", isBot: true, connected: true });
+      room.players.push({ id: `p${room.nextPlayer++}`, alias: `🤖 Bot ${n}`, consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 30, relationship: "single", partnersToDate: 0, longestMonths: 0, crushingHere: false, tonight: "vibes" }, secret: "", isBot: true, connected: true });
       this.changed(room); this.prepare(room);
     });
     socket.on("custom_prompts", (input) => {
@@ -339,7 +346,7 @@ export class RoomManager {
     try { const result = room.provider.forPhase(phase, 100, room.usedIds); if (Array.isArray(result)) provided = result; } catch { /* fallback */ }
     const fallback = new BankPromptProvider().forPhase(phase, 100, new Set());
     const pool = [...room.custom.filter((p) => p.phase === phase && !room.usedIds.has(p.id)), ...provided, ...fallback].filter((p) => asSafePrompt(p, phase));
-    const desired: RoundKind[] = phase === "warmup" ? ["pick", "shout", "minigame"] : phase === "spicy" ? ["pick", "rating", "ios"] : phase === "deep" ? ["text", "rating", "pick"] : [...Array<RoundKind>(DARE_ROUNDS).fill("dare"), "pair_dare"];
+    const desired: RoundKind[] = phase === "warmup" ? ["pick", "shout", "minigame", "pick"] : phase === "spicy" ? ["pick", "rating", "ios", "pick"] : phase === "deep" ? ["text", "rating", "pick", "pick"] : [...Array<RoundKind>(DARE_ROUNDS).fill("dare"), "pair_dare"];
     const slots = phase === "dare" ? desired : desired.slice(0, ROUNDS_PER_PHASE);
     const chosen = new Set<string>();
     return slots.map((kind) => {
@@ -385,9 +392,27 @@ export class RoomManager {
     }
     this.clearTimers(room); room.reveal = undefined; room.interlude = undefined; room.stage = "round";
     if (definition.kind === "pair_dare") { room.pair = this.pair(room); definition.onlyPlayers = [...room.pair]; }
+    if (definition.kind === "dare") {
+      const roster = room.players.map((p) => p.id);
+      definition.performer = roster[room.dareCount % roster.length]!;
+      room.dareCount++;
+      definition.onlyPlayers = [definition.performer];
+    }
     const startedAt = this.now();
-    const round: LiveRound = { ...definition, text: this.replacePlaceholders(room, definition.text, definition.onlyPlayers), id: `${room.id}-${++room.roundIndex}`, index: room.roundIndex, startedAt,
+    const displayPrompt = definition.kind === "pair_dare"
+      ? `You two: ${this.replacePlaceholders(room, definition.text, definition.onlyPlayers)}`
+      : this.replacePlaceholders(room, definition.text, definition.kind === "dare" && definition.performer ? [definition.performer] : definition.onlyPlayers);
+    const round: LiveRound = { ...definition, text: displayPrompt, id: `${room.id}-${++room.roundIndex}`, index: room.roundIndex, startedAt,
       closesAt: startedAt + (this.options.roundTimers?.[definition.kind] ?? ROUND_TIMERS_MS[definition.kind]), responses: new Map() };
+    if (round.kind === "rating" || round.kind === "ios") {
+      const eligible = room.players.map((p) => p.id);
+      round.targets = new Map(eligible.map((id) => {
+        const others = eligible.filter((candidate) => candidate !== id);
+        const offset = Math.max(0, room.roundIndex - 1) % others.length;
+        return [id, others[offset]!];
+      }));
+      if (round.kind === "rating") round.trait = TRAITS[(room.roundIndex - 1) % TRAITS.length]!;
+    }
     room.round = round; room.usedIds.add(definition.prompt.id); this.changed(room);
     this.eachSocket(room, (socket, player) => socket.emit("round", this.roundView(round, player.id)));
     this.schedule(room, round.closesAt - startedAt + (this.options.graceMs ?? GRACE_MS), () => this.finishRound(room));
@@ -409,10 +434,10 @@ export class RoomManager {
         case "text": case "debrief": value = { kind: "text", text: ["I appreciate the way someone here shows up for me.", "We talked about a time the group surprised us.", "Someone in this room always makes me laugh."][rand(3)]! }; break;
         case "shout": value = { kind: "shout", word: ["chaos", "vibes", "legend"][rand(3)]! }; break;
         case "rating": {
-          const about = rand(2) ? "self" : other;
-          value = { kind: "rating", trait: TRAITS[rand(TRAITS.length)]!, about, value: about === "self" ? 5 + rand(4) : 1 + rand(10) }; break;
+          const about = round.targets?.get(player.id) ?? other;
+          value = { kind: "rating", trait: round.trait ?? TRAITS[rand(TRAITS.length)]!, about, value: 1 + rand(10) }; break;
         }
-        case "ios": value = { kind: "ios", about: other, value: 1 + rand(7) }; break;
+        case "ios": value = { kind: "ios", about: round.targets?.get(player.id) ?? other, value: 1 + rand(7) }; break;
         case "minigame": value = { kind: "minigame", score: 10 + rand(51) }; break;
         case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
       }
@@ -438,12 +463,17 @@ export class RoomManager {
     if (value.kind === "shout" && /\s/u.test(value.word.trim())) return { ok: false, error: "Shout must be one word." };
     const target = value.kind === "pick" ? value.target : value.kind === "ios" ? value.about : value.kind === "rating" && value.about !== "self" ? value.about : undefined;
     if (target !== undefined && !room.players.some((p) => p.id === target)) return { ok: false, error: "Unknown target." };
+    if ((round.kind === "rating" || round.kind === "ios") && value.kind === round.kind) {
+      if (value.about !== round.targets?.get(player.id)) return { ok: false, error: "Answer must use your assigned subject." };
+      if (value.kind === "rating" && value.trait !== round.trait) return { ok: false, error: "Answer must use the assigned trait." };
+    }
     const at = this.now();
+    if (round.kind === "pair_dare" && round.pairPassed && value.kind === "dare" && value.status !== "passed") return { ok: false, error: "Your partner passed; submit your own reason to close the pair dare." };
     const record: LogRecord = { roomId: room.id, roundId: round.id, playerId: player.id, roundKind: round.kind, promptId: round.prompt.id, coding: round.prompt.coding,
-      value, at, latencyMs: Math.max(0, at - round.startedAt) };
+      value, at, latencyMs: Math.max(0, at - round.startedAt), ...(round.kind === "dare" && round.performer ? { performerId: round.performer } : round.kind === "pair_dare" ? { performerId: player.id } : {}) };
     try { appendFileSync(room.file, `${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 }); }
     catch { return { ok: false, error: "Unable to save the answer." }; }
-    room.log.push(record); room.seen.set(key, { roundId: r.roundId, fingerprint }); round.responses.set(player.id, value); room.lastActivity = at;
+    room.log.push(record); room.seen.set(key, { roundId: r.roundId, fingerprint }); round.responses.set(player.id, value); if (round.kind === "pair_dare" && value.kind === "dare" && value.status === "passed") round.pairPassed = true; room.lastActivity = at;
     this.options.audit?.persisted(room.code, room.file, { roundId: r.roundId, playerId: player.id, clientUuid: r.clientUuid });
     if (target) { const k = PAIR_KEY(player.id, target); room.interactions.set(k, (room.interactions.get(k) ?? 0) + 1); }
     this.changed(room);
@@ -475,7 +505,6 @@ export class RoomManager {
         const alias = room.players.find((p) => p.id === id)?.alias ?? "Player";
         if (value.kind === "text") items.push({ alias, text: value.text });
         if (value.kind === "dare") items.push({ alias, text: value.status === "done" ? "Done" : `Passed: ${value.reason}` });
-        if (value.kind === "pick") items.push({ alias, text: `Chose ${room.players.find((p) => p.id === value.target)?.alias ?? "someone"}` });
       }
     }
     const holdMs = this.options.revealHoldMs ?? REVEAL_HOLD_MS;
@@ -519,7 +548,7 @@ export class RoomManager {
     this.enterHeat(room, next);
   }
   private meta(room: Room): RoomMeta {
-    return { roomId: room.id, players: room.players.map((p, i) => ({ id: p.id, alias: pseudonym(i) })), revealOptIn: room.players.filter((p) => p.consent.revealOptIn).map((p) => p.id) };
+    return { roomId: room.id, players: room.players.map((p, i) => ({ id: p.id, alias: pseudonym(i) })), revealOptIn: room.players.filter((p) => p.consent.revealOptIn).map((p) => p.id), profiles: Object.fromEntries(room.players.map((p) => [p.id, p.profile])) };
   }
   private redactedLog(room: Room): LogRecord[] { return room.log.map((r) => ({ ...r, value: redactValue(r.value, room.players) })); }
   private async finale(room: Room): Promise<void> {

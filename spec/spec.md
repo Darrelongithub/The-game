@@ -11,9 +11,8 @@ only.
 ## 0. Non-negotiables
 1. **Deterministic scoring.** The LLM never produces a number.
 2. **Fully playable with NO API keys** — handwritten bank carries the whole night.
-3. **Two LLM lanes; code carries the night.** Grok (xAI) generates the
-   unhinged prompts (`XAI_API_KEY`). Higher-tier Gemini analyzes the data and
-   narrates the finale (`GEMINI_API_KEY`). Everything else — bank, similarity,
+3. **Two LLM lanes; code carries the night.** Grok (xAI) generates unhinged prompts and may narrate when enabled (`XAI_API_KEY`).
+   Gemini analyzes data only (`GEMINI_API_KEY`); deterministic templates narrate offline. Everything else — bank, similarity,
    tags, digest, every number — is deterministic code. Lanes are independent
    and optional: no keys at all = a fully playable night on the bank, offline.
 4. **18+ only.** Private friend group, self-hosted by the host.
@@ -32,7 +31,7 @@ only.
   Server authoritative; rounds auto-advance when all required players submit or
   timer + `GRACE_MS` expires. `add_bot` fills a seat with a server bot (alias
   "🤖 Bot N") so the host can test solo.
-- Join = alias (2–14 chars) + consent (age 18+, terms, reveal opt-in).
+- Join = alias (2–14 chars) + profile (age 18+, relationship context, dating history, private crush opt-in, tonight intent) + consent (terms, reveal opt-in). Display-role sockets are broadcast-only.
 - Reconnect: session secret in sessionStorage; `visibilitychange` → re-join →
   full `RoomView` snapshot + seq. No diff replay.
 
@@ -57,22 +56,21 @@ unlocks (§7) — only if they have cards.
 | pair_dare | 330s | two players leave together, questioned separately after |
 | debrief | 60s | private text from each pair member, compared at the finale |
 
-`pair_dare` and `debrief` rounds carry `onlyPlayers` — everyone else gets a
-spectator screen ("They're talking…"). Each response records `latencyMs`.
+`dare` rounds assign exactly one rotating performer; only their phone can submit and their log record carries `performerId`. `pair_dare` is one shared instruction prefixed “You two:” delivered identically to both participants; either can pass, and each participant records their own required reason. `pair_dare` and `debrief` carry `onlyPlayers` — everyone else gets a spectator screen ("They're talking…"). Each response records `latencyMs`.
 
 ## 4. Signals (engine inputs)
 Directed picks, self+peer trait ratings, IOS, shout words, minigame scores, dare
 compliance + verbatim pass reasons, pair debrief texts, response latencies.
 
 ## 5. Scoring (deterministic; every component 0..1)
-pair_score(i,j) = 0.30*pickOverlap + 0.20*mutualPick + 0.20*debriefSim
-                + 0.15*iosMean     + 0.15*traitAgreement
+pair_score(i,j) = weighted mean over measured components only; weights renormalize
+  when a component is missing (measured zero remains a real zero).
 - `pickOverlap`: share of pick rounds where i and j chose the same target
   (excluding rounds where they chose each other).
 - `mutualPick`: normalized mutual couple/friend-coded picks between i and j.
 - `debriefSim`: pair-dare transcript similarity 0..1 — token-Jaccard is
-  PRIMARY; one batched higher-tier Gemini call refines it when
-  `GEMINI_API_KEY` exists; 0.5 = unknown.
+  PRIMARY; one batched Gemini analysis call may refine it. Missing data is
+  omitted from `componentsUsed`, never replaced by a midpoint.
 - `iosMean`: (ios(i→j) + ios(j→i)) / 14.
 - `traitAgreement`: i's self-ratings vs j's peer-ratings of i (and vice versa).
 - **ship** = maximum-weight matching over `pair_score` (brute-force enumeration;
@@ -116,10 +114,8 @@ pair_score(i,j) = 0.30*pickOverlap + 0.20*mutualPick + 0.20*debriefSim
     sexual acts, minors, real-person sexual content, non-consent are
     hard-blocked — the unhinged tier lives inside that. No safety knobs
     exist; the deterministic filter is the guardrail.
-  - **Gemini = analysis + narration** (`GEMINI_API_KEY`, higher tier):
-    `gemini-3.5-flash-lite` tags all texts (ONE batch call per night);
-    `gemini-3.1-pro-preview` judges debrief-pair similarity (ONE batch
-    call) and writes the finale + secret card copy (ONE call). `SAFETY_OFF`
+  - **Gemini = analysis only** (`GEMINI_API_KEY`):
+    `gemini-3.5-flash-lite` handles tagging and debrief analysis only (ONE batch call); Grok narrates the finale and secret-card copy. Gemini model is overridable with GEMINI_MODEL. `SAFETY_OFF`
     attached — it must analyze spicy text without refusing. Gemini NEVER
     generates game prompts (it soft-refuses them).
 - **Lane independence:** each lane checks only its own key and degrades to
@@ -128,8 +124,7 @@ pair_score(i,j) = 0.30*pickOverlap + 0.20*mutualPick + 0.20*debriefSim
   internet needed after install.
 - **Batching (the call budget):** generation = ONE call per phase (~15
   candidates per call, JSON array) in the lobby background — never in the
-  gameplay loop; tag = ONE call; debrief = ONE call; reveal+secrets = ONE
-  call. ≈7 calls worst case, cap 8.
+  gameplay loop; tag = ONE call; debrief = ONE call; finale narration is template-backed. ≈6 calls worst case, cap 8.
 - **Generation:** the deterministic filter (schema, dedupe vs
   bank+usedIds+within-batch, banned patterns, 20–160 chars, valid
   `{P1}..{P11}` placeholders) picks the best of the batch. Generated
@@ -266,3 +261,8 @@ words (running gags), minigame champions, pick clusters, self-vs-room gaps.
 (3) finale digest slides — Quote of the Night, Dodge Report, Speed Runner,
 contradictions ("Self-rated honesty 9/10. Passed on the honesty dare. Twice.").
 Every joke must trace to digest/claims data — the narrator never invents.
+
+## Remediation contract additions
+PromptCoding includes `tease`, which is excluded from toxic scoring. RoundView may carry personalized `about`, `trait`, and `performer`, plus `submitted` IDs. LogRecord may carry `performerId`. JoinRequest supports player/display roles and ProfileAnswers; first-time player joins and room creation require a complete profile while credential resume/reclaim retains the stored profile. RoomMeta stores profiles for downstream game analysis; profile answers are not sent in public RoomView snapshots. PROFILE_QUESTIONS is the join UI source of truth and collects age (18+), relationship, dating history, private crush status, and tonight intent. Server validation bounds all numeric values and checks enumerated answers. Consent remains separately required. Tunables: PICK_ROUNDS_PER_PHASE=2 (two pick rounds in each warmup, spicy, and deep phase), ROUNDS_PER_PHASE=4, SPARK_MIN_MUTUAL=2, CONSENSUS_MIN_PICKERS=4.
+
+Pair scores renormalize `DEFAULT_WEIGHTS` across `PairSignal.componentsUsed`; absence is distinct from measured zero. A high-confidence pair claim still requires at least three independent measured signal types. Finale narration is template-backed; Gemini has no reveal lane. `GEMINI_MODEL` overrides every Gemini analysis call site.

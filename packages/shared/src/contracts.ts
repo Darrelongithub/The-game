@@ -1,6 +1,5 @@
 // packages/shared/src/contracts.ts
-// SINGLE SOURCE OF TRUTH. Agents A–G never edit this file.
-// Change requests go to NOTES/contract-requests.md; Agent Z resolves them.
+// Shared contract — updated for the remediation contract requests.
 
 // ---------- Identity & rooms ----------
 export type PlayerId = string; // server-generated opaque id, e.g. "p3". NEVER the literal "self".
@@ -27,7 +26,7 @@ export type RoundKind =
 | "minigame" | "dare" | "pair_dare" | "debrief";
 
 export type PromptCoding =
-| "couple" | "friendship" | "trust" | "friction" | "rivalry" | "status" | "neutral";
+| "couple" | "friendship" | "trust" | "friction" | "tease" | "rivalry" | "status" | "neutral";
 
 export interface Prompt {
     id: string;
@@ -70,6 +69,7 @@ export interface RoomMeta {
     roomId: string;
     players: { id: PlayerId; alias: string }[];
     revealOptIn: PlayerId[];     // consented to private spark / one-sided / secret cards
+    profiles: Record<PlayerId, ProfileAnswers>;
 }
 
 // ---------- Engine: pair signals ----------
@@ -79,10 +79,11 @@ export interface PairSignal {
     b: PlayerId;
     pickOverlap: number;         // 0..1
     mutualPick: number;          // 0..1
-    debriefSim: number;          // 0..1 (0.5 = unknown)
+    debriefSim: number;          // 0..1; consult componentsUsed to distinguish missing from measured 0
     iosMean: number;             // 0..1
     traitAgreement: number;      // 0..1
-    pairScore: number;           // weighted, 0..1
+    pairScore: number;           // measured-component weighted, 0..1
+    componentsUsed: ("pickOverlap" | "mutualPick" | "debriefSim" | "iosMean" | "traitAgreement")[];
     coupleEvidence: number;      // 0..1
     friendEvidence: number;      // 0..1
     negativeMutual: number;      // 0..1
@@ -144,6 +145,10 @@ export interface RoundView {
     closesAt: number;            // epoch ms
     youSubmitted: boolean;
     onlyPlayers?: PlayerId[];    // pair_dare/debrief rounds; everyone else watches
+    about?: PlayerId;
+    trait?: TraitId;
+    performer?: PlayerId;
+    submitted?: PlayerId[];
 }
 
 export interface RoomView {    // PUBLIC — contains nothing private
@@ -211,11 +216,24 @@ export const SECRET_HOLD_MS = 400;   // press-and-hold ramp before a card opens;
 // ---------- Socket contract ----------
 export interface Consent { age: boolean; terms: boolean; revealOptIn: boolean; }
 
+export type JoinRole = "player" | "display";
+export interface ProfileAnswers { age: number; relationship: "single" | "dating" | "committed" | "married" | "complicated"; partnersToDate: number; longestMonths: number; crushingHere: boolean; tonight: "chaos" | "vibes" | "feelings" | "mission"; }
+export const PROFILE_QUESTIONS = [
+    { field: "age", label: "How old are you?", kind: "number" },
+    { field: "relationship", label: "Your relationship status?", kind: "select" },
+    { field: "partnersToDate", label: "How many people have you dated?", kind: "number" },
+    { field: "longestMonths", label: "Longest relationship (months)?", kind: "number" },
+    { field: "crushingHere", label: "Crushing on someone here? (stays secret)", kind: "boolean", secret: true },
+    { field: "tonight", label: "What are you here for tonight?", kind: "select" },
+] as const;
+
 export interface JoinRequest {
     roomCode: RoomCode;
     alias: string;               // 2–14 chars
     consent: Consent;            // age must be true (18+)
     resume?: { playerId: PlayerId; secret: string };
+    role?: JoinRole;
+    profile?: ProfileAnswers;
 }
 
 export interface JoinReply {
@@ -230,7 +248,7 @@ export interface SubmitRequest { roundId: string; clientUuid: string; value: Res
 export interface DarePassRequest { roundId: string; reason: string; }   // reason REQUIRED, ≤140
 
 export type ClientToServerEvents = {
-    create: (p: { alias: string; consent: Consent }, reply: (r: JoinReply & { code?: RoomCode }) => void) => void;
+    create: (p: { alias: string; consent: Consent; profile: ProfileAnswers; role?: JoinRole }, reply: (r: JoinReply & { code?: RoomCode }) => void) => void;
     join: (p: JoinRequest, reply: (r: JoinReply) => void) => void;
     submit: (p: SubmitRequest, reply: (r: { ok: boolean; error?: string }) => void) => void;
     dare_pass: (p: DarePassRequest) => void;
@@ -281,7 +299,10 @@ export const ROUND_TIMERS_MS: Record<RoundKind, number> = {
 export const REVEAL_HOLD_MS = 4200;
 export const INTERLUDE_HOLD_MS = 3200;
 export const GRACE_MS = 8000;         // extra wait after timer for stragglers
-export const ROUNDS_PER_PHASE = 3;    // warmup / spicy / deep
+export const PICK_ROUNDS_PER_PHASE = 2;
+export const SPARK_MIN_MUTUAL = 2;
+export const CONSENSUS_MIN_PICKERS = 4;
+export const ROUNDS_PER_PHASE = 4;    // warmup / spicy / deep, including both pick slots
 export const DARE_ROUNDS = 2;         // solo dares before the pair dare
 
 // ---------- LLM providers ----------
@@ -305,7 +326,8 @@ export const PROVIDERS = {
         // knobs — our deterministic filter (banned patterns, length, placeholders)
         // is the guardrail.
         baseUrl: "https://api.x.ai/v1",
-        generate: "grok-4-1-fast", // unhinged generation + callbacks — Grok's only job
+        generate: "grok-4.7",
+        reveal: "grok-4.7", // narration and secret-card copy
     },
     gemini: {
         // Analysis + narration lane — the higher tier. All calls BATCHED:
@@ -313,10 +335,13 @@ export const PROVIDERS = {
         // reveal+secrets copy ONCE per night. SAFETY_OFF attached (see below) so
         // it can analyze spicy text without refusing.
         tag: "gemini-3.5-flash-lite",       // cheap classification, one batch call
-        analyze: "gemini-3.1-pro-preview",  // pair-dare debrief judgment
-        reveal: "gemini-3.1-pro-preview",   // finale slides + secret card copy, ONE call/night
+        analyze: "gemini-3.5-flash-lite",  // tagging and debrief analysis only
     },
 } as const;
+
+/** One GEMINI_MODEL override is shared by every Gemini analysis call site. */
+export const resolveGeminiModel = (override?: string): string =>
+    typeof override === "string" && override.trim() ? override.trim() : PROVIDERS.gemini.analyze;
 
 // Hard API budget: generation 4 (one per phase) + tag 1 + debrief 1 +
 // reveal+secrets 1 = 7. "Most things are done through code" — the cap is
