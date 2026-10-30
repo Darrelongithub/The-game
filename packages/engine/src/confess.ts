@@ -21,6 +21,7 @@ import {
   type PlayerId,
   type PromptStyle,
   type RoomMeta,
+  type RoundKind,
 } from "../../shared/src/contracts.ts";
 import { clamp01, pseudoOf } from "./internal.ts";
 import { mulberry32 } from "./rng.ts";
@@ -28,6 +29,15 @@ import { mulberry32 } from "./rng.ts";
 // ---------------------------------------------------------------------------
 // THE 50/50 — style selection for QUESTION rounds
 // ---------------------------------------------------------------------------
+
+/**
+ * The QUESTION kinds the 50/50 governs: the flexible question slots. rating,
+ * ios and minigame keep their own mechanics (they are instruments, not
+ * conversation), and dares / spotlights / verdicts are not question rounds at
+ * all — the mix never touches them.
+ */
+export const STYLE_QUESTION_KINDS: readonly RoundKind[] = ["pick", "text", "shout"];
+export const isStyleQuestionKind = (kind: RoundKind): boolean => STYLE_QUESTION_KINDS.includes(kind);
 
 /** Group-style and confess-style QUESTION rounds served so far tonight. */
 export interface StyleServed { group: number; confess: number }
@@ -83,6 +93,8 @@ export const TWIN_RATE = 0.6;
 export interface TwinPlan {
   /** the group seed that was just served */
   groupPromptId: string;
+  /** round index the group seed was served at (rounds are 1-based) */
+  groupRoundIndex: number;
   /** the confess seed on the same topic */
   confessPromptId: string;
   /** round index at which the confess twin is due (rounds are 1-based) */
@@ -110,7 +122,7 @@ export function planTwin(input: TwinInput): TwinPlan | undefined {
   if (mulberry32(seed ^ 0x51ed270b)() >= TWIN_RATE) return undefined;
   const span = TWIN_WINDOW.max - TWIN_WINDOW.min + 1;
   const offset = TWIN_WINDOW.min + Math.floor(mulberry32(seed ^ 0x2545f491)() * span);
-  return { groupPromptId: input.groupPromptId, confessPromptId: input.confessPromptId, dueAt: input.groupRoundIndex + offset };
+  return { groupPromptId: input.groupPromptId, groupRoundIndex: input.groupRoundIndex, confessPromptId: input.confessPromptId, dueAt: input.groupRoundIndex + offset };
 }
 
 /** Is a scheduled twin due at the round index now being dealt? */

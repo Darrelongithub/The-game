@@ -90,7 +90,7 @@ interface NightOptions {
 
 const TINY: Partial<Record<RoundView["kind"], number>> = {
   pick: 700, shout: 700, minigame: 700, rating: 700, ios: 700, text: 700,
-  dare: 700, pair_dare: 700, debrief: 700, spotlight: 700, verdict: 700,
+  dare: 700, pair_dare: 700, debrief: 700, spotlight: 700, verdict: 700, confess: 300,
 };
 
 /**

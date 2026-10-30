@@ -49,7 +49,7 @@ test("five real sockets complete all rounds; public finale is identical; private
       return { slides: slides.map((slide) => slide.flavor === "quote" || slide.flavor === "dodge" ? { ...slide, title: "Fabricated attribution", body: "A fabricated version." } : slide), decks };
     },
   };
-  const server = createGameServer({ dataDir: dir, services, revealHoldMs: 5, interludeHoldMs: 5, roundTimers: { pick: 1500, shout: 1500, minigame: 1500, rating: 1500, ios: 1500, text: 1500, dare: 1500, pair_dare: 1500, debrief: 1500, spotlight: 1500, verdict: 1500 }, verdictDiscussMs: 0, graceMs: 50 });
+  const server = createGameServer({ dataDir: dir, services, revealHoldMs: 5, interludeHoldMs: 5, roundTimers: { pick: 1500, shout: 1500, minigame: 1500, rating: 1500, ios: 1500, text: 1500, dare: 1500, pair_dare: 1500, debrief: 1500, spotlight: 1500, verdict: 1500, confess: 400 }, verdictDiscussMs: 0, graceMs: 50 });
   const port = await server.listen(0, "127.0.0.1", false), base = `http://127.0.0.1:${port}`;
   const clients: Client[] = [];
   t.after(async () => { for (const c of clients) c.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
@@ -128,7 +128,7 @@ test("five real sockets complete all rounds; public finale is identical; private
   await wait(40);
   assert.deepEqual(errors, []);
   assert.ok(pairChecked && duplicateChecked && spectatorChecked && emptyTargetChecked);
-  assert.deepEqual([...kinds].sort(), ["dare", "debrief", "ios", "minigame", "pair_dare", "pick", "rating", "shout", "text", "spotlight", "verdict"].sort());
+  assert.deepEqual([...kinds].sort(), ["dare", "debrief", "ios", "minigame", "pair_dare", "pick", "rating", "shout", "text", "spotlight", "verdict", "confess"].sort());
   assert.deepEqual([...phases].sort(), ["warmup", "spicy", "deep", "dare", "debrief"].sort());
   for (const finale of allFinales) assert.deepEqual(finale, allFinales[0]);
   assert.ok(allFinales[0]!.slides.some((slide) => slide.flavor === "quote" && slide.body === "Alice.* always turns a difficult evening into a funny story."));
@@ -146,7 +146,9 @@ test("five real sockets complete all rounds; public finale is identical; private
   const rawLog = readFileSync(join(dir, files[0]!), "utf8");
   assert.ok(!rawLog.includes("PRIVATE_SECRET"));
   const records: LogRecord[] = rawLog.trim().split("\n").map((line) => JSON.parse(line));
-  assert.equal(records.length, 103); // 68 question answers + 4 spotlights × 5 + 3 verdicts × 5
+  // 68 group question answers + 6 CONFESS rounds × 5 (two per heat phase)
+  // + 4 spotlights × 5 + 3 verdicts × 5
+  assert.equal(records.length, 133);
   assert.ok(records.every((r) => r.coding && r.latencyMs >= 0));
   assert.equal(records.filter((r) => r.roundId === records[0]!.roundId && r.playerId === ids[0]).length, 1, "retry persisted exactly once");
   assert.equal(records.filter((r) => r.roundKind === "debrief").length, 4);

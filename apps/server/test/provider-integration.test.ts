@@ -25,7 +25,7 @@ async function setup(t: TestContext, fakeFetch: typeof fetch, services?: GameSer
   globalThis.fetch = fakeFetch;
   const dir = mkdtempSync(join(tmpdir(), "reveal-provider-test-"));
   const server = createGameServer({ dataDir: dir, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, graceMs: 0,
-    roundTimers: { spotlight: 300, verdict: 300 }, verdictDiscussMs: 0, services });
+    roundTimers: { spotlight: 300, verdict: 300, confess: 300 }, verdictDiscussMs: 0, services });
   const port = await server.listen(0, "127.0.0.1", false);
   const clients: Client[] = [];
   t.after(async () => {
@@ -137,7 +137,12 @@ test("real integration filters generated prompts and sends only pseudonymous pub
   assert.ok(observedTags && observedTags.public.length > 0 && observedTags.public.every((tags) => tags?.includes("contempt")), "completed public classification is available without affecting scores");
   assert.ok(observedTags.private.length > 0 && observedTags.private.every((tags) => tags === undefined), "private debriefs are never sent for classification");
   for (const { body } of calls) {
-    for (const alias of aliases) assert.ok(!body.normalize("NFC").toLowerCase().includes(alias.normalize("NFC").toLowerCase()), `alias ${alias} leaked to a provider`);
+    // Alias matching is TOKEN-based: "Chao" must not match the innocent word
+    // "chaos" inside ordinary digest copy.
+    for (const alias of aliases) {
+      const token = new RegExp(`(^|[^\\p{L}\\p{N}])${alias.normalize("NFC").toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u");
+      assert.ok(!token.test(body.normalize("NFC").toLowerCase()), `alias ${alias} leaked to a provider`);
+    }
     assert.ok(!body.includes("PRIVATE_DEBRIEF_"), "private debrief must not reach the public narrator");
   }
   assert.ok(!JSON.stringify(views).includes("PRIVATE_DEBRIEF_"));

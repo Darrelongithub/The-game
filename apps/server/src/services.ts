@@ -35,6 +35,13 @@ export interface GameServices {
 // prompts keep this server testable and playable without a key or another agent.
 const p = (id: string, phase: HeatPhase, kind: Prompt["kind"], text: string, coding: PromptCoding, measures: string[]): Prompt =>
   ({ id, phase, kind, text, coding, measures, asksTarget: true, source: "bank" });
+/**
+ * A CONFESSION: addressed to nobody, answered about yourself. `twinId` points at
+ * the group seed on the same topic (the perception/reality payoff).
+ */
+const c = (id: string, phase: HeatPhase, text: string, coding: PromptCoding, twinId?: string): Prompt =>
+  ({ id, phase, kind: "confess", text, coding, measures: ["confess"], asksTarget: false, style: "confess", source: "bank",
+    ...(twinId ? { twinId } : {}) });
 const BANK: Prompt[] = [
   p("f-w1", "warmup", "pick", "Who here would rescue the group from a chaotic trip?", "friendship", ["pick"]),
   p("f-w2", "warmup", "shout", "In one word, describe {P1}'s effect on this room.", "neutral", ["shout"]),
@@ -56,6 +63,17 @@ const BANK: Prompt[] = [
   p("f-a2", "dare", "dare", "Tell someone here about a moment when they surprised you.", "trust", ["dareCompliance"]),
   p("f-a3", "dare", "pair_dare", "{P1} and {P2}: step aside and share a story you have never told this room.", "trust", ["dareCompliance", "debrief"]),
   p("f-a4", "dare", "dare", "Choose someone here and make up a harmless two-person victory dance.", "friendship", ["dareCompliance"]),
+  // THE SECOND VOICE: every phase also carries private self-report rounds, so
+  // the no-key stub bank still deals CONFESSIONS 50/50 with the group voice.
+  p("f-wt1", "warmup", "pick", "Who here would you most want to sit next to on a long flight?", "friendship", ["pick"]),
+  c("f-wc1", "warmup", "Have you ever had a crush on someone in this room?", "tease", "f-wt1"),
+  c("f-wc2", "warmup", "Have you ever lied to dodge a date with someone here?", "tease"),
+  p("f-st1", "spicy", "pick", "Who here could talk you into something you swore you would not do?", "couple", ["pick"]),
+  c("f-sc1", "spicy", "Have you ever sent a nude to someone in this room?", "couple", "f-st1"),
+  c("f-sc2", "spicy", "Have you ever fantasized about someone else in this room?", "couple"),
+  p("f-dt1", "deep", "pick", "Who here knows something about you that nobody else does?", "trust", ["pick"]),
+  c("f-dc1", "deep", "Have you ever hooked up with someone from this friend group?", "couple", "f-dt1"),
+  c("f-dc2", "deep", "Have you ever kept a secret from this whole group?", "trust"),
 ];
 
 export class BankPromptProvider implements PromptProvider {
