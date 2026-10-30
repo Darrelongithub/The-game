@@ -21,6 +21,7 @@ export const CODINGS: readonly PromptCoding[] = [
   "friendship",
   "trust",
   "friction",
+  "tease",
   "rivalry",
   "status",
   "neutral",

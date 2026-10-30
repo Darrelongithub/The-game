@@ -14,7 +14,7 @@
     "id": "u2",
     "phase": "spicy",
     "kind": "rating",
-    "text": "Rate {P2}'s freakiness 1–10. Pray they rate you back.",
+    "text": "Rate {P2}'s freakiness 1\u201310. Pray they rate you back.",
     "measures": [
       "trait:spice",
       "spice trait agreement",
@@ -38,7 +38,7 @@
     "id": "u4",
     "phase": "spicy",
     "kind": "rating",
-    "text": "Rate {P3}'s flirty energy toward YOU specifically, 1–10.",
+    "text": "Rate {P3}'s flirty energy toward YOU specifically, 1\u201310.",
     "measures": [
       "trait:spice",
       "dyadic perception gap",
@@ -75,7 +75,7 @@
     "id": "u7",
     "phase": "spicy",
     "kind": "ios",
-    "text": "How close are you and {P4} really? Circles — and the room can see you thinking.",
+    "text": "How close are you and {P4} really? Circles \u2014 and the room can see you thinking.",
     "measures": [
       "closeness map under spicy pressure"
     ],
@@ -91,14 +91,14 @@
       "pick cluster",
       "consensus"
     ],
-    "coding": "friction",
+    "coding": "tease",
     "asksTarget": true
   },
   {
     "id": "u9",
     "phase": "spicy",
     "kind": "rating",
-    "text": "Rate how well {P5} hides their crushes, 1–10.",
+    "text": "Rate how well {P5} hides their crushes, 1\u201310.",
     "measures": [
       "trait:spice",
       "directed perception"
@@ -169,7 +169,7 @@
     "id": "u15",
     "phase": "deep",
     "kind": "rating",
-    "text": "Rate {P6}'s rizz 1–10. They will see this at the finale.",
+    "text": "Rate {P6}'s rizz 1\u201310. They will see this at the finale.",
     "measures": [
       "trait:spice",
       "peer rating",
@@ -187,7 +187,7 @@
       "status",
       "flirt-pattern"
     ],
-    "coding": "friction",
+    "coding": "tease",
     "asksTarget": true
   },
   {
@@ -239,7 +239,7 @@
     "id": "u21",
     "phase": "dare",
     "kind": "dare",
-    "text": "Text your most recent ex 'thinking of you' — but {P3} types it and hits send.",
+    "text": "Text your most recent ex 'thinking of you' \u2014 but {P3} types it and hits send.",
     "measures": [
       "trust-in-agent compliance"
     ],
@@ -262,7 +262,7 @@
     "id": "u23",
     "phase": "dare",
     "kind": "dare",
-    "text": "Maintain eye contact with {P5} for 60 seconds. Laugh and you both restart — closer.",
+    "text": "Maintain eye contact with {P5} for 60 seconds. Laugh and you both restart \u2014 closer.",
     "measures": [
       "dyadic tension compliance"
     ],
@@ -297,7 +297,7 @@
     "id": "u26",
     "phase": "dare",
     "kind": "dare",
-    "text": "Tell {P8} the exact moment you realized they were your type — or pass with a reason the room will remember.",
+    "text": "Tell {P8} the exact moment you realized they were your type \u2014 or pass with a reason the room will remember.",
     "measures": [
       "confession",
       "memorable pass"

@@ -18,7 +18,7 @@
     "measures": [
       "flirt-pattern signal"
     ],
-    "coding": "friction",
+    "coding": "tease",
     "asksTarget": true
   },
   {
@@ -36,7 +36,7 @@
     "id": "s4",
     "phase": "spicy",
     "kind": "rating",
-    "text": "How spicy are you, really? 1–10.",
+    "text": "How spicy are you, really? 1\u201310.",
     "measures": [
       "trait:spice",
       "self-spice baseline",
@@ -127,7 +127,7 @@
     "id": "s12",
     "phase": "spicy",
     "kind": "rating",
-    "text": "Rate {P5}'s flirting, 1–10 — technique only. They will see it.",
+    "text": "Rate {P5}'s flirting, 1\u201310 \u2014 technique only. They will see it.",
     "measures": [
       "trait:spice",
       "peer spice read",
@@ -164,7 +164,7 @@
     "id": "s15",
     "phase": "spicy",
     "kind": "rating",
-    "text": "Rate how well {P7} actually listens, 1–10. They will see it.",
+    "text": "Rate how well {P7} actually listens, 1\u201310. They will see it.",
     "measures": [
       "trait:warmth",
       "peer warmth read"

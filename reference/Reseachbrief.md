@@ -19,7 +19,7 @@ zombies, desert island, untwisted "most likely to", generic icebreakers).
   "Who's getting us lost on the road trip? Point."
 - w3 | warmup | text | neutral | no | chaos baseline
   "Most chaotic thing you did this year. No context needed."
-- w4 | warmup | pick | friction | yes | teasing baseline
+- w4 | warmup | pick | tease | yes | teasing baseline
   "Who would forget their own birthday? Point."
 - w5 | warmup | rating | neutral | self | self-image baseline
   "How warm are you, honestly? 1–10."
@@ -37,7 +37,7 @@ zombies, desert island, untwisted "most likely to", generic icebreakers).
 ### Spicy (10)
 - s1 | spicy | pick | status | yes | social awareness
   "Who's been performing calm all night? Point at the best actor."
-- s2 | spicy | pick | friction | yes | flirt-pattern signal
+- s2 | spicy | pick | tease | yes | flirt-pattern signal
   "Who flirts their way out of trouble? Point."
 - s3 | spicy | text | friction | about a room member | past-meets-present tags
   "What did you hear about someone in this room BEFORE you met them?"
