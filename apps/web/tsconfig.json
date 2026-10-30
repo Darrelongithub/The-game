@@ -27,8 +27,7 @@
     ".next/types/**/*.ts",
     "../../packages/shared/src/**/*.ts"
   ],
-  // src/components/__tests__ is Agent B2's standalone jsdom harness (run with
-  // `npx tsx`, jsdom not vendored). It is not part of the app build, so it is
-  // excluded from the project typecheck rather than dragging in a dependency.
+  // The jsdom harness and socket regressions run separately with tsx and are
+  // excluded from the production app's TypeScript project.
   "exclude": ["node_modules", "src/components/__tests__"]
 }

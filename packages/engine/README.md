@@ -8,7 +8,7 @@ score is code, and replaying a log always deep-equals itself.
 
 ```bash
 npm --prefix packages/engine install   # dev tooling only (typescript, tsx, @types/node)
-npm --prefix packages/engine test      # 15 tests: 2 golden fixtures + false-positive suite (a)–(j)
+npm --prefix packages/engine test      # deterministic goldens, edge cases and scoring regressions
 npm --prefix packages/engine run typecheck
 ```
 
@@ -51,7 +51,7 @@ import { computeSignals, computeResults, buildNightDigest, buildSecrets }
   debrief writers in the log. Gemini refinement, when it exists, arrives
   via Agent D's lane — the engine stays code-primary.
 - `iosMean` — `(ios(a→b) + ios(b→a)) / 14`, averaging repeated records
-  per direction first. A missing direction doesn't vote; none at all → 0.
+  per direction first. A missing direction contributes zero.
 - `traitAgreement` — `1 − |self − peer| / 9` per shared trait, averaged
   over traits, then over both directions (a's self vs b's peer-ratings of
   a, and vice versa). Repeated ratings are averaged per rater first, so
@@ -69,14 +69,13 @@ numerals other than the pseudonym — every quantity lives in
 `claim.numbers`, per spec §7's "numbers ONLY from claim.numbers".
 
 - **ship** — brute-force maximum-weight matching over `pairScore`
-  (recursion: pair the first player or leave them out; ties → more
-  pairs, then lexicographically smallest pair list). Constrained to
-  `coupleEvidence > 0 || friendEvidence > 0`; if that leaves more
-  players out than parity needs (0 even, exactly one `freeAgent` odd),
-  rerun unconstrained. One claim per matched pair that has any evidence.
-- **besties** — same matching, weight = `friendEvidence`, constrained to
-  `friendEvidence > 0`, same rerun rule. `Results.freeAgent` comes from
-  the *ship* matching.
+  (ties → more pairs, then the lexicographically smallest pair list).
+  Both players must have made a positive-coded pick of the other. If the
+  evidence does not support a complete matching, the matching stays partial;
+  it never invents an unsupported public pairing.
+- **besties** — the same matching on reciprocal friendship-coded picks,
+  weighted by `friendEvidence`. `Results.freeAgent` comes from the *ship*
+  matching only when there is exactly one unmatched player.
 - **spark** (private, always) — ship pairs with ≥ 1 couple-coded pick in
   *each* direction and both players in `revealOptIn`.
 - **toxic** — negative indegree over friction/rivalry pick rounds.

@@ -7,8 +7,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
 import { createGameServer } from '../apps/server/src/server.ts';
-import { createIntegratedServices } from '../apps/server/src/integrated-services.ts';
-import { CallGuard, Provider } from '../packages/prompts/src/index.ts';
+import { createProductionServices } from '../apps/server/src/integratedServices.ts';
 import type { LogRecord, Results, SecretDeckView } from '../packages/shared/src/contracts.ts';
 
 const directory = mkdtempSync(join(tmpdir(), 'reveal-verified-smoke-'));
@@ -47,10 +46,15 @@ function publish(): void {
   renameSync(tmp, oraclePath);
 }
 
-const provider = new Provider({ env: {}, guard: new CallGuard() });
-const services = createIntegratedServices(provider, (room, observed) => weights.set(room, new Map(observed)));
+// This observer runs the actual default adapter, with keys explicitly disabled.
+delete process.env.XAI_API_KEY;
+delete process.env.GEMINI_API_KEY;
+const services = createProductionServices((room, observed) => weights.set(room, new Map(observed)));
+const fast = process.env.SMOKE_FAST === '1';
+if (fast) console.log('SMOKE_FAST: isolated fixture uses shortened live-moment timers; assertions are unchanged.');
 const server = createGameServer({
   dataDir: join(directory, 'data'), services, revealHoldMs: 10, interludeHoldMs: 10,
+  ...(fast ? { roundTimers: { spotlight: 7000, verdict: 8000 }, verdictDiscussMs: 1000, graceMs: 100 } : {}),
   audit: {
     persisted(roomCode, file, request) { persist.push({ roomCode, file, ...request }); },
     decks(roomCode, roomId, players, decks, results) {

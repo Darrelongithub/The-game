@@ -100,8 +100,8 @@ export function ShareCard({
       // ── heat gradient + blobs ───────────────────────────────────────
       const diag = ctx.createLinearGradient(0, 0, W, H)
       diag.addColorStop(0, 'rgba(139,47,224,0.55)')
-      diag.addColorStop(0.5, 'rgba(47,95,224,0.22)')
-      diag.addColorStop(1, 'rgba(182,255,60,0.28)')
+      diag.addColorStop(0.5, 'rgba(207,43,169,0.22)')
+      diag.addColorStop(1, 'rgba(239,180,255,0.28)')
       ctx.fillStyle = diag
       ctx.fillRect(0, 0, W, H)
 
@@ -112,8 +112,8 @@ export function ShareCard({
       ctx.fillRect(0, 0, W, H)
 
       const glowBR = ctx.createRadialGradient(W - 60, H - 80, 0, W - 60, H - 80, 640)
-      glowBR.addColorStop(0, 'rgba(182,255,60,0.35)')
-      glowBR.addColorStop(1, 'rgba(182,255,60,0)')
+      glowBR.addColorStop(0, 'rgba(239,180,255,0.35)')
+      glowBR.addColorStop(1, 'rgba(239,180,255,0)')
       ctx.fillStyle = glowBR
       ctx.fillRect(0, 0, W, H)
 
@@ -128,7 +128,7 @@ export function ShareCard({
 
       // ── top chip ────────────────────────────────────────────────────
       ctx.font = bodyFont(600, 26)
-      ctx.fillStyle = 'rgba(182,255,60,0.9)'
+      ctx.fillStyle = 'rgba(239,180,255,0.9)'
       ctx.textBaseline = 'alphabetic'
       try {
         ;(ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = '6px'
@@ -143,7 +143,7 @@ export function ShareCard({
       }
 
       // lime rule under the chip
-      ctx.fillStyle = '#b6ff3c'
+      ctx.fillStyle = '#efb4ff'
       ctx.fillRect(84, 158, 120, 6)
 
       // ── headline ────────────────────────────────────────────────────
@@ -171,7 +171,7 @@ export function ShareCard({
       for (const { key, label } of blocks) {
         const value = summary[key] as string
         ctx.font = bodyFont(700, 26)
-        ctx.fillStyle = 'rgba(182,255,60,0.85)'
+        ctx.fillStyle = 'rgba(239,180,255,0.85)'
         try {
           ;(ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = '4px'
         } catch {

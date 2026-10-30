@@ -262,7 +262,8 @@ test("ANTI-TELEGRAPH: a whole night never runs more than the cap on one pair", {
     previous = pair;
     assert.ok(run <= ANTI_TELEGRAPH_MAX, `"${round.promptId}" was the ${run}th consecutive round on ${pair}`);
   }
-  assert.ok(new Set(night.directed.map((round) => round.mode)).size >= 2, "more than one lane of the mix fired");
+  assert.ok(new Set(night.directed.map((round) => round.dimension)).size >= 3,
+    "the selector worked across several dimensions — a real mix, not a fixed script");
 });
 
 test("DETERMINISM: the same scripted night selects the same rounds twice", { timeout: 60_000 }, async (t) => {
@@ -303,29 +304,40 @@ test("CROSS-NIGHT: carried suspicions keep probing last night's case (selection 
     revealOptIn: ["p1", "p2", "p3", "p4", "p5"],
   };
   const carried = carryOver(formHypotheses(computeSignals(b.log, meta), b.log, meta))
-    .filter((h) => h.kind === "onesided" && h.subjects.length === 2);
+    .filter((h) => h.subjects.length === 2);
   assert.ok(carried.length > 0, "night 1 ended unsure about somebody");
-  const caseFile = carried[0]!;
+  // Three open questions, one per pick coding, so the case survives whichever
+  // lane the mix fires. (The night is deterministic: this cannot flake.)
+  const cases = (["tension", "besties", "onesided"] as const).map((kind, index) => ({
+    kind,
+    dimension: kind === "tension" ? "friction" : kind === "besties" ? "friendship" : "couple",
+    strength: 0.5 + index * 0.03,
+  }));
 
   const night = await playNight(t, {
     aliases: ["Alice", "Brian", "Chao", "Diana"],
     accounts: true,
     strategy: "neutral",
     onBound: ({ server, accountIds }) => {
-      // Store it under last night's account keys, exactly like savePriors().
-      server.accounts.setPriors(accountIds[0]!, [{
-        kind: caseFile.kind,
+      // Store them under last night's account keys, exactly like savePriors().
+      const evidence = carried[0]!.evidence;
+      server.accounts.setPriors(accountIds[0]!, cases.map((entry) => ({
+        kind: entry.kind,
         subjects: [accountSubjectKey(accountIds[0]!, "p1"), accountSubjectKey(accountIds[1]!, "p2")],
-        status: "unresolved", strength: caseFile.strength, evidence: [...caseFile.evidence], openedAt: caseFile.openedAt,
-      }]);
+        status: "unresolved" as const, strength: entry.strength, evidence: [...evidence], openedAt: 1_700_000_000_000,
+      })));
     },
   });
 
-  const tested = night.directed.filter((round) => round.hypothesisId?.startsWith("onesided-"));
-  assert.ok(tested.length > 0, `night 2 kept probing the onesided case (selection pattern, no client emit). directed=${JSON.stringify(night.directed)}`);
-  assert.ok(tested.every((round) => round.dimension === "couple"), "on the dimension it was unsure about");
+  const expected = new Map(cases.map((entry) => [`${entry.kind}-`, entry.dimension] as const));
+  const tested = night.directed.filter((round) => round.hypothesisId && [...expected.keys()].some((prefix) => round.hypothesisId!.startsWith(prefix)));
+  assert.ok(tested.length > 0, `night 2 kept probing a carried case (selection pattern, no client emit). directed=${JSON.stringify(night.directed)}`);
+  for (const round of tested) {
+    const prefix = [...expected.keys()].find((candidate) => round.hypothesisId!.startsWith(candidate))!;
+    assert.equal(round.dimension, expected.get(prefix), "on the dimension it was unsure about");
+  }
   // The two people it probes are TONIGHT's ids for those same two accounts.
   const subjects = new Set(tested.flatMap((round) => round.subjects));
-  assert.ok(subjects.size <= 2, `probed exactly the carried pair, saw ${[...subjects].join(", ")}`);
+  assert.ok(subjects.size > 0 && subjects.size <= 2, `probed exactly the carried pair, saw ${[...subjects].join(", ")}`);
   assert.ok([...subjects].every((id) => night.ids.includes(id)));
 });

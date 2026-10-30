@@ -38,8 +38,8 @@ export function SoundToggle({ className }: { className?: string }) {
         // unmuted: speaker with waves
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
           <path d="M4 9v6h4l5 4V5L8 9H4z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-          <path d="M16 9.5a4 4 0 0 1 0 5" stroke="#b6ff3c" strokeWidth="1.7" strokeLinecap="round" />
-          <path d="M18.5 7a7.5 7.5 0 0 1 0 10" stroke="#b6ff3c" strokeWidth="1.7" strokeLinecap="round" />
+          <path d="M16 9.5a4 4 0 0 1 0 5" stroke="#efb4ff" strokeWidth="1.7" strokeLinecap="round" />
+          <path d="M18.5 7a7.5 7.5 0 0 1 0 10" stroke="#efb4ff" strokeWidth="1.7" strokeLinecap="round" />
         </svg>
       )}
     </button>

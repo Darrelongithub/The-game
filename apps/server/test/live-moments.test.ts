@@ -73,7 +73,8 @@ test("spotlight: rotation holds, the subject never sees the question, decoys nev
   };
   const { connect } = await setup(t, { services });
   const clients = await Promise.all([connect(), connect(), connect(), connect()]);
-  const aliases = ["Host", "Brian", "Chao", "Diana"];
+  // `$&` must remain literal when substituting a subject alias.
+  const aliases = ["$&Host", "Brian", "Chao", "Diana"];
   const made = await create(clients[0]!, aliases[0]!); assert.ok(made.ok && made.code);
   const ids = [made.you!];
   for (let i = 1; i < clients.length; i++) {
@@ -142,7 +143,7 @@ test("spotlight: rotation holds, the subject never sees the question, decoys nev
     // Nothing on that socket, all night, may carry the question — checked
     // against the WHOLE spotlight pool for that subject, not just the draw.
     const pool = liveSeeds("spotlight", "dare", { spicy: true }).map((seed) =>
-      seed.text.replace(/\{S\}/gu, aliases[spot.subjectIndex]!));
+      seed.text.replace(/\{S\}/gu, () => aliases[spot.subjectIndex]!));
     assert.ok(pool.includes(spot.question), "drawn question must come from the bank pool");
     for (const question of new Set(pool)) {
       for (const frame of frames[spot.subjectIndex]!) {
@@ -156,7 +157,8 @@ test("spotlight: rotation holds, the subject never sees the question, decoys nev
   assert.equal(spotlightReveals.length, 4);
   for (const reveal of spotlightReveals) {
     assert.ok(reveal.subject, "reveal names the subject");
-    assert.ok(reveal.items && reveal.items.length > 0, "captions stack on the wall");
+    assert.equal(reveal.items?.length, clients.length - 1, "each non-subject caption appears exactly once");
+    assert.equal(new Set(reveal.items?.map((item) => item.alias)).size, clients.length - 1, "caption authors are not duplicated");
     assert.ok(!JSON.stringify(reveal).includes(spotlights.find((s) => s.roundId === reveal.roundId)!.question), "the wall never prints the question");
   }
   const withPunchline = spotlightReveals.filter((reveal) => !!reveal.punchline);

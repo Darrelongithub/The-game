@@ -241,14 +241,17 @@ async function main(): Promise<void> {
   check(speedDone, 'speed demon did not submit in under one second');
   check(duplicate, 'duplicate submit was not exercised');
   for (const bot of bots) for (const finale of bot.finales) assert.deepStrictEqual(finale, bots[0].finales[0], 'finale differs across sockets');
-  // Give asynchronous per-socket secret frames time to arrive, then resume a
-  // player with a deck. If none has one, use the last player and verify the
-  // absence against the independent oracle instead.
+  // Select a real owner from the independent oracle, not from observed client
+  // frames: an accidental leak must not make a non-owner look like an owner.
   await sleep(1500);
-  const resuming = bots.find(bot => bot.decks.length > 0) ?? bots[bots.length - 1];
+  check(oraclePath, 'SMOKE_ORACLE is required: see RUNBOOK.md');
+  const resumeOracle = JSON.parse(await readFile(oraclePath, 'utf8')) as Oracle;
+  check(resumeOracle.roomCode === code && resumeOracle.decks, 'resume oracle is malformed or for a different room');
+  const resuming = bots.find(bot => resumeOracle.decks[bot.id] != null) ?? bots[bots.length - 1];
+  const expectedDeck = resumeOracle.decks[resuming.id];
   const before = resuming.decks.length;
   await reconnect(resuming, 'finale');
-  if (before > 0) await waitFor(() => resuming.decks.length > before, 'post-finale secrets redelivery', 10000);
+  if (expectedDeck) await waitFor(() => resuming.decks.length > before, 'post-finale secrets redelivery', 10000);
   else await sleep(1500);
   for (const finale of resuming.finales) assert.deepStrictEqual(finale, bots[0].finales[0], 'finale changed on resume');
   await verifyOracle();

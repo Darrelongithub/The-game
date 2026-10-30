@@ -182,6 +182,8 @@ export function buildSecrets(
   // ---------- fixed order spark → onesided → blindspot → roomnote → stat, capped ----------
   const decks = new Map<PlayerId, SecretCard[]>();
   for (const player of meta.players) {
+    // The reveal opt-in gates the entire private deck, not only spark/onesided.
+    if (!optIn.has(player.id)) continue;
     const cards = buckets.get(player.id);
     if (!cards || cards.length === 0) continue;
     const ordered = [...cards].sort((x, y) => KIND_ORDER.indexOf(x.kind) - KIND_ORDER.indexOf(y.kind));

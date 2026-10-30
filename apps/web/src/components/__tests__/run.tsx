@@ -188,8 +188,8 @@ async function main() {
   }
 
   /* ── 1. imports (environment is ready) ─────────────────────────────── */
-  const ReactMod = await import('react')
-  const { act } = ReactMod
+  const React = await import('react')
+  const { act } = React
   const { createRoot } = await import('react-dom/client')
   const { GlassCard } = await import('../GlassCard')
   const { GlowButton } = await import('../GlowButton')
@@ -299,27 +299,22 @@ async function main() {
     await unmount()
   }
 
-  /* ── 3. Flame: ember memoization + reduced motion ─────────────────── */
+  /* ── 3. Flame: recognizable layers and stable SVG gradients ──────── */
   {
     const el = await mount(<Flame size={80} />)
-    const emberLefts = () =>
-      Array.from(el.querySelectorAll('div'))
-        .filter((div) => (div.className ?? '').includes('bg-lime-accent'))
-        .map((div) => div.style.left)
-    ok('Flame renders 7 embers', emberLefts().length === 7)
-    const before = emberLefts().join('|')
-    await act(async () => {
-      root!.render(<Flame size={80} />)
-    })
-    ok('Flame embers memoized (no teleport on re-render)', emberLefts().join('|') === before && before.length > 0)
+    ok('Flame has an accessible label and two layered paths', !!el.querySelector('[role="img"][aria-label="Flame"]') && el.querySelectorAll('svg path').length === 2)
+    const gradients = () => Array.from(el.querySelectorAll('linearGradient')).map((gradient) => gradient.id).join('|')
+    const before = gradients()
+    await act(async () => { root!.render(<Flame size={80} />) })
+    ok('Flame gradient IDs stay stable on re-render', gradients() === before && before.length > 0)
+    await act(async () => { root!.render(<><Flame size={80} /><Flame size={80} /></>) })
+    const ids = gradients().split('|')
+    ok('multiple flames have unique gradient IDs', ids.length === 4 && new Set(ids).size === 4)
     await unmount()
 
     setReduce(true)
     const el2 = await mount(<Flame size={80} />)
-    const emberCount = Array.from(el2.querySelectorAll('div')).filter((div) =>
-      (div.className ?? '').includes('bg-lime-accent')
-    ).length
-    ok('prefers-reduced-motion kills flame embers/flicker', emberCount === 0)
+    ok('reduced motion retains the recognizable flame', el2.querySelectorAll('svg path').length === 2)
     await unmount()
     setReduce(false)
   }
@@ -788,14 +783,24 @@ async function main() {
     ok('verdict counts the debate down', /\d+s/.test(text(q('[data-testid="verdict-debate"]') ?? d.createElement('i'))))
     await unmount()
 
+    await mount(<PromptScreen round={round({ roundId: 'live-transition', voteOpensAt: Date.now() + 80 }) as any} room={room as any} you="p1" onSubmit={() => true} />)
+    await tick(120)
+    ok('verdict shows the pick grid automatically when the debate ends', !!q('[data-testid="verdict-pickgrid"]'))
+    await unmount()
+
     const submitted: any[] = []
     const open = await mount(
       <PromptScreen round={round({ voteOpensAt: Date.now() - 1 }) as any} room={room as any} you="p1" onSubmit={(value: any) => { submitted.push(value); return true }} />
     )
     ok('verdict opens a simultaneous pick grid', !!q('[data-testid="verdict-pickgrid"]'))
-    const picks = qa('[data-testid="verdict-pickgrid"] button')
+    const picks = qa('[data-testid="verdict-pickgrid"] button[aria-pressed]')
     ok('verdict pick grid excludes yourself', picks.length === 2 && !text(open).includes('You'))
+    const lockVote = qa('[data-testid="verdict-pickgrid"] button').find((node: any) => text(node) === 'Lock in answer')!
+    ok('verdict vote needs a selection before locking', (lockVote as HTMLButtonElement).disabled)
     click(picks[0])
+    await tick(30)
+    ok('selecting a verdict is editable before locking', submitted.length === 0 && !(lockVote as HTMLButtonElement).disabled)
+    click(lockVote)
     await tick(30)
     ok('verdict pick submits a normal coded pick', submitted.length === 1 && submitted[0].kind === 'pick' && submitted[0].target !== 'p1')
     await unmount()

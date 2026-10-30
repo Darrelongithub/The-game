@@ -197,7 +197,7 @@ async function main() {
   ok("cards are ordered spark → onesided → stat",
      (secrets?.cards ?? []).map((c) => c.kind).join(",") === "spark,onesided,stat");
   ok("every card has 1–4 facts", (secrets?.cards ?? []).every((c) => c.facts.length >= 1 && c.facts.length <= 4));
-  ok("room ends closed after the deck", lastState?.phase === "closed", String(lastState?.phase));
+  ok("finale remains available after the deck arrives", lastState?.phase === "finale", String(lastState?.phase));
 
   // ---- reload resume: a fresh instance must restore the snapshot ----------
   const snapRaw = store.getItem("reveal.mock.snapshot");

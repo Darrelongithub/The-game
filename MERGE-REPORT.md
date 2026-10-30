@@ -1,5 +1,13 @@
 # Agent Z merge and QA report
 
+> Historical report for the earlier integration (PR #9). Follow-up work added
+> local current-night callbacks, nonce-bound reconnect recovery and an automated
+> full-game Chromium regression. The remaining real-device, LAN and live-provider
+> checks below still apply; see the current runbook and package READMEs. The
+> intermittent server-test failure noted below was traced to counting only
+> rounds where the host participates; the follow-up checks every observed
+> round (including the later live moments) and every eligible host response.
+
 ## Decision: **NO-GO for game night**
 
 The no-key five-player game and independent local privacy oracle now pass; the

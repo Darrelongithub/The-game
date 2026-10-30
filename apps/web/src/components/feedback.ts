@@ -8,7 +8,7 @@ import confetti from 'canvas-confetti'
 import { prefersReducedMotion } from './deviceFeedback'
 export { prefersReducedMotion, usePrefersReducedMotion, haptic } from './deviceFeedback'
 
-const LIME = '#b6ff3c'
+const LIME = '#efb4ff'
 const PURPLE = '#8b2fe0'
 const WHITE = '#f5f3ff'
 

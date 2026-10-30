@@ -11,7 +11,7 @@ const TRAIT_HINTS: Readonly<Record<TraitId, readonly RegExp[]>> = {
   loyalty: [/\bloyal\w*/i, /\bkeep(s|ing)?\s+a?\s*secret/i, /\bsecret[- ]keeper/i, /\bfaithful\b/i, /\bback(s|ed)?\s+you\b/i],
   chaos: [/\bchaos\b/i, /\bchaotic\b/i, /\bunpredictable\b/i, /\bwild\b/i, /\bmes(s|y)\b/i, /\breckless\b/i, /\bspontaneous\b/i],
   reliability: [/\breliab\w*/i, /\bdependab\w*/i, /\bshow(s|ed)?\s+up\b/i, /\bon\s+time\b/i, /\bconsistent\b/i, /\bflak(e|ey)\b/i],
-  warmth: [/\bwarm\w*/i, /\bkind\w*/i, /\bcaring\b/i, /\baffectionate\b/i, /\bcold\b/i, /\bsoft\b/i],
+  warmth: [/\bwarm\w*/i, /\bkind\w*/i, /\bcaring\b/i, /\baffectionate\b/i, /\bcold\b/i, /\bsoft\b/i, /\blisten(?:s|ing)?\b/i],
   honesty: [/\bhonest\w*/i, /\btruth\w*/i, /\blie(s|d)?\b/i, /\bhonesty\b/i, /\bbs\b/i],
   spice: [/\bspic\w*/i, /\bfreak\w*/i, /\brizz\b/i, /\bflirt\w*/i, /\bdesire\b/i, /\bsexual\b/i, /\btension\b/i, /\bcrush\w*/i],
 };

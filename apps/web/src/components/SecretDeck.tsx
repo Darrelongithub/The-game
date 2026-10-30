@@ -78,8 +78,8 @@ export function SecretDeck({ deck, onClose }: { deck: SecretDeckView; onClose?: 
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path d="M7 10V7a5 5 0 0 1 10 0v3" stroke="#b6ff3c" strokeWidth="2" strokeLinecap="round" />
-              <rect x="4.7" y="10" width="14.6" height="10.3" rx="2.6" stroke="#b6ff3c" strokeWidth="2" />
+              <path d="M7 10V7a5 5 0 0 1 10 0v3" stroke="#efb4ff" strokeWidth="2" strokeLinecap="round" />
+              <rect x="4.7" y="10" width="14.6" height="10.3" rx="2.6" stroke="#efb4ff" strokeWidth="2" />
             </svg>
             <span className="font-display font-bold uppercase tracking-[0.18em] text-sm text-white">
               Your secret deck

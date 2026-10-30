@@ -67,7 +67,8 @@ test("Hypothesis / AccountInfo carry exactly the contracted fields and nothing e
 
 const walk = (dir: string, out: string[] = []): string[] => {
   for (const entry of readdirSync(dir)) {
-    if (entry === "node_modules" || entry === ".git" || entry === "out" || entry === "dist") continue;
+    // Build output is not source (and .next bundles vendor code).
+    if (["node_modules", ".git", ".next", "out", "dist", "build", "coverage"].includes(entry)) continue;
     const path = join(dir, entry);
     if (statSync(path).isDirectory()) walk(path, out);
     else if (/\.(ts|tsx|mjs|js)$/u.test(entry)) out.push(path);

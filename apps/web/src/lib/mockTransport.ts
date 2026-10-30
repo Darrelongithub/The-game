@@ -38,7 +38,7 @@ import type {
 } from "@shared/contracts.ts";
 import { MIN_PLAYERS, ROUND_TIMERS_MS } from "@shared/contracts.ts";
 import { isAlias, isResponseValue, targetsOther } from "@shared/validate.ts";
-import { clearSession, loadSession, saveSession } from "./session";
+import { clearSession, saveSession } from "./session";
 import type { Transport, TransportHandlers } from "./transport";
 
 const MOCK_CODE: RoomCode = "MOCK";
@@ -119,9 +119,9 @@ export class MockTransport implements Transport {
   private roundId = "";
   private closed = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private finaleTimer: ReturnType<typeof setTimeout> | null = null;
   private heatDownVotes = 0;
   private restoredSnapshot: Snap | null = null;
-  private restoredTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     this.restoredSnapshot = this.readSnapshot();
@@ -199,10 +199,13 @@ export class MockTransport implements Transport {
       this.armTimer(ms);
     } else {
       this.round = null;
+      // Older mock snapshots marked the finale as closed after its deck. A
+      // deleted mock removes its snapshot, so those snapshots are recoverable.
+      if (this.phase === "closed") this.phase = "finale";
       this.emitState();
       if (this.phase === "finale") this.emitFinale();
-      if (this.phase === "closed") this.emitSecrets();
     }
+    this.handlers.onConnection?.(true, { resuming: false });
   }
 
   // ---------------------------------------------------------------- join
@@ -274,6 +277,7 @@ export class MockTransport implements Transport {
     this.handlers.onConnection?.(true, { resuming: true });
     this.emitState();
     if (this.round) this.handlers.onRound?.(this.round);
+    this.handlers.onConnection?.(true, { resuming: false });
     return { ok: true, you: this.you, secret: MOCK_SECRET, state: this.view() };
   }
 
@@ -287,6 +291,7 @@ export class MockTransport implements Transport {
     this.handlers.onConnection?.(true, { resuming: true });
     this.emitState();
     if (this.round) this.handlers.onRound?.(this.round);
+    this.handlers.onConnection?.(true, { resuming: false });
   }
 
   // ------------------------------------------------------------- actions
@@ -375,6 +380,19 @@ export class MockTransport implements Transport {
       }
     }
     this.handlers.onDeleted?.();
+  }
+
+  forgetSession(): void {
+    this.stopTimer();
+    this.players = [];
+    this.round = null;
+    this.phase = "lobby";
+    this.closed = false;
+    this.restoredSnapshot = null;
+    clearSession();
+    if (typeof window !== "undefined") {
+      try { window.sessionStorage.removeItem(SNAPSHOT_KEY); } catch { /* ignore */ }
+    }
   }
 
   disconnect(): void {
@@ -504,9 +522,9 @@ export class MockTransport implements Transport {
 
   private stopTimer(): void {
     if (this.timer) clearTimeout(this.timer);
+    if (this.finaleTimer) clearTimeout(this.finaleTimer);
     this.timer = null;
-    if (this.restoredTimer) clearTimeout(this.restoredTimer);
-    this.restoredTimer = null;
+    this.finaleTimer = null;
   }
 
   private goFinale(): void {
@@ -549,14 +567,18 @@ export class MockTransport implements Transport {
     this.handlers.onFinale?.(finale);
     this.phase = "finale";
     this.writeSnapshot();
-    // The deck unlocks only AFTER the public story ends on this phone (§2).
-    setTimeout(() => this.emitSecrets(), 600);
+    // The UI keeps the deck closed until the public story ends. Track this
+    // delayed event so deletion, start-over and unmount cannot revive a room.
+    if (this.finaleTimer) clearTimeout(this.finaleTimer);
+    this.finaleTimer = setTimeout(() => {
+      this.finaleTimer = null;
+      if (!this.closed && this.phase === "finale") this.emitSecrets();
+    }, 600);
   }
 
   private emitSecrets(): void {
     const deck: SecretDeckView = { cards: secretCards(this.players) };
     this.handlers.onSecrets?.(deck);
-    this.phase = "closed";
     this.seq += 1;
     this.emitState();
   }

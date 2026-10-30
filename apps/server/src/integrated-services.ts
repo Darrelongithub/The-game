@@ -4,14 +4,16 @@ import { PromptProvider as FullPromptProvider, Provider, selectFromBank, tagText
 import { buildSkeleton, writeFinale } from "../../../packages/narrator/src/index.ts";
 import type { GameServices, PromptProvider } from "./services.ts";
 
-/** Production adapter. The room manager supplies pseudonymized inputs and keeps
- * private decks out of the public narrator. No calls are needed in no-key mode. */
+/** Injectable compatibility adapter. The default production server uses
+ * integratedServices.ts, with room-scoped HTTP attempt limits and cancellation.
+ * This entry point remains available for existing callers and provider tests. */
 export function createIntegratedServices(
   provider = Provider.fromEnv(),
   onJokerWeights?: (roomId: string, weights: ReadonlyMap<string, number>) => void,
 ): GameServices {
   return {
-    createPromptProvider(roomId = "unassigned"): PromptProvider {
+    createPromptProvider(context = "unassigned"): PromptProvider {
+      const roomId = typeof context === "string" ? context : context.roomId;
       let full: FullPromptProvider | undefined;
       let disposed = false;
       return {
@@ -35,7 +37,7 @@ export function createIntegratedServices(
     },
     computeSignals,
     computeResults(signals, log, meta) {
-      const tags = new Map(log.map((record: LogRecord) => {
+      const tags = new Map(log.filter((record) => record.roundKind !== "debrief").map((record: LogRecord) => {
         const value = record.value;
         const text = value.kind === "text" ? value.text : value.kind === "shout" ? value.word : value.kind === "dare" ? value.reason ?? "" : "";
         return [logRecordId(record), tagText(text)] as const;
