@@ -13,6 +13,7 @@ import {
   parseJsonLoose,
   redactAliases,
 } from "../src/index.ts";
+import { resolveGeminiModel } from "../../shared/src/contracts.ts";
 import { ALIASES, geminiReply, grokReply, hangingFetch, makeProvider, mockFetch } from "./helpers.ts";
 
 const messages = [{ role: "user" as const, content: "Give me 3 prompts." }];
@@ -126,7 +127,7 @@ test("gemini lane: classic generateContent, SAFETY_OFF mapped to BLOCK_NONE, JSO
   });
   assert.equal(result.ok, true);
   const call = mock.calls[0]!;
-  assert.match(call.url, /\/models\/gemini-3\.1-pro-preview:generateContent\?key=gem-test$/);
+  assert.match(call.url, /\/models\/gemini-3\.5-flash-lite:generateContent\?key=gem-test$/);
   assert.equal(call.headers.authorization, undefined, "Gemini uses ?key=, not a bearer header");
   assert.equal(call.body.generationConfig !== undefined, true);
   const config = call.body.generationConfig as Record<string, unknown>;
@@ -254,6 +255,14 @@ test("parseJsonLoose handles fences, prose and garbage; extractText reads both A
 test("geminiSafetySettings maps OFF → BLOCK_NONE only for the classic endpoint", () => {
   assert.ok(geminiSafetySettings("classic").every((s) => s.threshold === "BLOCK_NONE"));
   assert.ok(geminiSafetySettings("literal").every((s) => s.threshold === "OFF"));
+});
+
+test("Gemini resolver defaults to flash-lite and preserves overrides", () => {
+  assert.equal(resolveGeminiModel(), "gemini-3.5-flash-lite");
+  assert.equal(resolveGeminiModel("  "), "gemini-3.5-flash-lite");
+  assert.equal(resolveGeminiModel(" custom-model "), "custom-model");
+  const provider = new Provider({ env: {} });
+  assert.equal(provider.modelFor("gemini", "analyze"), "gemini-3.5-flash-lite");
 });
 
 test("GEMINI_MODEL overrides both Gemini analysis call sites through one resolver", () => {
