@@ -33,6 +33,7 @@ continues to export static files served by the game server.
 npm run typecheck     # tsc --noEmit (strict)
 npm run test:ssr      # server-render smoke checks over every screen
 npm run test:regressions # DOM, reconnect and lost-ack regressions
+npm run test:transport # additional local socket lifecycle regression
 npm run test:components # full component/jsdom harness
 npm run test:mock     # the full scripted night, headless
 npm run test:live     # optional: same-contract smoke against a running server
@@ -58,7 +59,8 @@ dependency; it is not included in the production client.
 |---|---|
 | `src/app/layout.tsx` | fonts (self-hosted Clash Display + Inter), `AmbientBackground` mount |
 | `src/app/globals.css` | design tokens verbatim, `--red-alert`, heat vars, mobile blur variants, `prefers-reduced-motion` |
-| `src/app/page.tsx` | intro gate (once per session) → Join / Lobby / Play router |
+| `src/app/page.tsx` | intro gate (once per session), lazy-loads the room app |
+| `src/components/RoomApp.tsx` | Join / Lobby / Play router and reconnect overlay |
 | `src/lib/transport.ts` | `Transport` interface + factory behind `NEXT_PUBLIC_TRANSPORT` |
 | `src/lib/socketTransport.ts` | socket.io v4: polling-first, auto-reconnect, visibilitychange re-join, stale-seq drop |
 | `src/lib/mockTransport.ts` | scripted 4-player night, snapshotted to sessionStorage |

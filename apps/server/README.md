@@ -31,7 +31,9 @@ expired rooms from being revived before the sweep.
 digests, private decks and narration are connected to the workspace packages.
 `src/services.ts` retains conservative injectable fallback implementations for
 provider failure, defensive error handling and tests. It is not the default
-production scoring pipeline. `createGameServer({ services })` remains the
+production scoring pipeline. The older `src/integrated-services.ts` injectable
+adapter is retained for compatibility and synthetic provider tests; production
+uses `src/integratedServices.ts`. `createGameServer({ services })` remains the
 injectable test seam; each room has its own prompt provider. Lobby preparation
 runs in the background and `forPhase()` returns already-available prompts.
 Transient reveal, interlude and finale events are re-emitted on reconnect.

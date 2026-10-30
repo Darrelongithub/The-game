@@ -34,3 +34,4 @@ AGENT-AUDIT | packages/shared/src/contracts.ts | Formalize nonce-bound resume-ro
 
 AGENT-PLAYABILITY | apps/web/package.json | Add playwright-core as a dev-only dependency | The real-browser multi-player regression needs browser automation without bundling or downloading a browser in production; a locally installed Chromium executable is supplied separately.
 AGENT-PLAYABILITY | package.json | Override Next 15 internal PostCSS to the patched 8.5.x release | Next 15 pins vulnerable 8.4.31; the override keeps the same PostCSS major, removes the known advisories and will be validated with build and browser regressions.
+AGENT-Z | packages/shared/src/contracts.ts | Specify a replay-safe resume credential rotation/acknowledgment protocol | The versioned nonce-bound retry described above addresses lost acknowledgments for updated clients without changing frozen contracts; a formal cross-client protocol remains a contract request.

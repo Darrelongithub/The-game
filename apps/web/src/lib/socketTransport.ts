@@ -246,7 +246,7 @@ export class SocketTransport implements Transport {
 
   async darePass(req: DarePassRequest): Promise<{ ok: boolean; error?: string }> {
     const reason = req.reason.trim();
-    if (!reason) return { ok: false, error: "A reason is required." };
+    if (!reason || reason.length > 140) return { ok: false, error: "A reason of up to 140 characters is required." };
     const uuid = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     // Use the acknowledged submission route rather than assuming a fire-and-
     // forget dare_pass event succeeded.

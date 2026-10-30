@@ -77,6 +77,7 @@ export function computeResults(
   meta: RoomMeta,
   config: PairWeights = DEFAULT_WEIGHTS,
   tagOf: (recordId: string) => string[] = () => [],
+  onJokerWeights?: (weights: ReadonlyMap<PlayerId, number>) => void,
 ): Results {
   assertScorableMeta(meta);
   const weights: PairWeights = { ...DEFAULT_WEIGHTS, ...config };
@@ -288,6 +289,8 @@ export function computeResults(
       // pick rounds gets every nomination downweighted.
       const pickerWeight = jokerNominationWeights(log, idsInOrder);
 
+      // Optional in-process QA observer; never part of Results or socket data.
+      onJokerWeights?.(new Map(pickerWeight));
       const rawIndegree = new Map<PlayerId, number>();
       const weightedIndegree = new Map<PlayerId, number>();
       const guardedWeighted = new Map<PlayerId, number>();

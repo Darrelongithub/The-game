@@ -106,20 +106,26 @@ class IntegratedPromptProvider implements PromptProvider {
   }
 }
 
-export const integratedServices: GameServices = {
-  createPromptProvider: ({ roomId }) => new IntegratedPromptProvider(roomId),
-  computeSignals,
-  computeResults(signals, log, meta) {
-    // Scores are always deterministic local computations: a model response
-    // (or its timing) must not change them. Private debriefs stay excluded.
-    const tags = new Map(log.filter((r) => r.roundKind !== "debrief" && r.value.kind === "text")
-      .map((r) => [logRecordId(r), r.value.kind === "text" ? tagText(r.value.text) : []]));
-    return computeResults(signals, log, meta, undefined, (id) => tags.get(id) ?? []);
-  },
-  buildNightDigest,
-  buildSecrets,
-  buildSkeleton: (results, digest, meta) => buildSkeleton(results, digest, meta.players),
-  writeFinale: (skeleton, decks, results, digest, meta, provider) =>
-    writeFinale(skeleton, decks, results, digest,
-      provider instanceof IntegratedPromptProvider ? provider.narrationOptions(meta) : { apiKey: "", roster: meta.players }),
-};
+/** The optional observer is for in-process tests only; no client sees it. */
+export function createProductionServices(onJokerWeights?: (roomId: string, weights: ReadonlyMap<string, number>) => void): GameServices {
+  return {
+    createPromptProvider: (context) => new IntegratedPromptProvider(typeof context === "string" ? context : context?.roomId ?? "unassigned"),
+    computeSignals,
+    computeResults(signals, log, meta) {
+      // Scores are always deterministic local computations: a model response
+      // (or its timing) must not change them. Private debriefs are not tagged.
+      const tags = new Map(log.filter((r) => r.roundKind !== "debrief" && r.value.kind === "text")
+        .map((r) => [logRecordId(r), r.value.kind === "text" ? tagText(r.value.text) : []]));
+      return computeResults(signals, log, meta, undefined, (id) => tags.get(id) ?? [],
+        onJokerWeights ? (weights) => onJokerWeights(meta.roomId, weights) : undefined);
+    },
+    buildNightDigest,
+    buildSecrets,
+    buildSkeleton: (results, digest, meta) => buildSkeleton(results, digest, meta?.players),
+    writeFinale: (skeleton, decks, results, digest, meta, provider) =>
+      writeFinale(skeleton, decks, results, digest,
+        provider instanceof IntegratedPromptProvider && meta ? provider.narrationOptions(meta) : { apiKey: "", roster: meta?.players }),
+  };
+}
+
+export const integratedServices = createProductionServices();

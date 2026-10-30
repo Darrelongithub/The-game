@@ -18,13 +18,14 @@ export interface PromptProvider {
   dispose?(): void;
 }
 export interface GameServices {
-  createPromptProvider(context: { roomId: string }): PromptProvider;
+  /** Accept the original room-id form and the newer explicit context. */
+  createPromptProvider(context?: string | { roomId: string }): PromptProvider;
   computeSignals(log: LogRecord[], meta: RoomMeta): PairSignal[];
   computeResults(signals: PairSignal[], log: LogRecord[], meta: RoomMeta, provider?: PromptProvider): Results;
   buildNightDigest(log: LogRecord[], meta: RoomMeta): NightDigest;
   buildSecrets(results: Results, digest: NightDigest, meta: RoomMeta): Map<PlayerId, SecretCard[]>;
-  buildSkeleton(results: Results, digest: NightDigest, meta: RoomMeta): FinaleSlide[];
-  writeFinale(skeleton: FinaleSlide[], decks: Map<PlayerId, SecretCard[]>, results: Results, digest: NightDigest, meta: RoomMeta, provider: PromptProvider): Promise<{ slides: FinaleSlide[]; decks: Map<PlayerId, SecretCard[]> }>;
+  buildSkeleton(results: Results, digest: NightDigest, meta?: RoomMeta): FinaleSlide[];
+  writeFinale(skeleton: FinaleSlide[], decks: Map<PlayerId, SecretCard[]>, results: Results, digest: NightDigest, meta?: RoomMeta, provider?: PromptProvider): Promise<{ slides: FinaleSlide[]; decks: Map<PlayerId, SecretCard[]> }>;
 }
 
 // Small standalone bank. Agent D's full bank/provider is injected at merge; these

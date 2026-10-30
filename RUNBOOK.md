@@ -66,9 +66,25 @@ requires a 48-hour hard purge and 24-hour idle-room expiry; verify these on the
 integrated server before relying on them. Stopping the process alone is not a
 substitute for deleting room logs.
 
+## Verified no-key smoke game
+
+The following independent in-process oracle exercises the actual production
+adapter, using synthetic players, no API keys, a temporary data directory and
+no public debug endpoint:
+
+```sh
+npm run smoke:verified
+```
+
+To verify that the oracle catches a deliberately misdelivered secret frame, run
+`SMOKE_INJECT_LEAK=1 npm run smoke:verified`; the underlying smoke must fail.
+The injection is confined to that test harness. `MERGE-REPORT.md` is the
+historical QA report for the earlier integration; real device and LAN testing
+is still required before a game night.
+
 ## External smoke bots
 
-For a self-contained, synthetic local smoke test with no provider keys, run:
+For a second self-contained, synthetic local smoke test with no provider keys, run:
 
 ```sh
 npm run smoke:oracle

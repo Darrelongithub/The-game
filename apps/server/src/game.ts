@@ -53,6 +53,11 @@ export interface GameOptions {
   interludeHoldMs?: number;
   botDelayMs?: [number, number];
   writerTimeoutMs?: number;
+  /** In-process test observer only; never configured by the production entry point. */
+  audit?: {
+    persisted(roomCode: string, file: string, request: { roundId: string; playerId: string; clientUuid: string }): void;
+    decks(roomCode: string, roomId: string, players: string[], decks: ReadonlyMap<string, SecretDeckView>, results: import("../../../packages/shared/src/contracts.ts").Results): void;
+  };
 }
 const HOUR = 60 * 60 * 1000;
 const PAIR_KEY = (a: string, b: string): string => [a, b].sort().join("\u0000");
@@ -528,6 +533,7 @@ export class RoomManager {
     try { appendFileSync(room.file, `${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 }); }
     catch { return { ok: false, error: "Unable to save the answer." }; }
     room.log.push(record); room.seen.set(key, { roundId: r.roundId, fingerprint }); round.responses.set(player.id, value); room.lastActivity = at;
+    this.options.audit?.persisted(room.code, room.file, { roundId: r.roundId, playerId: player.id, clientUuid: r.clientUuid });
     if (target) { const k = PAIR_KEY(player.id, target); room.interactions.set(k, (room.interactions.get(k) ?? 0) + 1); }
     this.changed(room);
     if (!player.isBot && player.socketId) this.io.sockets.sockets.get(player.socketId)?.emit("round", this.roundView(round, player.id));
@@ -636,6 +642,7 @@ export class RoomManager {
         .filter((c) => c.facts.length > 0);
       if (cards.length) room.decks.set(player.id, { cards });
     }
+    this.options.audit?.decks(room.code, room.id, room.players.map((p) => p.id), room.decks, results);
     decks.clear();
     const privateDebriefs = log.flatMap((r) => r.roundKind === "debrief" && r.value.kind === "text" ? [r.value.text.toLocaleLowerCase()] : []);
     const safeClaims = results.claims.filter((c) => c.audience === "public" && c.type !== "spark" && c.type !== "onesided" && !(c.confidence === "low" && (c.type === "toxic" || c.type === "rival"))).map((c) => ({ ...c, evidence: c.evidence.filter((e) => !privateDebriefs.some((d) => d.length >= 10 && e.toLocaleLowerCase().includes(d))) }));

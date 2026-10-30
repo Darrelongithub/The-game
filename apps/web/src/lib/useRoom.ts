@@ -19,7 +19,7 @@ import type {
   SecretDeckView,
   SubmitRequest,
 } from "@shared/contracts.ts";
-import { createTransport, roundTargetsMe, type Transport, type TransportHandlers } from "./transport";
+import { createTransport, roundTargetsMe, transportMode, type Transport, type TransportHandlers } from "./transport";
 import { clearSession, loadSession, saveSession } from "./session";
 
 export interface UseRoom {
@@ -65,9 +65,11 @@ export function clientUuid(): string {
   return `u-${Date.now().toString(36)}-${uuidCounter}`;
 }
 
-export function useRoom(): UseRoom {
+/** Factory injection lets tests exercise slow chunk/network initialization. */
+export function useRoom(factory: typeof createTransport = createTransport): UseRoom {
   const transportRef = useRef<Transport | null>(null);
-  const [mode, setMode] = useState<"socket" | "mock">("mock");
+  const transportReady = useRef<Promise<Transport> | null>(null);
+  const [mode, setMode] = useState<"socket" | "mock">(transportMode);
   const [view, setView] = useState<RoomView | null>(null);
   const [you, setYou] = useState<PlayerId | null>(null);
   const [code, setCode] = useState<RoomCode | null>(null);
@@ -135,24 +137,33 @@ export function useRoom(): UseRoom {
       },
     };
 
-    const transport = createTransport(handlers);
-    transportRef.current = transport;
-    setMode(transport.mode);
-
-    // Boot: if this tab has a session, ask for a full snapshot right away.
-    if (stored) transport.resume();
+    let disposed = false;
+    const ready = factory(handlers).then((transport) => {
+      if (disposed) { transport.disconnect(); throw new Error("Room screen unmounted"); }
+      transportRef.current = transport;
+      setMode(transport.mode);
+      if (stored) transport.resume();
+      return transport;
+    });
+    transportReady.current = ready;
+    void ready.catch(() => {
+      if (!disposed) { setConnected(false); setError("Could not start the connection. Please reload."); }
+    });
 
     // The real transport owns its visibility listener. Keep the mock's
     // snapshot refresh without issuing a second real rejoin on the same token.
     const onVisible = () => {
-      if (document.visibilityState === "visible") transport.resume();
+      const current = transportRef.current;
+      if (document.visibilityState === "visible" && current?.mode === "mock") current.resume();
     };
-    if (transport.mode === "mock") document.addEventListener("visibilitychange", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
-      if (transport.mode === "mock") document.removeEventListener("visibilitychange", onVisible);
-      transport.disconnect();
+      disposed = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      transportRef.current?.disconnect();
       transportRef.current = null;
+      if (transportReady.current === ready) transportReady.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -172,8 +183,8 @@ export function useRoom(): UseRoom {
   }, []);
 
   const createRoom = useCallback(async (alias: string, consent: Consent) => {
-    const t = transportRef.current;
-    if (!t) return { ok: false, error: "Not connected yet." } satisfies JoinReply;
+    const t = transportRef.current ?? await transportReady.current?.catch(() => null);
+    if (!t) return { ok: false, error: "Not connected yet. Please retry." } satisfies JoinReply;
     setError(null);
     const reply = await t.create(alias, consent);
     if (reply.ok && reply.you) {
@@ -192,8 +203,8 @@ export function useRoom(): UseRoom {
   }, []);
 
   const joinRoom = useCallback(async (roomCode: RoomCode, alias: string, consent: Consent) => {
-    const t = transportRef.current;
-    if (!t) return { ok: false, error: "Not connected yet." } satisfies JoinReply;
+    const t = transportRef.current ?? await transportReady.current?.catch(() => null);
+    if (!t) return { ok: false, error: "Not connected yet. Please retry." } satisfies JoinReply;
     setError(null);
     const reply = await t.join({ roomCode, alias, consent });
     if (reply.ok && reply.you) {

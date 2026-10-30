@@ -164,6 +164,11 @@ async function verifyOracle(): Promise<void> {
   check(oracle.darePasses.some(pass => pass.playerId === bots[1].id && pass.reason === 'My mother is watching.'), 'dare pass reason was not stored verbatim');
   const joker = oracle.joker;
   check(joker.playerId === bots[0].id && joker.target === bots[1].id && joker.pickRounds > 0 && joker.sameTargetPicks === joker.pickRounds && joker.negativeNominations > 0 && joker.nominationWeight === 0.5 && (joker.victimToxicConfidence === null || joker.victimToxicConfidence === 'low' || joker.victimToxicConfidence === 'med'), 'joker guard did not protect the fixed-target victim');
+  const publicFinale = JSON.stringify(bots[0].finales[0]);
+  check(!publicFinale.includes('"cards"'), 'public finale contains a private deck');
+  for (const deck of Object.values(oracle.decks)) if (deck) for (const card of deck.cards) {
+    check(!publicFinale.includes(JSON.stringify(card)), 'public finale contains a private card');
+  }
   for (const frame of oracle.secretFrames) check(frame.owner === frame.recipient, 'secret frame delivered to a non-owner');
   check(oracle.secretFrames.every(frame => bots.some(bot => bot.id === frame.recipient)), 'oracle has an unknown secret recipient');
   for (const bot of bots) {
@@ -199,6 +204,9 @@ async function main(): Promise<void> {
     } else acceptJoin(bot, await join(bot, false));
   }
   console.log(`Smoke room ${code}: ${count} players at ${address}`);
+  // Ensure the live scenario includes a negative nomination: bank ordering
+  // alone does not guarantee a friction/rivalry pick on every night.
+  bots[0].socket.emit('custom_prompts', { lines: ['spicy: Who here would argue with a rival?'] });
   bots[0].socket.emit('start');
   await waitFor(() => bots.every(bot => bot.finales.length > 0), 'finale on every socket');
   await waitFor(() => pending.size === 0, 'pending submissions', 15000);
@@ -210,14 +218,17 @@ async function main(): Promise<void> {
   check(speedDone, 'speed demon did not submit in under one second');
   check(duplicate, 'duplicate submit was not exercised');
   for (const bot of bots) for (const finale of bot.finales) assert.deepStrictEqual(finale, bots[0].finales[0], 'finale differs across sockets');
-  // Give asynchronous per-socket secret frames time to arrive, then resume a
-  // player with a deck. If none has one, use the last player and verify the
-  // absence against the independent oracle instead.
+  // Select a real owner from the independent oracle, not from observed client
+  // frames: an accidental leak must not make a non-owner look like an owner.
   await sleep(1500);
-  const resuming = bots.find(bot => bot.decks.length > 0) ?? bots[bots.length - 1];
+  check(oraclePath, 'SMOKE_ORACLE is required: see RUNBOOK.md');
+  const resumeOracle = JSON.parse(await readFile(oraclePath, 'utf8')) as Oracle;
+  check(resumeOracle.roomCode === code && resumeOracle.decks, 'resume oracle is malformed or for a different room');
+  const resuming = bots.find(bot => resumeOracle.decks[bot.id] != null) ?? bots[bots.length - 1];
+  const expectedDeck = resumeOracle.decks[resuming.id];
   const before = resuming.decks.length;
   await reconnect(resuming, 'finale');
-  if (before > 0) await waitFor(() => resuming.decks.length > before, 'post-finale secrets redelivery', 10000);
+  if (expectedDeck) await waitFor(() => resuming.decks.length > before, 'post-finale secrets redelivery', 10000);
   else await sleep(1500);
   for (const finale of resuming.finales) assert.deepStrictEqual(finale, bots[0].finales[0], 'finale changed on resume');
   await verifyOracle();

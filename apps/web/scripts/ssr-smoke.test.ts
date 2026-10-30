@@ -107,8 +107,6 @@ for (const kind of kinds) {
     closesAt: Date.now() + 20_000,
     youSubmitted: false,
     ...(kind === "pair_dare" || kind === "debrief" ? { onlyPlayers: ["p1", "p2"] } : {}),
-    ...(kind === "rating" ? { trait: "chaos", about: "p2" } : {}),
-    ...(kind === "ios" ? { about: "p2" } : {}),
   };
   const html = renderToString(
     React.createElement(PromptScreen, {
@@ -120,6 +118,9 @@ for (const kind of kinds) {
     })
   );
   ok(`RoundPanel renders ${kind}`, html.includes(`Rendered prompt for ${kind}`));
+  if (kind === "rating") {
+    ok("Rating requires an explicit trait and subject", html.includes("Choose a trait") && html.includes("Choose who") && /<button[^>]*disabled[^>]*>Submit rating/.test(html));
+  }
   const touchOk =
     html.includes("min-h-[48px]") ||
     html.includes("min-h-[52px]") ||

@@ -30,6 +30,7 @@ async function main() {
   const { PromptScreen } = await import('../../screens/PromptScreen')
   const { HoldToReveal } = await import('../HoldToReveal')
   const { Flame } = await import('../Flame')
+  const { useRoom } = await import('../../lib/useRoom')
   let failures = 0
   async function check(name: string, fn: (root: ReturnType<typeof createRoot>, host: HTMLElement) => Promise<void> | void) {
     const host = w.document.createElement('div'); w.document.body.appendChild(host)
@@ -84,6 +85,32 @@ async function main() {
     await act(async () => { setter.call(input, 'Guest'); input.dispatchEvent(new w.Event('input', { bubbles: true })) })
     await click(button(host, 'Create room'))
     assert.match(host.textContent ?? '', /Offline/)
+  })
+
+  await check('create and join wait for a slow lazy transport to initialize', async (root) => {
+    let release!: (value: any) => void
+    const calls: string[] = []
+    const factory = () => new Promise<any>((resolve) => { release = resolve })
+    let room!: ReturnType<typeof useRoom>
+    function Harness() { room = useRoom(factory); return null }
+    await render(root, <Harness />)
+    const consent = { age: true, terms: true, revealOptIn: true }
+    let created!: Promise<any>, joined!: Promise<any>
+    await act(async () => {
+      created = room.createRoom('Guest', consent)
+      joined = room.joinRoom('AB2C', 'Guest', consent)
+      await Promise.resolve()
+    })
+    assert.deepEqual(calls, [], 'requests do not fail or run before the transport is ready')
+    const fake = {
+      mode: 'socket', disconnect() {}, resume() {},
+      create: async () => { calls.push('create'); return { ok: false, error: 'synthetic create' } },
+      join: async () => { calls.push('join'); return { ok: false, error: 'synthetic join' } },
+    }
+    await act(async () => { release(fake); await Promise.all([created, joined]) })
+    assert.deepEqual(calls.sort(), ['create', 'join'])
+    assert.equal((await created).error, 'synthetic create')
+    assert.equal((await joined).error, 'synthetic join')
   })
 
   await check('a pick is editable until the player locks it in', async (root, host) => {

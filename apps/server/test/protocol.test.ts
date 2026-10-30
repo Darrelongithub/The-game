@@ -53,6 +53,8 @@ test("validation, host controls, maximum seats, custom prompts and submit idempo
   await expectError(host, () => host.emit("custom_prompts", { lines: ["Drink some water"] }), "INVALID_PROMPTS");
   await expectError(host, () => host.emit("custom_prompts", { lines: ["Who killed a historical figure?"] }), "INVALID_PROMPTS");
   await expectError(host, () => host.emit("custom_prompts", { lines: ["Who in this room likes a minor?"] }), "INVALID_PROMPTS");
+  await expectError(host, () => host.emit("custom_prompts", { lines: ["Who here would send nudes?"] }), "INVALID_PROMPTS");
+  await expectError(host, () => host.emit("custom_prompts", { lines: ["Who here would play two truths and a lie?"] }), "INVALID_PROMPTS");
   await expectError(host, () => host.emit("custom_prompts", { lines: ["Who here knows {P12}?"] }), "INVALID_PROMPTS");
   await expectError(host, () => host.emit("custom_prompts", { lines: ["Who here?\nWho else?"] }), "INVALID_PROMPTS");
   await expectError(host, () => host.emit("custom_prompts", { lines: Array(11).fill("Who here?") }), "INVALID_PROMPTS");

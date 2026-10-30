@@ -13,13 +13,16 @@
     "selfcheck": "npx -y tsx scripts/selfcheck.ts",
     "smoke": "npx tsx scripts/bots.ts",
     "typecheck": "node scripts/typecheck.mjs",
-    "smoke:oracle": "node scripts/smoke-with-oracle.mjs"
+    "smoke:oracle": "node scripts/smoke-with-oracle.mjs",
+    "smoke:verified": "tsx scripts/verified-smoke.ts",
+    "test:components": "tsx --tsconfig apps/web/scripts/tsconfig.test.json scripts/test-components.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "socket.io-client": "^4.8.1",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "jsdom": "^26.1.0"
   },
   "overrides": {
     "next": {

@@ -4,63 +4,13 @@
 // and inside jsdom (guarded + try/catch) and all confetti honors
 // prefers-reduced-motion (spec §11.9 / acceptance: reduced-motion kills confetti).
 'use client'
-import { useEffect, useState } from 'react'
 import confetti from 'canvas-confetti'
+import { prefersReducedMotion } from './deviceFeedback'
+export { prefersReducedMotion, usePrefersReducedMotion, haptic } from './deviceFeedback'
 
 const LIME = '#efb4ff'
 const PURPLE = '#8b2fe0'
 const WHITE = '#f5f3ff'
-
-/** Synchronous reduced-motion probe (SSR- and jsdom-safe). */
-export function prefersReducedMotion(): boolean {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
-  try {
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  } catch {
-    return false
-  }
-}
-
-/** React hook form of prefersReducedMotion — tracks changes live. */
-export function usePrefersReducedMotion(): boolean {
-  // Match the server's first render; the effect applies the browser setting
-  // immediately after hydration. CSS also suppresses motion before that.
-  const [reduced, setReduced] = useState(false)
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
-    let mq: MediaQueryList
-    try {
-      mq = window.matchMedia('(prefers-reduced-motion: reduce)')
-    } catch {
-      return
-    }
-    const onChange = () => setReduced(mq.matches)
-    onChange()
-    if (typeof mq.addEventListener === 'function') {
-      mq.addEventListener('change', onChange)
-      return () => mq.removeEventListener('change', onChange)
-    }
-    // Older Safari
-    mq.addListener(onChange)
-    return () => mq.removeListener(onChange)
-  }, [])
-
-  return reduced
-}
-
-/**
- * Feature-detected haptics (spec §11.5 — iOS Safari lacks navigator.vibrate;
- * failures are swallowed silently).
- */
-export function haptic(pattern?: number | number[]): void {
-  if (typeof navigator === 'undefined' || !('vibrate' in navigator)) return
-  try {
-    navigator.vibrate(pattern ?? 12)
-  } catch {
-    /* iOS Safari and friends — fine */
-  }
-}
 
 /** Lime/purple confetti burst for land beats. No-op under reduced motion. */
 export function fireConfettiBurst(opts?: { particleCount?: number; spread?: number; y?: number }): void {
