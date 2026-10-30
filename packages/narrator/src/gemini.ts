@@ -1,14 +1,11 @@
 // packages/narrator/src/gemini.ts
-// The narrator's own thin fetch helper — narration is Gemini's lane (spec §6).
-//
-// ONE call per night, ONCE, on `PROVIDERS.gemini.reveal` (higher tier) with
-// SAFETY_OFF attached so it can analyse spicy text without refusing.
-// Grok is never used here: generation is Grok's lane, narration is Gemini's.
+// Legacy Gemini transport helper. Application finale narration is template-backed;
+// production Gemini calls are restricted to tagging/debrief analysis in packages/prompts.
 //
 // Everything is injectable (fetch, timeout, base URL) so the whole package can
 // be tested against a mocked fetch with zero real network calls.
 
-import { PROVIDERS, SAFETY_OFF } from "../../shared/src/contracts.ts";
+import { resolveGeminiModel, SAFETY_OFF } from "../../shared/src/contracts.ts";
 
 export const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 export const DEFAULT_TIMEOUT_MS = 10_000;
@@ -72,7 +69,7 @@ export async function callGemini(request: GeminiRequest): Promise<GeminiResult> 
     apiKey,
     system,
     user,
-    model = PROVIDERS.gemini.reveal,
+    model = resolveGeminiModel(process.env.GEMINI_MODEL),
     temperature = 0.85,
     maxOutputTokens = 4096,
     timeoutMs = DEFAULT_TIMEOUT_MS,
