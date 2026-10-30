@@ -55,6 +55,7 @@ export interface GameOptions {
 }
 const HOUR = 60 * 60 * 1000;
 const metadataFile = (file: string): string => file.replace(/\.jsonl$/u, ".meta.json");
+const displayChannel = (code: string): string => `display:${code}`;
 const PAIR_KEY = (a: string, b: string): string => [a, b].sort().join("\u0000");
 const secret = (): string => randomBytes(32).toString("base64url");
 const safeEqual = (a: string, b: string): boolean => {
@@ -234,6 +235,15 @@ export class RoomManager {
       players: room.players.map(({ id, alias, connected, isBot }) => ({ id, alias, connected, isBot })),
       round: room.round ? this.roundView(room.round, playerId) : null, seq: room.seq };
   }
+  private displayRoundView(round: LiveRound): RoundView {
+    return { roundId: round.id, index: round.index, phase: round.phase, kind: round.kind,
+      promptText: round.text, closesAt: round.closesAt, youSubmitted: false };
+  }
+  private displayView(room: Room): RoomView {
+    const round = room.round ? this.displayRoundView(room.round) : null;
+    return { code: room.code, phase: room.phase, hostId: room.hostId,
+      players: room.players.map(({ id, alias, connected, isBot }) => ({ id, alias, connected, isBot })), round, seq: room.seq };
+  }
   private roundView(round: LiveRound, playerId: string): RoundView {
     return { roundId: round.id, index: round.index, phase: round.phase, kind: round.kind, promptText: round.text,
       closesAt: round.closesAt, youSubmitted: round.responses.has(playerId), ...(round.onlyPlayers ? { onlyPlayers: [...round.onlyPlayers] } : {}), ...(round.targets?.has(playerId) ? { about: round.targets.get(playerId) } : {}), ...(round.kind === "rating" && round.trait ? { trait: round.trait } : {}), ...(round.performer ? { performer: round.performer } : {}), submitted: [...round.responses.keys()] };
@@ -244,7 +254,10 @@ export class RoomManager {
       if (socket) fn(socket, p);
     }
   }
-  private states(room: Room): void { this.eachSocket(room, (s, p) => s.emit("state", this.view(room, p.id))); }
+  private states(room: Room): void {
+    this.eachSocket(room, (s, p) => s.emit("state", this.view(room, p.id)));
+    this.io.to(displayChannel(room.code)).emit("state", this.displayView(room));
+  }
   private changed(room: Room): void { room.seq++; this.states(room); }
   private replay(room: Room, socket: GameSocket, player: Player): void {
     if (room.round) socket.emit("round", this.roundView(room.round, player.id));
@@ -255,6 +268,12 @@ export class RoomManager {
       const deck = room.decks.get(player.id);
       if (deck) socket.emit("secrets", deck); // exactly this authenticated socket
     }
+  }
+  private displayReplay(room: Room, socket: GameSocket): void {
+    if (room.round) socket.emit("round", this.displayRoundView(room.round));
+    if (room.reveal) socket.emit("reveal", { ...room.reveal.value, holdMs: Math.max(0, room.reveal.endsAt - this.now()) });
+    if (room.interlude) socket.emit("interlude", { ...room.interlude.value, holdMs: Math.max(0, room.interlude.endsAt - this.now()) });
+    if (room.finale) socket.emit("finale", room.finale);
   }
   private bind(socket: GameSocket): void {
     socket.on("create", (input, reply) => {
@@ -275,9 +294,18 @@ export class RoomManager {
     });
     socket.on("join", (input, reply) => {
       const ack: (r: JoinReply) => void = typeof reply === "function" ? reply : () => {};
-      if (!input || !isRoomCode(input.roomCode) || !validAlias(input.alias) || !validConsent(input.consent)) return ack({ ok: false, error: "Invalid room code, alias, or consent." });
+      if (!input || !isRoomCode(input.roomCode)) return ack({ ok: false, error: "Invalid room code." });
+      const displayRole = input.role === "display";
+      if (!displayRole && (!validAlias(input.alias) || !validConsent(input.consent))) return ack({ ok: false, error: "Invalid alias or consent." });
       const room = this.rooms.get(input.roomCode);
       if (!room || room.stage === "deleted") return ack({ ok: false, error: "Room not found." });
+      if (displayRole) {
+        if (socket.data.roomCode) return ack({ ok: false, error: "Already joined a room." });
+        socket.data = { roomCode: room.code }; void socket.join(displayChannel(room.code));
+        ack({ ok: true, state: this.displayView(room) });
+        this.displayReplay(room, socket);
+        return;
+      }
       if (socket.data.playerId && (socket.data.roomCode !== room.code || socket.data.playerId !== input.resume?.playerId)) return ack({ ok: false, error: "Already joined a room." });
       let player: Player;
       if (input.resume) {
@@ -471,6 +499,7 @@ export class RoomManager {
     }
     room.round = round; room.usedIds.add(definition.prompt.id); this.changed(room);
     this.eachSocket(room, (socket, player) => socket.emit("round", this.roundView(round, player.id)));
+    this.io.to(displayChannel(room.code)).emit("round", this.displayRoundView(round));
     this.schedule(room, round.closesAt - startedAt + (this.options.graceMs ?? GRACE_MS), () => this.finishRound(room));
     for (const player of room.players) if (player.isBot && (!round.onlyPlayers || round.onlyPlayers.includes(player.id))) this.scheduleBot(room, player, round);
     this.maybeComplete(room);
@@ -567,6 +596,7 @@ export class RoomManager {
     const reveal: RevealView = { roundId: round.id, summary: round.kind === "debrief" ? "Their answers are private." : round.kind === "shout" ? "The room has spoken." : round.kind === "minigame" ? "Tap-war leaderboard" : "Round complete.", ...(items.length ? { items } : {}), holdMs };
     room.reveal = { value: reveal, endsAt: this.now() + holdMs }; this.changed(room);
     this.io.to(room.code).emit("reveal", reveal);
+    this.io.to(displayChannel(room.code)).emit("reveal", reveal);
     this.schedule(room, holdMs, () => this.afterReveal(room));
   }
   private afterReveal(room: Room): void {
@@ -584,7 +614,7 @@ export class RoomManager {
     const view: InterludeView = { headline: cooled ? "Cooling things down" : next === "finale" ? "The room has spoken" : `Next: ${next}`, sub: cooled ? "The room chose a gentler level." : "Take a breath before the next chapter.", ...(teaser ? { teaser } : {}), holdMs };
     room.interlude = { value: view, endsAt: this.now() + holdMs };
     // Store the transition independently of the label exposed to clients.
-    this.transitions.set(room.id, next); this.changed(room); this.io.to(room.code).emit("interlude", view);
+    this.transitions.set(room.id, next); this.changed(room); this.io.to(room.code).emit("interlude", view); this.io.to(displayChannel(room.code)).emit("interlude", view);
     this.schedule(room, holdMs, () => this.afterInterlude(room));
   }
   private readonly transitions = new Map<string, HeatPhase | "debrief" | "finale">();
@@ -722,6 +752,7 @@ export class RoomManager {
     privateFacts.length = 0;
     room.finale = { slides, summary }; room.stage = "finale"; this.changed(room);
     this.io.to(room.code).emit("finale", room.finale); // public, identical on every socket
+    this.io.to(displayChannel(room.code)).emit("finale", room.finale);
     this.eachSocket(room, (socket, player) => { const deck = room.decks.get(player.id); if (deck) socket.emit("secrets", deck); });
   }
   private deleteRoom(room: Room): boolean {
@@ -729,6 +760,7 @@ export class RoomManager {
     try { unlinkSync(metadataFile(room.file)); } catch { /* legacy room without metadata */ }
     room.stage = "deleted"; room.phase = "closed"; this.transitions.delete(room.id); this.rooms.delete(room.code);
     this.io.to(room.code).emit("deleted");
+    this.io.to(displayChannel(room.code)).emit("deleted");
     this.eachSocket(room, (socket) => { socket.data = {}; void socket.leave(room.code); });
     this.clearRoomMemory(room);
     return true;

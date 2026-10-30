@@ -31,7 +31,7 @@ only.
   Server authoritative; rounds auto-advance when all required players submit or
   timer + `GRACE_MS` expires. `add_bot` fills a seat with a server bot (alias
   "🤖 Bot N") so the host can test solo.
-- Join = alias (2–14 chars) + profile (age 18+, relationship context, dating history, private crush opt-in, tonight intent) + consent (terms, reveal opt-in). Display-role sockets are broadcast-only.
+- Join = alias (2–14 chars) + profile (age 18+, relationship context, dating history, private crush opt-in, tonight intent) + consent (terms, reveal opt-in). Display-role sockets are broadcast-only: they occupy no player seat, require no player profile/consent, receive sanitized public state/round/reveal/interlude/finale beats, cannot control the room, and never receive private decks.
 - Reconnect: session secret in sessionStorage; `visibilitychange` → re-join →
   full `RoomView` snapshot + seq. No diff replay.
 

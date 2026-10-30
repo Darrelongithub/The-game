@@ -51,6 +51,32 @@ test("LAN banner includes every non-loopback IPv4 URL and a QR code", () => {
   assert.match(text, /Scan to join/); assert.ok(output.length > 4, "QR code was rendered");
 });
 
+test("display-role sockets get only public stage and finale events", { timeout: 12000 }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "reveal-display-"));
+  const server = createGameServer({ dataDir: dir, botDelayMs: [1, 2], revealHoldMs: 1, interludeHoldMs: 1, roundTimers: { pick: 1000, text: 1000, shout: 1000, rating: 1000, ios: 1000, minigame: 1000, dare: 1000, pair_dare: 1000, debrief: 1000 }, graceMs: 10 });
+  const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port), display = await socketFor(port);
+  t.after(async () => { host.disconnect(); display.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
+  const profile = { age: 30, relationship: "single" as const, partnersToDate: 1, longestMonths: 6, crushingHere: false, tonight: "vibes" as const };
+  const made = await new Promise<any>(resolve => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile }, resolve));
+  const joined = await new Promise<any>(resolve => display.emit("join", { roomCode: made.code, alias: "", consent: { age: false, terms: false, revealOptIn: false }, role: "display" }, resolve));
+  assert.equal(joined.ok, true); assert.equal(joined.you, undefined); assert.equal(joined.secret, undefined);
+  assert.equal(joined.state.phase, "lobby");
+  for (let i = 0; i < 3; i++) host.emit("add_bot");
+  host.on("round", () => host.emit("skip_round"));
+  host.on("interlude", () => host.emit("skip_round"));
+  const roundEvent = event<RoundView>(display, "round"), finaleEvent = event(display, "finale");
+  let privateDecks = 0; display.on("secrets", () => privateDecks++);
+  const displayError = event<{ code: string }>(display, "error"); display.emit("start");
+  assert.equal((await limit(displayError)).code, "NOT_IN_ROOM", "display role cannot control the game");
+  host.emit("start");
+  const round = await limit(roundEvent);
+  assert.equal(round.kind, "pick");
+  assert.equal(round.about, undefined); assert.equal(round.trait, undefined); assert.equal(round.performer, undefined); assert.equal(round.onlyPlayers, undefined);
+  assert.ok(await limit(finaleEvent, 10000));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(privateDecks, 0, "display role never receives per-player secret decks");
+});
+
 test("persisted JSONL replays to the same results after two server restarts", { timeout: 15000 }, async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "reveal-replay-"));
   const outcomes: unknown[] = [];

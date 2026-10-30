@@ -66,6 +66,7 @@ export function LobbyScreen({
           <p className="mt-3 text-sm text-white/50">
             Everyone opens this same site and types the code. No install.
           </p>
+          <a className="mt-3 inline-flex min-h-12 items-center rounded-xl border border-lime-accent/40 px-4 text-sm text-lime-accent" href={`/display?code=${code ?? view.code}`} target="_blank" rel="noopener noreferrer">Open public big-screen display</a>
         </motion.div>
 
         {/* players */}
