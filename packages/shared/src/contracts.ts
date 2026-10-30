@@ -309,10 +309,9 @@ export const DARE_ROUNDS = 2;         // solo dares before the pair dare
 // TWO INDEPENDENT LANES — deterministic code is primary everywhere (bank
 // prompts, Jaccard similarity, lexicon tags, template finale); providers only
 // augment. Each lane checks only its own key and degrades to code silently:
-//   Grok   (XAI_API_KEY)    → unhinged prompt generation ONLY.
-//   Gemini (GEMINI_API_KEY) → data analysis + finale narration (higher tier).
-// Gemini never generates game prompts (it soft-refuses spicy); Grok never
-// analyzes or narrates. Neither key → full game, zero internet.
+//   Grok   (XAI_API_KEY)    → prompt generation + one validated reveal polish call.
+//   Gemini (GEMINI_API_KEY) → tagging/debrief analysis only (never reveals).
+// Gemini never generates prompts or narrates. Neither key → full game, zero internet.
 export const PROVIDERS = {
     grok: {
         // OpenAI-compatible REST: POST {baseUrl}/chat/completions with Bearer XAI_API_KEY.

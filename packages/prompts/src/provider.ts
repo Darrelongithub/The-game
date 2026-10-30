@@ -1,7 +1,7 @@
 // packages/prompts/src/provider.ts
 // TWO INDEPENDENT LANES. Code carries the night; providers only garnish.
 //
-//   Grok   (XAI_API_KEY)    → unhinged prompt generation ONLY.
+//   Grok   (XAI_API_KEY)    → unhinged generation + one validated reveal call.
 //   Gemini (GEMINI_API_KEY) → analysis (tags, debrief similarity) + narration.
 //
 // Rules this file enforces:
@@ -15,6 +15,7 @@
 import {
   PROVIDERS,
   SAFETY_OFF,
+  resolveGeminiModel,
 } from "../../shared/src/contracts.ts";
 import { CallGuard, callGuard, type CallPurpose } from "./guard.ts";
 
@@ -29,7 +30,8 @@ export type ProviderFailReason =
   | "http"
   | "network"
   | "empty"
-  | "parse";
+  | "parse"
+  | "disabled";
 
 export interface LaneResult {
   ok: boolean;
@@ -72,7 +74,6 @@ export interface ProviderOptions {
   grokModel?: string;
   geminiTagModel?: string;
   geminiAnalyzeModel?: string;
-  geminiRevealModel?: string;
   timeoutMs?: number;
   env?: Record<string, string | undefined>;
 }
@@ -242,7 +243,6 @@ export class Provider {
   private readonly grokModel: string;
   private readonly geminiTagModel: string;
   private readonly geminiAnalyzeModel: string;
-  private readonly geminiRevealModel: string;
   private readonly timeoutMs: number;
 
   constructor(opts: ProviderOptions = {}) {
@@ -252,9 +252,8 @@ export class Provider {
     // The model id in contracts.ts is the contract default; XAI_MODEL lets the
     // host override it at game time without a contract change (ids drift).
     this.grokModel = opts.grokModel ?? keyOf(env.XAI_MODEL) ?? PROVIDERS.grok.generate;
-    this.geminiTagModel = opts.geminiTagModel ?? PROVIDERS.gemini.tag;
-    this.geminiAnalyzeModel = opts.geminiAnalyzeModel ?? PROVIDERS.gemini.analyze;
-    this.geminiRevealModel = opts.geminiRevealModel ?? PROVIDERS.gemini.reveal;
+    this.geminiTagModel = opts.geminiTagModel ?? resolveGeminiModel(keyOf(env.GEMINI_MODEL) ?? undefined);
+    this.geminiAnalyzeModel = opts.geminiAnalyzeModel ?? resolveGeminiModel(keyOf(env.GEMINI_MODEL) ?? undefined);
     this.grokBaseUrl = (opts.grokBaseUrl ?? PROVIDERS.grok.baseUrl).replace(/\/+$/, "");
     this.geminiBaseUrl = (opts.geminiBaseUrl ?? "https://generativelanguage.googleapis.com/v1beta").replace(/\/+$/, "");
     this.guard = opts.guard ?? callGuard;
@@ -269,12 +268,12 @@ export class Provider {
   }
 
   // ---------- lane probes ----------
-  /** Grok lane: unhinged generation ONLY. */
+  /** Grok generation lane; reveal purpose is reserved for one validated narration request. */
   canGenerate(): boolean {
     return this.xaiKey !== null && this.fetchImpl !== null;
   }
 
-  /** Gemini lane: analysis + narration support. */
+  /** Gemini lane: tagging and debrief analysis only. */
   canAnalyze(): boolean {
     return this.geminiKey !== null && this.fetchImpl !== null;
   }
@@ -285,8 +284,8 @@ export class Provider {
 
   modelFor(lane: Lane, purpose: CallPurpose = "generate"): string {
     if (lane === "grok") return this.grokModel;
+    if (purpose === "reveal") throw new Error("Gemini finale narration is disabled; use templates/Grok.");
     if (purpose === "tag") return this.geminiTagModel;
-    if (purpose === "reveal") return this.geminiRevealModel;
     return this.geminiAnalyzeModel;
   }
 
@@ -339,6 +338,7 @@ export class Provider {
   // ---------- Gemini lane ----------
   async gemini(req: GeminiRequest): Promise<LaneResult> {
     const lane: Lane = "gemini";
+    if (req.purpose === "reveal") return { ok: false, lane, reason: "disabled", requests: 0 };
     if (this.geminiKey === null || this.fetchImpl === null) return { ok: false, lane, reason: "no-key", requests: 0 };
     if (!this.guard.tryConsume(req.room, req.purpose)) return { ok: false, lane, reason: "budget", requests: 0 };
 

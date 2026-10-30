@@ -1,16 +1,8 @@
 // packages/narrator/src/write.ts
-// writeFinale — ONE provider call for everything (spec §6 batching).
-//
-// Sends the pseudonymized claims + digest material + skeleton beats + the
-// per-player secret cards + the tone spec to `PROVIDERS.gemini.reveal` once,
-// validates every returned string, and merges it over the engine copy.
-//
-// Degrades silently and completely:
-//   no key                → the engine skeleton + the engine decks, untouched
-//   timeout / 429 / junk  → same
-//   one bad slide / fact  → that slide/fact keeps the engine line
-// Never throws, never returns empty text, never lets a real alias leave the
-// server (the digest is pseudonymized before it is serialized).
+// writeFinale — deterministic template output, no provider calls. Gemini is
+// analysis-only; the server keeps public slides and private secret decks separate.
+// The engine owns all claims, numbers, evidence, and card facts; this module
+// validates/fills copy from that source and never sends secret data to a provider.
 
 import {
   SECRET_DECK_MAX,
@@ -23,7 +15,7 @@ import {
 } from "../../shared/src/contracts.ts";
 import { conservativeSource, normalizeTitle } from "./slides.ts";
 import { buildSkeleton, registerSource, sourceOf } from "./slides.ts";
-import { callGemini, DEFAULT_TIMEOUT_MS, parseJsonLoose, readGeminiKey } from "./gemini.ts";
+
 import {
   derivePseudonyms,
   pseudonymForAlias,
@@ -44,13 +36,16 @@ import {
 } from "./validate.ts";
 
 export interface WriteOptions {
-  /** Defaults to GEMINI_API_KEY from `env` / process.env. */
+  /** Optional single Grok reveal call; validated copy is merged over deterministic engine text. */
+  grok?: (payload: Record<string, unknown>) => Promise<unknown | null>;
+  /** Legacy-compatible option; ignored because Gemini is analysis-only. */
   apiKey?: string;
-  /** Injectable for tests — never hit the network in a test. */
+  /** Legacy-compatible option; finale narration performs no network requests. */
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   roster?: RosterInput;
   env?: Record<string, string | undefined>;
+  /** Legacy-compatible option; ignored. */
   model?: string;
 }
 
@@ -79,7 +74,7 @@ const TONE =
   "roast-warm, dry, never mean-spirited, never clinical. The room is laughing WITH each other. " +
   "Secret cards are KIND — they open on one phone, alone, at midnight.";
 
-const SYSTEM_PROMPT = `You are the narrator of "The Reveal Game": a private, 18+ friends' party game. You write the end-of-night reveal — a Wrapped-style story that plays on every phone at 2am — plus private secret cards that open on ONE phone only.
+export const SYSTEM_PROMPT = `You are the narrator of "The Reveal Game": a private, 18+ friends' party game. You write the end-of-night reveal — a Wrapped-style story that plays on every phone at 2am — plus private secret cards that open on ONE phone only.
 
 VOICE
 - Roast-warm and dry. Funny because it is true, never because it is cruel.
@@ -96,7 +91,7 @@ HARD RULES — a validator checks every line and silently replaces anything that
 6. Adults only, nobody outside this room, no real public figures.
 
 OUTPUT — STRICT JSON only, no prose, no code fences:
-{"slides":[{"i":0,"title":"...","body":"..."}],"cards":[{"i":0,"title":"...","facts":["..."]}]}
+{"slides":[{"i":0,"title":"...","body":"..."}],"secretCards":[{"i":0,"title":"...","facts":["..."]}]}
 - One entry per slide and per card, keyed by the given "i".
 - Beats stay exactly where they are; you only rewrite title/body (slides) and title/facts (cards).
 - Shorter is funnier. If you have nothing better than the engine line, return it unchanged.`;
@@ -185,7 +180,7 @@ interface FlatCard {
   card: SecretCard;
 }
 
-function flattenCards(decks: Map<PlayerId, SecretCard[]>): FlatCard[] {
+export function flattenCards(decks: Map<PlayerId, SecretCard[]>): FlatCard[] {
   const flat: FlatCard[] = [];
   for (const [playerId, cards] of decks) {
     cards.forEach((card, cardIndex) => flat.push({ playerId, cardIndex, card }));
@@ -236,7 +231,7 @@ function digestForModel(
   };
 }
 
-function buildRequestPayload(
+export function buildRequestPayload(
   slides: readonly FinaleSlide[],
   flatCards: readonly FlatCard[],
   results: Results,
@@ -319,7 +314,7 @@ const keepsVerbatim = (body: string, verbatim: string | undefined): boolean => {
   return normalizeForQuote(body).includes(needle);
 };
 
-function mergeSlides(
+export function mergeSlides(
   slides: FinaleSlide[],
   raw: unknown,
   ps: Pseudonyms,
@@ -359,7 +354,7 @@ function mergeSlides(
   return slides;
 }
 
-function mergeCards(
+export function mergeCards(
   decks: Map<PlayerId, SecretCard[]>,
   flat: readonly FlatCard[],
   raw: unknown,
@@ -453,30 +448,22 @@ export async function writeFinale(
   const baseSlides = normalizeSlides(skeleton, results, ps);
   const baseDecks = normalizeDecks(decks);
 
-  const env = options.env ?? (typeof process !== "undefined" ? process.env : {});
-  const apiKey = options.apiKey ?? readGeminiKey(env);
-  if (!apiKey) return { slides: baseSlides, decks: baseDecks };
-
-  const flatCards = flattenCards(baseDecks);
-  const payload = buildRequestPayload(baseSlides, flatCards, results, digest, ps, roster);
-
-  const call = await callGemini({
-    apiKey,
-    system: SYSTEM_PROMPT,
-    user: JSON.stringify(payload),
-    model: options.model,
-    timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    fetchImpl: options.fetchImpl,
-  });
-  if (!call.ok) return { slides: baseSlides, decks: baseDecks };
-
-  const parsed = parseJsonLoose(call.text);
-  const root = asRecord(parsed);
-  if (!root) return { slides: baseSlides, decks: baseDecks };
-
-  const slides = mergeSlides(baseSlides, root["slides"], ps, roster, results);
-  const mergedDecks = mergeCards(baseDecks, flatCards, root["cards"], ps, roster);
-  return { slides, decks: mergedDecks };
+  // One Grok reveal request may polish public slides and private cards together.
+  // Every returned field is validated against its engine source; on missing key,
+  // provider refusal, timeout, parse failure, or validation failure we keep the
+  // deterministic engine-authored copy. Gemini is never used for reveals.
+  if (options.grok) {
+    try {
+      const payload = buildRequestPayload(baseSlides, flattenCards(baseDecks), results, digest, ps, roster);
+      const raw = await options.grok(payload);
+      const record = asRecord(raw);
+      if (record) {
+        mergeSlides(baseSlides, record["slides"], ps, roster, results);
+        mergeCards(baseDecks, flattenCards(baseDecks), record["secretCards"], ps, roster);
+      }
+    } catch { /* deterministic engine copy remains valid */ }
+  }
+  return { slides: baseSlides, decks: baseDecks };
 }
 
 /**

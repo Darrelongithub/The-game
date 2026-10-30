@@ -1,7 +1,7 @@
 import { DEFAULT_WEIGHTS, type LogRecord } from "../../../packages/shared/src/contracts.ts";
 import { buildNightDigest, buildSecrets, computeResults, computeSignals, logRecordId } from "../../../packages/engine/src/index.ts";
 import { PromptProvider as FullPromptProvider, Provider, selectFromBank, tagText } from "../../../packages/prompts/src/index.ts";
-import { buildSkeleton, writeFinale } from "../../../packages/narrator/src/index.ts";
+import { buildSkeleton, SYSTEM_PROMPT, writeFinale } from "../../../packages/narrator/src/index.ts";
 import type { GameServices, PromptProvider } from "./services.ts";
 
 /** Production adapter. The room manager supplies pseudonymized inputs and keeps
@@ -47,12 +47,22 @@ export function createIntegratedServices(
     buildSecrets,
     buildSkeleton(results, digest, meta) { return buildSkeleton(results, digest, meta?.players); },
     async writeFinale(slides, decks, results, digest, meta) {
-      // Narrator's HTTP lane is independent from Provider, so reserve its slot
-      // in the same per-room ledger before allowing a Gemini request.
-      const key = process.env.GEMINI_API_KEY?.trim();
-      const permitted = Boolean(key) && provider.guard.tryConsume(results.roomId, "reveal");
       return writeFinale(slides, decks, results, digest, {
-        apiKey: permitted ? key : "", roster: meta?.players,
+        roster: meta?.players,
+        grok: async (payload) => {
+          const response = await provider.grokJson({
+            room: meta?.roomId ?? "unassigned",
+            purpose: "reveal",
+            messages: [
+              { role: "system", content: SYSTEM_PROMPT },
+              { role: "user", content: JSON.stringify(payload) },
+            ],
+            temperature: 0.35,
+            maxTokens: 4096,
+            json: true,
+          });
+          return response.result.ok ? response.value : null;
+        },
       });
     },
   };

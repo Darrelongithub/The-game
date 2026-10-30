@@ -106,7 +106,7 @@ pair_score(i,j) = weighted mean over measured components only; weights renormali
   `reference/unhinged-tier.md` (u1–u27) behind `SPICY_TIER=true`. The bank makes
   a full night playable with zero API calls.
 - **Two independent lanes:**
-  - **Grok (xAI) = unhinged generation ONLY** (`XAI_API_KEY`).
+  - **Grok (xAI) = unhinged generation plus one validated reveal polish call** (`XAI_API_KEY`).
     OpenAI-compatible REST `POST https://api.x.ai/v1/chat/completions`,
     Bearer key, model `grok-4-1-fast` ($0.20/$0.50 per 1M, verified Oct
     2026 — verify the id at docs.x.ai/docs/models). Grok's envelope ≈
@@ -120,11 +120,11 @@ pair_score(i,j) = weighted mean over measured components only; weights renormali
     generates game prompts (it soft-refuses them).
 - **Lane independence:** each lane checks only its own key and degrades to
   code silently. No XAI key → bank-only generation. No Gemini key → lexicon
-  tags + Jaccard similarity + template finale. Neither → full game, zero
+  tags + Jaccard similarity + template-backed fallback reveal. Neither → full game, zero
   internet needed after install.
 - **Batching (the call budget):** generation = ONE call per phase (~15
   candidates per call, JSON array) in the lobby background — never in the
-  gameplay loop; tag = ONE call; debrief = ONE call; finale narration is template-backed. ≈6 calls worst case, cap 8.
+  gameplay loop; tag = ONE call; debrief = ONE call; reveal narration uses one Grok call for public slides and private cards, validated before use. ≈7 calls worst case, cap 8.
 - **Generation:** the deterministic filter (schema, dedupe vs
   bank+usedIds+within-batch, banned patterns, 20–160 chars, valid
   `{P1}..{P11}` placeholders) picks the best of the batch. Generated

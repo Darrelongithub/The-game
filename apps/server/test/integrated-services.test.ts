@@ -38,6 +38,20 @@ test("production adapter uses the full bank, golden scoring and public narrator 
   prompts.dispose?.();
 });
 
+test("integrated Grok narrator spends exactly one reveal slot on structured pseudonyms", async () => {
+  const fetch = mockFetch(() => grokReply(JSON.stringify({ slides: [], secretCards: [] })));
+  const provider = new Provider({ env: {}, xaiApiKey: "test-only", fetchImpl: fetch.fetchImpl, guard: new CallGuard() });
+  const services = createIntegratedServices(provider);
+  const log = goldenLog1(), meta = meta5("grok-reveal-room"), signals = services.computeSignals(log, meta);
+  const results = services.computeResults(signals, log, meta), digest = services.buildNightDigest(log, meta);
+  const slides = services.buildSkeleton({ ...results, claims: results.claims.filter(c => c.audience === "public") }, digest, meta);
+  const copy = await services.writeFinale(slides, new Map(), results, digest, meta);
+  assert.equal(copy.slides.length, slides.length);
+  assert.equal(fetch.calls.length, 1);
+  assert.equal(provider.guard.snapshot("grok-reveal-room").byPurpose.reveal, 1);
+  assert.deepEqual(fetch.calls[0]!.body["response_format"], { type: "json_object" });
+});
+
 test("five-player hand-verification fixture includes a guarded joker", () => {
   const services = offline(), meta = meta5("room-g1"), log = goldenLog1();
   for (let n = 0; n < 5; n++) {
@@ -82,7 +96,7 @@ test("integrated no-key server completes a game on the production adapters", { t
   const socket = io(`http://127.0.0.1:${port}`, { reconnection: false });
   t.after(async () => { socket.disconnect(); await server.close(); rmSync(dataDir, { recursive: true, force: true }); });
   await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("connect_error", reject); });
-  const created = await socket.timeout(2000).emitWithAck("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true } });
+  const created = await socket.timeout(2000).emitWithAck("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" } });
   assert.equal(created.ok, true);
   for (let i = 0; i < 3; i++) socket.emit("add_bot");
   const seen = new Set<string>();
@@ -96,8 +110,8 @@ test("integrated no-key server completes a game on the production adapters", { t
       case "shout": value = { kind: "shout", word: "chaos" }; break;
       case "text": value = { kind: "text", text: "Someone here made the whole evening memorable." }; break;
       case "debrief": value = { kind: "text", text: "We had a great conversation together tonight." }; break;
-      case "rating": value = { kind: "rating", trait: "warmth", about: "self", value: 7 }; break;
-      case "ios": value = { kind: "ios", about: "p2", value: 5 }; break;
+      case "rating": value = { kind: "rating", trait: round.trait!, about: round.about!, value: 7 }; break;
+      case "ios": value = { kind: "ios", about: round.about!, value: 5 }; break;
       case "minigame": value = { kind: "minigame", score: 20 }; break;
       case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
     }

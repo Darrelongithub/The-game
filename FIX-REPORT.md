@@ -25,7 +25,10 @@
 - **R11 — pick-round density:** Warmup, spicy, and deep now each schedule two pick rounds (six total), while preserving the phase's other formats; `ROUNDS_PER_PHASE` is four. Full-game regression asserts two picks in each heat phase (six total). The focused full-game server test and strict TypeScript check passed.
 - **R12 — LAN interface selection:** Added a deterministic preferred IPv4 selector that prioritizes named Wi-Fi/Ethernet interfaces over virtual bridges, VPNs, and tunnel adapters; the banner QR uses that address while still listing all usable LAN IPv4s. Added selection regression with Wi-Fi, hotspot, and Docker interfaces.
 - **R13:** Deterministic JSONL replay after restart is not implemented.
-- **R14–R17:** Grok finale/secret narration, increased generated prompt share, display role/stage UI, lazy loading/bundle-size target and audit remediation are not implemented. No Android/iPhone real-device pass was performed.
+- **R14 — Grok reveal narration:** Added one guarded Grok reveal call for public slides plus structured private-card copy, with pseudonymized payloads, existing source/number/person/fact validators, deterministic fallback, and no Gemini reveal path. Narrator regression verifies alias scrubbing and safe fallback. Narrator and integrated-service regressions verify pseudonymized request content, exactly one reveal-budget slot, private-card separation, and deterministic fallback.
+- **R15:** Increased generated-prompt share has not been measured or tuned.
+- **R16:** Display-role/stage UI is not implemented.
+- **R17:** Lazy-loading/bundle-size target and audit remediation remain incomplete. No Android/iPhone real-device pass was performed.
 - **Bot/acceptance verification:** Latest full test run passed **190/190 tests**; `npm run smoke:verified` passed the external-socket phase, finale equality, secret ownership/deck-limit, duplicate persistence, active/finale resume, dare-pass, and deletion checks. These do not cover unfinished profiles, performer/pair-dare behavior, display role, or restart replay.
 
 ## Follow-up clarifications R18–R20

@@ -29,7 +29,7 @@ export {
 } from "./slides.ts";
 export type { SkeletonSource } from "./slides.ts";
 
-export { writeFinale, narrateNight } from "./write.ts";
+export { writeFinale, narrateNight, SYSTEM_PROMPT } from "./write.ts";
 export type { WriteOptions, FinaleCopy } from "./write.ts";
 
 export {
