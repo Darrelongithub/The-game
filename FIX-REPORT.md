@@ -281,7 +281,9 @@ now 420s.
 
 ## R1–R20 remediation carry-forward — adapted to current `main`
 
-This section records the R1–R20 branch status (the ROUND 4 report above is historical). The branch has not yet been reconciled with the latest `main`: its newer ready-gate and demo-room changes overlap these files. A local merge attempt exposed conflicts across server, UI, contract, and test code; it was aborted rather than resolving those conflicts by selecting either side wholesale. The PR remains blocked until those features are adapted together and the full suites rerun.
+This section records the R1–R20 branch status (the ROUND 4 report above is historical). **The branch is now reconciled with `main`.** The ROUND 4 ready-gate and demo-room features were adapted together with the R1–R20 remediation instead of taking either side wholesale: the shared contract is the additive union (`profile`/`role`/structured rating intent **plus** `ready`/`demo`/`impersonatedBy`), the server keeps the ready gate and demo seats while still requiring the 18+ profile for an ordinary room, the web entry collects the profile and consents and also offers the demo-room toggle, rating/IOS keeps the server-assigned trait/target with an explicit fallback choice when a round carries none, and narrator reveals stay Grok-only (Gemini is analysis-only).
+
+Re-validated after the merge (Node 22.22.3): `selfcheck` 36/36; engine 40/40; prompts 104/104; narrator 81/81; server 68/68; web typecheck + 39 SSR checks + 56 mock-flow checks + UI/socket/transport/mock/privacy regressions all passing; jsdom component suite 151/151; production build, `bundle:check` (player 145.2 KiB / 150 KiB; display 115.7 KiB / 120 KiB) and `npm audit --omit=dev` (0 vulnerabilities) pass; `smoke:verified`, `smoke:demo` (42 round events, 12 finale slides) and the jsdom export smoke pass against the built server. The real-browser `test:browser` still needs a Chromium executable, and the physical-device/LAN/live-provider matrix remains outstanding (see below).
 
 ### Remediation and regression status
 

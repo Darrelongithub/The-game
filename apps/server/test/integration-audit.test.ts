@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { io, type Socket } from "socket.io-client";
-import type { ClientToServerEvents, FinaleView, LogRecord, ResponseValue, RoomMeta, RoundView, ServerToClientEvents } from "../../../packages/shared/src/contracts.ts";
+import type { ClientToServerEvents, FinaleView, LogRecord, ResponseValue, RoomMeta, RoundView, RoomView, ServerToClientEvents } from "../../../packages/shared/src/contracts.ts";
 import { computeResults, computeSignals, updateHypotheses } from "../../../packages/engine/src/index.ts";
 import { bankForPhase } from "../../../packages/prompts/src/bank/index.ts";
 import { createGameServer } from "../src/server.ts";
@@ -30,6 +30,7 @@ test("production defaults use the full bank and deterministic engine in a comple
   const port = await server.listen(0, "127.0.0.1", false);
   const host: Client = io(`http://127.0.0.1:${port}`, { reconnection: false, autoConnect: false });
   host.on("error", () => {});
+  host.on("state", (view: RoomView) => { if (view.ready) host.emit("ready"); });
   t.after(async () => {
     host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true });
     globalThis.fetch = originalFetch;
@@ -99,6 +100,7 @@ test("host custom prompts use the complete hard-block guard", async (t) => {
   const port = await server.listen(0, "127.0.0.1", false);
   const host: Client = io(`http://127.0.0.1:${port}`, { reconnection: false, autoConnect: false });
   host.on("error", () => {});
+  host.on("state", (view: RoomView) => { if (view.ready) host.emit("ready"); });
   t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const connected = event<void>(host, "connect"); host.connect(); await limit(connected);
   await new Promise((resolve) => host.emit("create", { alias: "Host", consent, profile }, resolve));
@@ -113,6 +115,7 @@ test("custom prompts cannot silently wrap an out-of-roster placeholder onto anot
   const port = await server.listen(0, "127.0.0.1", false);
   const host: Client = io(`http://127.0.0.1:${port}`, { reconnection: false, autoConnect: false });
   host.on("error", () => {});
+  host.on("state", (view: RoomView) => { if (view.ready) host.emit("ready"); });
   t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const connected = event<void>(host, "connect"); host.connect(); await limit(connected);
   await new Promise((resolve) => host.emit("create", { alias: "Host", consent, profile }, resolve));

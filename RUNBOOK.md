@@ -38,6 +38,44 @@ Open the printed URL on the host's phone or computer, create a room, then use
 **add bot** in the lobby three times (the `add_bot` action). Start the game.
 These are server bots; they are separate from the external smoke-test bots.
 
+### Demo room (the whole game on one laptop)
+
+Tick **Demo room** on the Create tab. The room says `demo: true` and the host
+puppets every other seat:
+
+- **Add seat** creates a demo player (auto by default) — the room starts with
+  two seats instead of the usual four.
+- **Auto** seats answer and ready themselves. **Manual** seats wait for you;
+  during a round tap **Answer this round for …** in the **Demo** panel.
+- **Everyone's ready** releases a pending reveal without waiting out the grace.
+- **Night speed** rescales every timer (0.1× is a fast rehearsal, 1× is the
+  real clock). It applies to rounds scheduled after the change.
+
+The engine cannot tell a demo night from a real one: puppet answers are ordinary
+log records plus `impersonatedBy` metadata that nothing scores, so a rehearsal
+produces the same claims and finale as the same answers from real phones. Demo
+controls are refused outside a demo room and by anyone who is not the host.
+
+### Rehearsal smoke test
+
+```sh
+npm run host          # in one terminal
+npm run smoke:demo    # in another: plays a whole night alone at 0.1x speed
+```
+
+`scripts/demo-smoke.ts` creates a real demo room on the running server,
+puppets three seats, walks the entire game, and asserts the ready gate, the
+broadcast-safe finale and that no internal material (hypotheses, the director,
+the impersonation metadata) ever reaches a client.
+
+## Reveals wait for everyone
+
+Every round's reveal is **pending** until each connected player taps **I'm
+ready** — a phone in a pocket or a reconnecting tab never misses the moment.
+The room shows who is still looking up; after `REVEAL_READY_GRACE_MS` (20s) the
+reveal fires anyway so one AFK phone cannot stall the night. The host's **Skip
+round** releases a pending reveal immediately.
+
 ## Remote friends
 
 On Render, Railway or Fly use Node 20+, and configure:

@@ -29,6 +29,7 @@ async function setup(t: TestContext, options: ServerOptions = {}) {
   const connect = async (): Promise<Client> => {
     const client: Client = io(base, { forceNew: true, transports: ["polling", "websocket"], reconnection: false, autoConnect: false });
     clients.push(client); client.on("error", () => {});
+    client.on("state", (view) => { if (view.ready) client.emit("ready"); });
     const ready = event<void>(client, "connect"); client.connect(); await limit(ready); return client;
   };
   return { server, connect, dir, base };
@@ -216,6 +217,46 @@ test("timer honors grace, skip advances, and reconnect restores the personalized
   const reclaimedAnswer: ResponseValue = second.kind === "pick" ? { kind: "pick", target: replies[3]!.you! } : { kind: "shout", word: "vibes" };
   assert.equal((await submit(reclaimed, second.roundId, reclaimedAnswer, "reclaimed")).ok, true);
   assert.ok((await limit(secondReveal)).items?.length, "the second round emitted a reveal after every eligible player answered");
+});
+
+test("a lost rotation acknowledgement is recoverable only on its authenticated socket", async (t) => {
+  const { connect } = await setup(t);
+  const host = await connect(), attacker = await connect();
+  const made = await create(host);
+  const old = { playerId: made.you!, secret: made.secret! };
+  const rotated = await joinRoom(host, made.code!, "Host", old);
+  assert.ok(rotated.ok && rotated.secret && rotated.secret !== old.secret);
+  // Treat the first acknowledgement as lost: the same authenticated socket
+  // retries with the token it still knows and receives the identical result.
+  const retry = await joinRoom(host, made.code!, "Host", old);
+  assert.equal(retry.ok, true); assert.equal(retry.secret, rotated.secret);
+  assert.equal((await joinRoom(attacker, made.code!, "Host", old)).ok, false, "old tokens cannot resume on another socket");
+  const replaced = await joinRoom(attacker, made.code!, "Host", { playerId: made.you!, secret: rotated.secret! });
+  assert.ok(replaced.ok && replaced.secret !== rotated.secret);
+  const third = await connect();
+  assert.equal((await joinRoom(third, made.code!, "Host", { playerId: made.you!, secret: rotated.secret! })).ok, false);
+});
+
+test("a nonce-bound lost rotation acknowledgement survives a new socket without accepting the old token alone", async (t) => {
+  const { connect } = await setup(t);
+  const host = await connect(), first = await connect(), attacker = await connect();
+  const made = await create(host);
+  const nonce = "1a".repeat(16);
+  const attempt = { playerId: made.you!, secret: `rr1.${made.secret!}.${nonce}` };
+  // Drop the acknowledgement entirely, then disconnect the authenticated
+  // socket. The client knows only its original secret and its private nonce.
+  const accepted = event(first, "state");
+  first.emit("join", { roomCode: made.code!, alias: "Host", consent, resume: attempt }, undefined as any);
+  await limit(accepted);
+  assert.equal((await joinRoom(attacker, made.code!, "Host", { playerId: made.you!, secret: made.secret! })).ok, false, "the old bearer token alone stays invalid");
+  assert.equal((await joinRoom(attacker, made.code!, "Host", { playerId: made.you!, secret: `rr1.${made.secret!}.${"2b".repeat(16)}` })).ok, false, "a guessed nonce cannot replay the request");
+  first.disconnect();
+  const retrySocket = await connect();
+  const retry = await joinRoom(retrySocket, made.code!, "Host", attempt);
+  assert.ok(retry.ok && retry.secret && retry.secret !== made.secret, "the exact pending request recovers the rotation");
+  const next = await joinRoom(retrySocket, made.code!, "Host", { playerId: made.you!, secret: `rr1.${retry.secret}.${"3c".repeat(16)}` });
+  assert.ok(next.ok && next.secret !== retry.secret);
+  assert.equal((await joinRoom(attacker, made.code!, "Host", attempt)).ok, false, "a later rotation retires the old nonce");
 });
 
 test("a lost rotation acknowledgement is recoverable only on its authenticated socket", async (t) => {

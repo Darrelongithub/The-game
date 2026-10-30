@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Server, Socket } from "socket.io";
 import {
   DARE_ROUNDS, GRACE_MS, HEAT_ORDER, IDLE_TTL_HOURS, INTERLUDE_HOLD_MS,
-  MAX_PLAYERS, MIN_PLAYERS, RETENTION_HOURS, REVEAL_HOLD_MS, ROOM_CODE_ALPHABET,
+  MAX_PLAYERS, MIN_PLAYERS, RETENTION_HOURS, REVEAL_HOLD_MS, REVEAL_READY_GRACE_MS, ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH, ROUNDS_PER_PHASE, ROUND_TIMERS_MS, SECRET_DECK_MAX, SPOTLIGHT_ANSWER_MAX,
   SPOTLIGHT_REVEAL_MS, TRAITS, VERDICT_DISCUSS_MS, VERDICT_REVEAL_MS, pseudonym,
   type ClientToServerEvents, type Consent, type FinaleSlide, type FinaleView, type InterludeView,
@@ -29,13 +29,17 @@ type SocketData = { roomCode?: string; playerId?: string; display?: boolean };
 const displayChannel = (code: string): string => `display:${code}`;
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 type GameIO = Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
-type Stage = "lobby" | "round" | "reveal" | "interlude" | "finale-building" | "finale" | "deleted";
+type Stage = "lobby" | "round" | "ready" | "reveal" | "interlude" | "finale-building" | "finale" | "deleted";
 interface Player {
   id: string; alias: string; consent: Consent; profile: ProfileAnswers; secret: string; isBot: boolean; connected: boolean; socketId?: string;
   /** A pending versioned resume is bound to a client-generated secret nonce. */
   resumeRetry?: { secret: string; socketId: string; nonce?: string };
   /** ROUND 4: bound account (never emitted). */
   accountId?: string;
+  /** ROUND 4 demo room: a seat the host puppets from their own laptop. It has
+   *  no socket, never appears in `secrets`, and answers through `demo_answer_as`
+   *  (manual) or the ordinary scheduler (auto). */
+  puppet?: { mode: "auto" | "manual" };
 }
 interface Definition {
   prompt: Prompt; phase: Phase; kind: RoundKind; text: string; onlyPlayers?: string[]; performer?: string;
@@ -90,6 +94,15 @@ interface Room {
   plan?: PhasePlan;
   /** hypothesis the round in flight was built to test (cleared each round) */
   testedHypothesisId?: string;
+  /**
+   * ROUND 4 — THE READY GATE. A closed round's reveal is PENDING here until
+   * every connected player has pressed ready (or the grace expires), so a
+   * phone in a pocket never costs anyone the moment. `ready` only ever
+   * contains player ids — nothing private.
+   */
+  pendingReveal?: RevealView; ready: Set<string>; readyClosesAt?: number;
+  /** ROUND 4 demo room: the host plays every seat from one laptop. */
+  demo: boolean; demoSpeed: number;
   timer?: ReturnType<typeof setTimeout>; botTimers: Set<ReturnType<typeof setTimeout>>;
 }
 export interface GameOptions {
@@ -104,6 +117,8 @@ export interface GameOptions {
   verdictDiscussMs?: number;
   graceMs?: number;
   revealHoldMs?: number;
+  /** Testing seam for the ready gate (production: REVEAL_READY_GRACE_MS). */
+  readyGraceMs?: number;
   interludeHoldMs?: number;
   botDelayMs?: [number, number];
   writerTimeoutMs?: number;
@@ -222,6 +237,7 @@ export class RoomManager {
     room.players.forEach((p) => { p.secret = ""; p.alias = ""; p.resumeRetry = undefined; }); room.players.length = 0;
     room.round = null; room.queue = []; room.custom = []; room.pair = undefined; room.reveal = undefined; room.interlude = undefined; room.finale = undefined;
     room.currentHeat = undefined; room.pendingHeatDown = undefined; room.spotlighted.clear(); room.lastSubject = undefined;
+    room.ready.clear(); room.pendingReveal = undefined; room.readyClosesAt = undefined;
     room.hypotheses.length = 0; room.priors.length = 0; room.director = emptyDirectorState(); room.plan = undefined; room.testedHypothesisId = undefined;
     room.provider = new BankPromptProvider();
   }
@@ -253,7 +269,8 @@ export class RoomManager {
         const provider = this.services.createPromptProvider({ roomId: state.id });
         const room: Room = { id: state.id, code: state.code, createdAt, lastActivity, file, hostId: state.hostId, players,
           phase: "lobby", stage: "lobby", seq: records.length + 1, nextPlayer: Math.max(Number(state.nextPlayer) || 2, players.length + 1), roundIndex: records.reduce((max, r) => Math.max(max, Number(r.roundId.match(/(\d+)$/u)?.[1] ?? 0)), 0), dareCount: records.filter(r => r.roundKind === "dare").length,
-          provider, prepared: false, usedIds: new Set(records.map(r => r.promptId)), custom: [], log: records, queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(state.id), botTimers: new Set(), hypotheses: [], priors: [], director: emptyDirectorState() };
+          provider, prepared: false, usedIds: new Set(records.map(r => r.promptId)), custom: [], log: records, queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(state.id), botTimers: new Set(), hypotheses: [], priors: [], director: emptyDirectorState(),
+          ready: new Set(), demo: false, demoSpeed: 1 };
         this.rooms.set(room.code, room);
         if (records.length > 0) void this.finale(room);
       } catch { /* Invalid metadata or partial logs are ignored. */ }
@@ -323,10 +340,21 @@ export class RoomManager {
     if (found && found.room.hostId !== found.player.id) { this.err(socket, "HOST_ONLY", "Only the host can do that."); return undefined; }
     return found;
   }
+  /** Demo events are accepted in demo rooms only (and say so when they are not). */
+  private demoOnly(socket: GameSocket, room: Room): boolean {
+    if (room.demo) return true;
+    this.err(socket, "DEMO_ONLY", "That control only exists in a demo room.");
+    return false;
+  }
   private view(room: Room, playerId: string): RoomView {
     return { code: room.code, phase: room.phase, hostId: room.hostId,
       players: room.players.map(({ id, alias, connected, isBot }) => ({ id, alias, connected, isBot })),
-      round: room.round ? this.roundView(room.round, playerId) : null, seq: room.seq };
+      round: room.round ? this.roundView(room.round, playerId) : null, seq: room.seq,
+      // Demo rooms say so (the host's puppet controls are gated on it); a real
+      // room's snapshot stays byte-identical to before.
+      ...(room.demo ? { demo: true } : {}),
+      // Present ONLY while a reveal is pending — who has pressed ready for it.
+      ...(room.stage === "ready" ? { ready: room.players.filter((p) => room.ready.has(p.id)).map((p) => p.id) } : {}) };
   }
   private displayView(room: Room): RoomView {
     const view = this.view(room, "");
@@ -415,7 +443,8 @@ export class RoomManager {
       try { provider = this.services.createPromptProvider({ roomId: id }); } catch { provider = new BankPromptProvider(); }
       const room: Room = { id, code, createdAt: now, lastActivity: now, file, hostId: player.id, players: [player], phase: "lobby", stage: "lobby", seq: 1, nextPlayer: 2, roundIndex: 0, dareCount: 0,
         provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set(),
-        hypotheses: [], priors: [], director: emptyDirectorState() };
+        hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(),
+        demo: (input as { demo?: unknown }).demo === true, demoSpeed: 1 };
       this.rooms.set(code, room); this.persistRoom(room); socket.data = { roomCode: code, playerId: player.id }; void socket.join(code);
       ack({ ok: true, code, you: player.id, secret: player.secret, state: this.view(room, player.id) });
       this.states(room);
@@ -467,11 +496,25 @@ export class RoomManager {
       ack({ ok: true, you: player.id, secret: player.secret, state: this.view(room, player.id) });
       this.states(room); this.replay(room, socket, player); this.prepare(room);
     });
+    socket.on("ready", () => {
+      const found = this.identify(socket); if (!found) return;
+      const { room, player } = found;
+      // A late tap from a phone that already saw the reveal is harmless.
+      if (room.stage !== "ready" || room.ready.has(player.id)) return;
+      room.ready.add(player.id);
+      this.changed(room);
+      if (this.everyoneReady(room)) this.showReveal(room);
+    });
     socket.on("start", () => {
       const found = this.host(socket); if (!found) return;
       const { room } = found;
       if (room.stage !== "lobby") return this.err(socket, "BAD_PHASE", "The game has already started.");
-      if (!playerCountOk(room.players.length)) return this.err(socket, "PLAYER_COUNT", `Start requires ${MIN_PLAYERS}–${MAX_PLAYERS} players.`);
+      // DEMO ROOMS (ROUND 4): the host plays every seat from one laptop, so the
+      // ordinary 4–11 seat rule does not apply — but a night needs at least two
+      // seats for the engine to have anything to compare.
+      if (room.demo ? room.players.length < 2 : !playerCountOk(room.players.length)) {
+        return this.err(socket, "PLAYER_COUNT", room.demo ? "Add at least one more demo seat to start." : `Start requires ${MIN_PLAYERS}–${MAX_PLAYERS} players.`);
+      }
       this.prepare(room); this.loadPriors(room); this.enterHeat(room, "warmup");
     });
     socket.on("add_bot", () => {
@@ -518,6 +561,7 @@ export class RoomManager {
       const found = this.host(socket); if (!found) return;
       const { room } = found;
       if (room.stage === "round") this.finishRound(room);
+      else if (room.stage === "ready") this.showReveal(room);
       else if (room.stage === "reveal") this.afterReveal(room);
       else if (room.stage === "interlude") this.afterInterlude(room);
       else this.err(socket, "BAD_PHASE", "No round to skip.");
@@ -525,11 +569,93 @@ export class RoomManager {
     socket.on("vote_heat_down", () => {
       const found = this.identify(socket); if (!found) return;
       const { room, player } = found;
-      if (!room.currentHeat || !["round", "reveal"].includes(room.stage) || room.pendingHeatDown) return this.err(socket, "BAD_PHASE", "Heat cannot be lowered here.");
+      if (!room.currentHeat || !["round", "ready", "reveal"].includes(room.stage) || room.pendingHeatDown) return this.err(socket, "BAD_PHASE", "Heat cannot be lowered here.");
       const i = HEAT_ORDER.indexOf(room.currentHeat);
       if (i <= 0) return this.err(socket, "MIN_HEAT", "The room is already at the lowest heat.");
       room.votes.add(player.id);
       this.checkVotes(room);
+    });
+    // -----------------------------------------------------------------------
+    // DEMO ROOMS (ROUND 4) — host only, demo rooms only, puppeted seats only.
+    // The host plays the whole game alone on one laptop: every extra seat is a
+    // puppet that answers itself ("auto") or waits for the host ("manual").
+    // The engine cannot tell the difference: puppet answers are ordinary
+    // LogRecords (plus `impersonatedBy` metadata it ignores).
+    // -----------------------------------------------------------------------
+    socket.on("demo_add_player", (input, reply) => {
+      const ack: (r: { ok: boolean; playerId?: PlayerId }) => void = typeof reply === "function" ? reply : () => {};
+      const found = this.host(socket); if (!found) return ack({ ok: false });
+      const { room } = found;
+      if (!this.demoOnly(socket, room)) return ack({ ok: false });
+      if (room.stage !== "lobby") { this.err(socket, "BAD_PHASE", "Demo seats are added in the lobby."); return ack({ ok: false }); }
+      if (room.players.length >= MAX_PLAYERS) { this.err(socket, "PLAYER_COUNT", "Room is full."); return ack({ ok: false }); }
+      const alias = typeof input?.alias === "string" ? input.alias.trim() : "";
+      if (!validAlias(alias)) { this.err(socket, "INVALID_ALIAS", "Give the demo seat a 2–14 character name."); return ack({ ok: false }); }
+      if (room.players.some((p) => p.alias.toLocaleLowerCase() === alias.toLocaleLowerCase())) {
+        this.err(socket, "INVALID_ALIAS", "That name is already in the room."); return ack({ ok: false });
+      }
+      const player: Player = { id: `p${room.nextPlayer++}`, alias, consent: { age: true, terms: true, revealOptIn: true }, profile: { ...neutralProfile },
+        secret: "", isBot: false, connected: true, puppet: { mode: "auto" } };
+      room.players.push(player);
+      this.changed(room); this.prepare(room);
+      ack({ ok: true, playerId: player.id });
+    });
+    socket.on("demo_remove_player", (input) => {
+      const found = this.host(socket); if (!found) return;
+      const { room } = found;
+      if (!this.demoOnly(socket, room)) return;
+      if (room.stage !== "lobby") return this.err(socket, "BAD_PHASE", "Demo seats are removed in the lobby.");
+      const target = room.players.find((p) => p.id === input?.playerId && p.puppet);
+      if (!target) return this.err(socket, "NOT_A_PUPPET", "Only a demo seat can be removed.");
+      room.players.splice(room.players.indexOf(target), 1);
+      this.changed(room); this.prepare(room);
+    });
+    socket.on("demo_set_bot_mode", (input) => {
+      const found = this.host(socket); if (!found) return;
+      const { room } = found;
+      if (!this.demoOnly(socket, room)) return;
+      const target = room.players.find((p) => p.id === input?.playerId && p.puppet);
+      if (!target) return this.err(socket, "NOT_A_PUPPET", "Only a demo seat has a bot mode.");
+      if (input.mode !== "auto" && input.mode !== "manual") return this.err(socket, "INVALID_MODE", "Mode must be auto or manual.");
+      target.puppet = { mode: input.mode };
+      // An auto seat readies itself; switching one to auto mid-gate can release it.
+      if (room.stage === "ready") {
+        if (input.mode === "auto") room.ready.add(target.id);
+        else room.ready.delete(target.id);
+        this.changed(room);
+        if (this.everyoneReady(room)) this.showReveal(room);
+        return;
+      }
+      this.changed(room);
+    });
+    socket.on("demo_answer_as", (input) => {
+      const found = this.host(socket); if (!found) return;
+      const { room } = found;
+      if (!this.demoOnly(socket, room)) return;
+      const target = room.players.find((p) => p.id === input?.playerId && p.puppet);
+      if (!target) return this.err(socket, "NOT_A_PUPPET", "Only a demo seat can be answered for.");
+      const result = this.submit(room, target, input, found.player.id);
+      if (!result.ok) this.err(socket, "DEMO_SUBMIT", result.error ?? "That answer was not accepted.");
+    });
+    socket.on("demo_all_ready", () => {
+      const found = this.host(socket); if (!found) return;
+      const { room } = found;
+      if (!this.demoOnly(socket, room)) return;
+      if (room.stage !== "ready") return; // nothing pending: harmless no-op
+      for (const player of room.players) room.ready.add(player.id);
+      this.changed(room);
+      this.showReveal(room);
+    });
+    socket.on("demo_speed", (input) => {
+      const found = this.host(socket); if (!found) return;
+      const { room } = found;
+      if (!this.demoOnly(socket, room)) return;
+      const scale = typeof input?.scale === "number" && Number.isFinite(input.scale) ? input.scale : NaN;
+      if (!(scale >= 0.1 && scale <= 1)) return this.err(socket, "INVALID_SPEED", "Speed must be between 0.1 and 1.");
+      // Applied to timers scheduled from now on; a round already in flight keeps
+      // its closing time so nobody loses time to a mid-round change.
+      room.demoSpeed = scale;
+      this.changed(room);
     });
     socket.on("delete_room", () => {
       const found = this.identify(socket); if (!found) return;
@@ -545,10 +671,15 @@ export class RoomManager {
       if (!player.resumeRetry?.nonce) player.resumeRetry = undefined;
       room.votes.delete(player.id); room.lastActivity = this.now();
       this.changed(room); this.checkVotes(room); this.maybeComplete(room);
+      // A pending reveal waits for everyone who is still here — and only them.
+      if (room.stage === "ready" && this.everyoneReady(room)) this.showReveal(room);
     });
   }
   private prepare(room: Room): void {
-    if (room.prepared || room.stage !== "lobby" || room.players.length < MIN_PLAYERS || !room.provider.prepare) return;
+    // A demo room may hold fewer seats than a real room and still wants the
+    // same prompt variety, so only the real 4-seat floor blocks preparation.
+    const floor = room.demo ? 2 : MIN_PLAYERS;
+    if (room.prepared || room.stage !== "lobby" || room.players.length < floor || !room.provider.prepare) return;
     room.prepared = true;
     try {
       room.provider.setAliases?.(room.players.map((player) => player.alias));
@@ -556,13 +687,15 @@ export class RoomManager {
     } catch { /* Bank remains available. */ }
   }
   private checkVotes(room: Room): void {
-    if (!room.currentHeat || room.pendingHeatDown || !["round", "reveal"].includes(room.stage)) return;
+    if (!room.currentHeat || room.pendingHeatDown || !["round", "ready", "reveal"].includes(room.stage)) return;
     const active = room.players.filter((p) => p.connected);
     const votes = active.filter((p) => room.votes.has(p.id)).length;
     const index = HEAT_ORDER.indexOf(room.currentHeat);
     if (index > 0 && votes > active.length / 2) {
       room.pendingHeatDown = HEAT_ORDER[index - 1]; room.votes.clear();
-      if (room.stage === "round") this.finishRound(room); else this.afterReveal(room);
+      if (room.stage === "round") this.finishRound(room);
+      else if (room.stage === "ready") this.showReveal(room);
+      else this.afterReveal(room);
     }
   }
   /** Round kinds a heat phase deals, in order (spec §3). */
@@ -767,7 +900,7 @@ export class RoomManager {
       room.spotlighted.add(definition.subjectId); room.lastSubject = definition.subjectId;
     }
     const startedAt = this.now();
-    const lengthMs = this.options.roundTimers?.[definition.kind] ?? ROUND_TIMERS_MS[definition.kind];
+    const lengthMs = this.scale(room, this.options.roundTimers?.[definition.kind] ?? ROUND_TIMERS_MS[definition.kind]);
     // Use a function replacement: aliases can contain `$&` or other special characters.
     // `{S}` is the subject's alias — substituted for display only, exactly like `{P1}`.
     // A director-chosen round binds its probed subjects into the first slots.
@@ -778,7 +911,7 @@ export class RoomManager {
         : this.replacePlaceholders(room, definition.text, definition.kind === "dare" && definition.performer ? [definition.performer] : definition.subjects ?? definition.onlyPlayers);
     const round: LiveRound = { ...definition, text: this.withCallback(room, definition, question), id: `${room.id}-${++room.roundIndex}`, index: room.roundIndex, startedAt,
       closesAt: startedAt + lengthMs, responses: new Map(),
-      ...(definition.kind === "verdict" ? { voteOpensAt: startedAt + Math.min(this.options.verdictDiscussMs ?? VERDICT_DISCUSS_MS, lengthMs) } : {}) };
+      ...(definition.kind === "verdict" ? { voteOpensAt: startedAt + Math.min(this.scale(room, this.options.verdictDiscussMs ?? VERDICT_DISCUSS_MS), lengthMs) } : {}) };
     if (round.kind === "rating" || round.kind === "ios") {
       const eligible = room.players.map(p => p.id);
       round.targets = new Map(eligible.map(id => { const others = eligible.filter(x => x !== id); return [id, others[Math.max(0, room.roundIndex - 1) % others.length]!] as const; }));
@@ -787,8 +920,8 @@ export class RoomManager {
     room.round = round; room.usedIds.add(definition.prompt.id); this.changed(room);
     this.eachSocket(room, (socket, player) => socket.emit("round", this.guard(this.roundView(round, player.id))));
     this.io.to(displayChannel(room.code)).emit("round", this.guard(this.displayView(room).round!));
-    this.schedule(room, round.closesAt - startedAt + (this.options.graceMs ?? GRACE_MS), () => this.finishRound(room));
-    for (const player of room.players) if (player.isBot && (!round.onlyPlayers || round.onlyPlayers.includes(player.id))) this.scheduleBot(room, player, round);
+    this.schedule(room, round.closesAt - startedAt + this.scale(room, this.options.graceMs ?? GRACE_MS), () => this.finishRound(room));
+    for (const player of room.players) if ((player.isBot || player.puppet?.mode === "auto") && (!round.onlyPlayers || round.onlyPlayers.includes(player.id))) this.scheduleBot(room, player, round);
     this.maybeComplete(room);
   }
   private scheduleBot(room: Room, player: Player, round: LiveRound, delayMs?: number): void {
@@ -824,7 +957,13 @@ export class RoomManager {
     }, Math.max(0, delay));
     timer.unref(); room.botTimers.add(timer);
   }
-  private submit(room: Room, player: Player, request: unknown): { ok: boolean; error?: string } {
+  /**
+   * `impersonatedBy` is demo-room METADATA ONLY: the host puppeted this seat.
+   * It is written to the room log and then ignored by every consumer — the
+   * engine, the digest, the narrator and the claims never read it, so a demo
+   * night scores exactly like the same answers from real phones (parity).
+   */
+  private submit(room: Room, player: Player, request: unknown, impersonatedBy?: PlayerId): { ok: boolean; error?: string } {
     if (!request || typeof request !== "object") return { ok: false, error: "Invalid submission." };
     const r = request as { roundId?: unknown; clientUuid?: unknown; value?: unknown };
     if (typeof r.roundId !== "string" || typeof r.clientUuid !== "string" || !r.clientUuid.trim() || r.clientUuid.length > 128) return { ok: false, error: "Invalid submission id." };
@@ -834,7 +973,7 @@ export class RoomManager {
     const previous = room.seen.get(key);
     if (previous) return previous.roundId === r.roundId && previous.fingerprint === fingerprint ? { ok: true } : { ok: false, error: "Submission id was already used." };
     const round = room.round;
-    if (room.stage !== "round" || !round || r.roundId !== round.id || this.now() > round.closesAt + (this.options.graceMs ?? GRACE_MS)) return { ok: false, error: "This round is closed." };
+    if (room.stage !== "round" || !round || r.roundId !== round.id || this.now() > round.closesAt + this.scale(room, this.options.graceMs ?? GRACE_MS)) return { ok: false, error: "This round is closed." };
     if (!player.connected || (round.onlyPlayers && !round.onlyPlayers.includes(player.id))) return { ok: false, error: "You are spectating this round." };
     if (round.responses.has(player.id)) return { ok: false, error: "You already answered this round." };
     // Verdict: the phones stay face-down until the debate window closes.
@@ -861,7 +1000,7 @@ export class RoomManager {
     // Flagging it here means no downstream consumer can score it by accident.
     const decoy = round.kind === "spotlight" && round.subjectId === player.id;
     const record: LogRecord = { roomId: room.id, roundId: round.id, playerId: player.id, roundKind: round.kind, promptId: round.prompt.id, coding: round.prompt.coding,
-      value, at, latencyMs: Math.max(0, at - round.startedAt), ...(decoy ? { decoy: true } : {}), ...(round.kind === "dare" && round.performer ? { performerId: round.performer } : round.kind === "pair_dare" ? { performerId: player.id } : {}) };
+      value, at, latencyMs: Math.max(0, at - round.startedAt), ...(decoy ? { decoy: true } : {}), ...(round.kind === "dare" && round.performer ? { performerId: round.performer } : round.kind === "pair_dare" ? { performerId: player.id } : {}), ...(impersonatedBy ? { impersonatedBy } : {}) };
     try { appendFileSync(room.file, `${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 }); }
     catch { return { ok: false, error: "Unable to save the answer." }; }
     room.log.push(record); room.seen.set(key, { roundId: r.roundId, fingerprint }); round.responses.set(player.id, value); if (round.kind === "pair_dare" && value.kind === "dare" && value.status === "passed") round.pairPassed = true; room.lastActivity = at; this.persistRoom(room);
@@ -881,10 +1020,16 @@ export class RoomManager {
   }
   private finishRound(room: Room): void {
     const round = room.round; if (room.stage !== "round" || !round) return;
-    this.clearTimers(room); room.round = null; room.stage = "reveal";
+    this.clearTimers(room); room.round = null;
     // ROUND 4: the engine re-reads the room after EVERY round. Pure deterministic
     // code decides what it suspects; nothing here is emitted.
     this.refreshHypotheses(room, round.id);
+    // ROUND 4: the reveal is PENDING, not shown. Nobody misses the moment.
+    this.beginReady(room, this.buildReveal(room, round));
+  }
+  /** The reveal payload for a round that just closed. Pure formatting — the
+   *  only side effect is the (internal) hypothesis refresh, done by the caller. */
+  private buildReveal(room: Room, round: LiveRound): RevealView {
     const items: NonNullable<RevealView["items"]> = [];
     if (round.kind === "shout") {
       const counts = new Map<string, { word: string; count: number }>();
@@ -915,14 +1060,9 @@ export class RoomManager {
       }
       const cover = round.subjectId ? round.responses.get(round.subjectId) : undefined;
       const punchline = cover?.kind === "text" ? cover.text : undefined;
-      const holdMs = this.options.revealHoldMs ?? SPOTLIGHT_REVEAL_MS;
-      const reveal: RevealView = { roundId: round.id, kind: "spotlight", summary: `Live on ${subjectAlias}`,
+      const holdMs = this.scale(room, this.options.revealHoldMs ?? SPOTLIGHT_REVEAL_MS);
+      return { roundId: round.id, kind: "spotlight", summary: `Live on ${subjectAlias}`,
         ...(items.length ? { items } : {}), subject: subjectAlias, ...(punchline ? { punchline } : {}), holdMs };
-      room.reveal = { value: reveal, endsAt: this.now() + holdMs }; this.changed(room);
-      this.io.to(room.code).emit("reveal", this.guard(reveal));
-      this.io.to(displayChannel(room.code)).emit("reveal", this.guard(reveal));
-      this.schedule(room, holdMs, () => this.afterReveal(room));
-      return;
     }
     if (round.kind === "verdict") {
       // Anonymous tallies only — never a voter's name (spec §7). The winner is
@@ -936,22 +1076,50 @@ export class RoomManager {
         beat: "land", flavor: "group", title: alias(winner[0]),
         body: `${winner[1]} of ${total} said it out loud.`, numbers: { votes: winner[1], of: total, share: winner[1] / total },
       } : undefined;
-      const holdMs = this.options.revealHoldMs ?? VERDICT_REVEAL_MS;
-      const reveal: RevealView = { roundId: round.id, kind: "verdict",
+      const holdMs = this.scale(room, this.options.revealHoldMs ?? VERDICT_REVEAL_MS);
+      return { roundId: round.id, kind: "verdict",
         summary: winner ? `The room decided: ${alias(winner[0])}` : "Nobody voted. The room argued for nothing.",
         ...(slide ? { slide } : {}), celebrate: round.couple ?? round.prompt.coding === "couple", holdMs };
-      room.reveal = { value: reveal, endsAt: this.now() + holdMs }; this.changed(room);
-      this.io.to(room.code).emit("reveal", this.guard(reveal));
-      this.io.to(displayChannel(room.code)).emit("reveal", this.guard(reveal));
-      this.schedule(room, holdMs, () => this.afterReveal(room));
-      return;
     }
-    const holdMs = this.options.revealHoldMs ?? REVEAL_HOLD_MS;
-    const reveal: RevealView = { roundId: round.id, summary: round.kind === "debrief" ? "Their answers are private." : round.kind === "shout" ? "The room has spoken." : round.kind === "minigame" ? "Tap-war leaderboard" : "Round complete.", ...(items.length ? { items } : {}), holdMs };
-    room.reveal = { value: reveal, endsAt: this.now() + holdMs }; this.changed(room);
-    this.io.to(room.code).emit("reveal", reveal);
-    this.io.to(displayChannel(room.code)).emit("reveal", reveal);
-    this.schedule(room, holdMs, () => this.afterReveal(room));
+    const holdMs = this.scale(room, this.options.revealHoldMs ?? REVEAL_HOLD_MS);
+    return { roundId: round.id, summary: round.kind === "debrief" ? "Their answers are private." : round.kind === "shout" ? "The room has spoken." : round.kind === "minigame" ? "Tap-war leaderboard" : "Round complete.", ...(items.length ? { items } : {}), holdMs };
+  }
+  // ---------------------------------------------------------------------------
+  // THE READY GATE (ROUND 4)
+  // A closed round's reveal is pending until every connected player has pressed
+  // ready, so nobody misses the moment (a reconnecting phone still gets it).
+  // The grace timer fires the reveal anyway — one AFK phone never stalls the
+  // night. Bots and auto-puppeted demo seats are always ready: they have no
+  // phone to look at.
+  // ---------------------------------------------------------------------------
+  private beginReady(room: Room, reveal: RevealView): void {
+    room.stage = "ready"; room.ready.clear(); room.pendingReveal = reveal;
+    for (const player of room.players) if (player.isBot || player.puppet?.mode === "auto") room.ready.add(player.id);
+    const grace = this.scale(room, this.options.readyGraceMs ?? REVEAL_READY_GRACE_MS);
+    room.readyClosesAt = this.now() + grace;
+    this.changed(room);
+    if (this.everyoneReady(room)) return this.showReveal(room);
+    this.schedule(room, grace, () => { if (room.stage === "ready") this.showReveal(room); });
+  }
+  /** A connected seat that has not pressed ready yet is the only thing a reveal waits for. */
+  private everyoneReady(room: Room): boolean {
+    return room.players.every((p) => !p.connected || room.ready.has(p.id));
+  }
+  private showReveal(room: Room): void {
+    const reveal = room.pendingReveal;
+    if (!reveal || room.stage !== "ready") return;
+    this.clearTimers(room);
+    room.pendingReveal = undefined; room.readyClosesAt = undefined; room.ready.clear();
+    room.stage = "reveal";
+    room.reveal = { value: reveal, endsAt: this.now() + reveal.holdMs };
+    this.changed(room);
+    this.io.to(room.code).emit("reveal", this.guard(reveal));
+    this.io.to(displayChannel(room.code)).emit("reveal", this.guard(reveal));
+    this.schedule(room, reveal.holdMs, () => this.afterReveal(room));
+  }
+  /** Timer scale: 1 everywhere except a demo room, where the host can speed up. */
+  private scale(room: Room, ms: number): number {
+    return room.demo ? Math.max(1, Math.round(ms * room.demoSpeed)) : ms;
   }
   private afterReveal(room: Room): void {
     if (room.stage !== "reveal") return;
@@ -969,11 +1137,11 @@ export class RoomManager {
       try { void room.provider.prepareAnalysis(this.redactedLog(room)).catch(() => {}); } catch { /* local tags remain available */ }
     }
     const teaser = digest.pickTeasers[0] ? displayText(digest.pickTeasers[0], room.players) : undefined;
-    const holdMs = this.options.interludeHoldMs ?? INTERLUDE_HOLD_MS;
+    const holdMs = this.scale(room, this.options.interludeHoldMs ?? INTERLUDE_HOLD_MS);
     const view: InterludeView = { headline: cooled ? "Cooling things down" : next === "finale" ? "The room has spoken" : `Next: ${next}`, sub: cooled ? "The room chose a gentler level." : "Take a breath before the next chapter.", ...(teaser ? { teaser } : {}), holdMs };
     room.interlude = { value: view, endsAt: this.now() + holdMs };
     // Store the transition independently of the label exposed to clients.
-    this.transitions.set(room.id, next); this.changed(room); this.io.to(room.code).emit("interlude", view); this.io.to(displayChannel(room.code)).emit("interlude", view);
+    this.transitions.set(room.id, next); this.changed(room); this.io.to(room.code).emit("interlude", this.guard(view)); this.io.to(displayChannel(room.code)).emit("interlude", this.guard(view));
     this.schedule(room, holdMs, () => this.afterInterlude(room));
   }
   private readonly transitions = new Map<string, HeatPhase | "debrief" | "finale">();

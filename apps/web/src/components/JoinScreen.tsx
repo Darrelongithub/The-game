@@ -36,7 +36,7 @@ export function JoinScreen({
   hasSession: boolean;
   busy: boolean;
   error: string | null;
-  onCreate: (alias: string, consent: Consent, profile: ProfileAnswers) => Promise<JoinReply & { code?: RoomCode }>;
+  onCreate: (alias: string, consent: Consent, profile: ProfileAnswers, options?: { demo?: boolean }) => Promise<JoinReply & { code?: RoomCode }>;
   onJoin: (code: RoomCode, alias: string, consent: Consent, profile: ProfileAnswers) => Promise<JoinReply>;
 }) {
   const [tab, setTab] = useState<Tab>("create");
@@ -47,6 +47,8 @@ export function JoinScreen({
   const [termsConsent, setTermsConsent] = useState(false);
   const [profile, setProfile] = useState<ProfileAnswers>({ age: 0, relationship: "single", partnersToDate: 0, longestMonths: 0, crushingHere: false, tonight: "vibes" });
   const [showPrivacyOptions, setShowPrivacyOptions] = useState(false);
+  // ROUND 4: a demo room lets one host play every seat on one laptop.
+  const [demoRoom, setDemoRoom] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -74,7 +76,7 @@ export function JoinScreen({
     const consent: Consent = { age: ageConsent, terms: termsConsent, revealOptIn };
     try {
       const reply = tab === "create"
-        ? await onCreate(alias.trim(), consent, profile)
+        ? await onCreate(alias.trim(), consent, profile, demoRoom ? { demo: true } : undefined)
         : await onJoin(code, alias.trim(), consent, profile);
       if (!reply.ok) setLocalError(reply.error ?? "Could not get in.");
     } catch (err) {
@@ -141,6 +143,23 @@ export function JoinScreen({
                 <label className="flex items-start gap-3 text-xs text-white/65"><input type="checkbox" checked={ageConsent} onChange={e => setAgeConsent(e.target.checked)} /> I am {AGE_MIN} or older.</label>
                 <label className="flex items-start gap-3 text-xs text-white/65"><input type="checkbox" checked={termsConsent} onChange={e => setTermsConsent(e.target.checked)} /> I agree to the house rules.</label>
               </div>
+              {tab === "create" && (
+                <button
+                  type="button"
+                  onClick={() => setDemoRoom((value) => !value)}
+                  aria-pressed={demoRoom}
+                  className={clsx(
+                    "mb-4 flex min-h-[48px] w-full items-center justify-between rounded-xl px-3 text-left text-xs",
+                    demoRoom ? "bg-lime-accent/15 text-lime-accent" : "bg-white/5 text-white/55"
+                  )}
+                >
+                  <span>
+                    Demo room
+                    <span className="block text-[11px] text-white/40">Test the whole game alone on this laptop.</span>
+                  </span>
+                  <span className="text-[10px] uppercase tracking-[0.18em]">{demoRoom ? "on" : "off"}</span>
+                </button>
+              )}
               <div className="mb-4 flex flex-wrap items-center gap-x-4">
                 <button type="button" onClick={() => setShowPrivacyOptions((value) => !value)} aria-expanded={showPrivacyOptions}
                   className="min-h-[40px] text-left text-xs text-white/55 underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent">

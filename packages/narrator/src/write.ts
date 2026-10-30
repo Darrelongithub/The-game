@@ -19,6 +19,7 @@ import { buildSkeleton, registerSource, sourceOf } from "./slides.ts";
 import {
   derivePseudonyms,
   pseudonymForAlias,
+  pseudonymOf,
   scrubAliases,
   toRoster,
   type Pseudonyms,
@@ -47,6 +48,8 @@ export interface WriteOptions {
   env?: Record<string, string | undefined>;
   /** Legacy-compatible option; ignored. */
   model?: string;
+  /** Optional, bounded style hint from public-answer analysis; never a score. */
+  publicToneHint?: "warm";
 }
 
 export interface FinaleCopy {
@@ -81,6 +84,7 @@ VOICE
 - Short sentences, concrete nouns. No corporate mush, no therapy-speak, no clinical or psychology labels.
 - Never explain the joke. Land it and move on.
 - Secret cards lean KIND: they land on one phone, alone, at midnight. Warm, a little flattering, never a diagnosis.
+- An optional publicToneHint is a style suggestion only, not a fact or a score.
 
 HARD RULES — a validator checks every line and silently replaces anything that breaks them with the engine line:
 1. NUMBERS: only repeat digits that already appear in that slide's "numbers" object or its "engine" text. Never compute, round, sum, average, or invent a number.
@@ -217,7 +221,7 @@ function digestForModel(
       topDodger: statEntry(stats.topDodger),
       tapWar: statEntry(stats.tapWar),
     },
-    runningGags: (digest.runningGags ?? []).slice(0, 6),
+    runningGags: (digest.runningGags ?? []).slice(0, 6).map((gag) => ({ word: scrub(gag.word), count: gag.count })),
     dodges: (digest.dodges ?? []).slice(0, 6).map((dodge) => ({
       who: who(dodge.alias),
       reason: scrub(dodge.reason),
@@ -238,7 +242,9 @@ export function buildRequestPayload(
   digest: NightDigest,
   ps: Pseudonyms,
   roster: readonly RosterEntry[] | undefined,
+  publicToneHint?: "warm",
 ): Record<string, unknown> {
+  const scrub = (text: string) => scrubAliases(text, ps, roster);
   const referenced = new Set(
     slides.map((slide) => slide.claimId).filter((id): id is string => Boolean(id)),
   );
@@ -248,10 +254,10 @@ export function buildRequestPayload(
     .map((claim) => ({
       id: claim.id,
       type: claim.type,
-      subjects: claim.subjects,
+      subjects: claim.subjects.map((id) => pseudonymOf(ps, id) ?? "someone in the room"),
       confidence: claim.confidence,
       numbers: claim.numbers,
-      evidence: claim.evidence,
+      evidence: claim.evidence.map(scrub),
     }));
 
   const slideBriefs: SlideBrief[] = slides.map((slide, index) => {
@@ -260,12 +266,12 @@ export function buildRequestPayload(
       i: index,
       beat: slide.beat,
       players: source ? [...source.players] : [],
-      engine: { title: slide.title, body: slide.body ?? "" },
+      engine: { title: scrub(slide.title), body: scrub(slide.body ?? "") },
     };
     if (slide.flavor) brief.flavor = slide.flavor;
     if (source?.claimType) brief.claimType = source.claimType;
     if (slide.numbers) brief.numbers = { ...slide.numbers };
-    if (source?.verbatim) brief.verbatim = source.verbatim;
+    if (source?.verbatim) brief.verbatim = scrub(source.verbatim);
     return brief;
   });
 
@@ -273,11 +279,11 @@ export function buildRequestPayload(
     i: index,
     owner: card.kind === "spark" ? "one of the two" : "the owner",
     kind: card.kind,
-    engine: { title: card.title, facts: [...card.facts] },
+    engine: { title: scrub(card.title), facts: card.facts.map(scrub) },
   }));
 
   return {
-    night: { players: ps.order.length, tone: TONE },
+    night: { players: ps.order.length, tone: TONE, ...(publicToneHint === "warm" ? { publicToneHint: "warm" } : {}) },
     claims,
     digest: digestForModel(digest, ps, roster),
     slides: slideBriefs,
@@ -365,7 +371,7 @@ export function mergeSlides(
     const body = validateBody(record["body"], limits);
     // QUOTE OF THE NIGHT and the Dodge Report are quoted material: a
     // paraphrase is an invented quote, so it falls back to the engine line.
-    if (body.ok && keepsVerbatim(body.text, source.verbatim) && !privatePhraseLeak(body.text, privateFacts)) target.body = body.text;
+    if (body.ok && keepsVerbatim(body.text, source.verbatim ? scrubAliases(source.verbatim, ps, roster) : undefined) && !privatePhraseLeak(body.text, privateFacts)) target.body = body.text;
   }
   return slides;
 }
@@ -482,6 +488,7 @@ export async function writeFinale(
     } catch { /* deterministic engine copy remains valid */ }
   }
   return { slides: baseSlides, decks: baseDecks };
+
 }
 
 /**

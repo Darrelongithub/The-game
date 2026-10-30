@@ -17,6 +17,7 @@ export interface PromptProvider {
   tagsFor?(recordId: string): string[] | undefined;
   /** Supply the private room roster for provider-side alias scrubbing. */
   setAliases?(aliases: readonly string[]): void;
+
   /** Cancel room-scoped provider work when the room is deleted or expires. */
   dispose?(): void;
 }

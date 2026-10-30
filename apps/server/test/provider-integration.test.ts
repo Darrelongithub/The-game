@@ -37,6 +37,8 @@ async function setup(t: TestContext, fakeFetch: typeof fetch, services?: GameSer
   const connect = async () => {
     const socket: Client = io(`http://127.0.0.1:${port}`, { forceNew: true, reconnection: false, autoConnect: false });
     clients.push(socket); socket.on("error", () => {});
+    // Simulated phones press ready the moment a reveal is pending (ROUND 4).
+    socket.on("state", (view) => { if (view.ready) socket.emit("ready"); });
     const ready = once<void>(socket, "connect"); socket.connect(); await limit(ready); return socket;
   };
   return { connect, dir, server };

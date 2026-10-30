@@ -131,6 +131,7 @@ test("golden 2: toxic percentile case, rivals, consensus — exact claim set", (
     { id: "ship-p1-p2", type: "ship", subjects: ["p1", "p2"], audience: "public", confidence: "high" },
     { id: "ship-p3-p5", type: "ship", subjects: ["p3", "p5"], audience: "public", confidence: "med" }, // mutualPick exactly 1/2 does not count
     { id: "besties-p1-p2", type: "besties", subjects: ["p1", "p2"], audience: "public", confidence: "med" }, // friendEvidence exactly 1/2 does not count
+
     { id: "rival-p1-p5", type: "rival", subjects: ["p1", "p5"], audience: "public", confidence: "med" }, // both pick rates strong; ratings agree, so no 3rd type
     { id: "toxic-p4", type: "toxic", subjects: ["p4"], audience: "public", confidence: "high" },
     { id: "consensus-X1-p4", type: "consensus", subjects: ["p4"], audience: "public", confidence: "med" },

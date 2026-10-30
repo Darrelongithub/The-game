@@ -9,6 +9,7 @@ import { GlassCard } from "@/components/GlassCard";
 import { GlowButton } from "@/components/GlowButton";
 import { Flame } from "@/components/Flame";
 import { pageVariants } from "@/lib/motion";
+import { DemoPanel } from "@/components/DemoPanel";
 
 const loading = () => <main className="screen flex items-center justify-center" aria-busy="true">Getting things ready…</main>;
 const JoinScreen = dynamic(() => import("@/components/JoinScreen").then((m) => m.JoinScreen), { loading });
@@ -19,10 +20,10 @@ export function RoomApp() {
   const room = useRoom();
   const [joining, setJoining] = useState(false);
 
-  const handleCreate = async (alias: string, consent: Consent, profile: ProfileAnswers) => {
+  const handleCreate = async (alias: string, consent: Consent, profile: ProfileAnswers, options?: { demo?: boolean }) => {
     setJoining(true);
     try {
-      return await room.createRoom(alias, consent, profile);
+      return await room.createRoom(alias, consent, profile, options);
     } finally {
       setJoining(false);
     }
@@ -72,6 +73,19 @@ export function RoomApp() {
               onCustomPrompts={room.setCustomPrompts}
               onDelete={room.deleteRoom}
               onHeatDown={room.voteHeatDown}
+              demoPanel={view!.demo ? <DemoPanel
+                players={view!.players}
+                you={room.you}
+                phase={view!.phase}
+                round={room.round}
+                awaitingReady={room.awaitingReady}
+                onAddPlayer={(alias) => void room.demoAddPlayer(alias)}
+                onRemovePlayer={room.demoRemovePlayer}
+                onSetMode={room.demoSetBotMode}
+                onAnswerAs={room.demoAnswerAs}
+                onAllReady={room.demoAllReady}
+                onSpeed={room.demoSpeed}
+              /> : undefined}
             />
           </motion.div>
         ) : view!.phase === "closed" ? (

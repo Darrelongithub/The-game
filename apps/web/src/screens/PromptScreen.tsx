@@ -1,8 +1,10 @@
 'use client';
 import React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { PlayerId, ResponseValue, RoomView, RoundView } from '../../../../packages/shared/src/contracts';
+import type { PlayerId, ResponseValue, RoomView, RoundView, TraitId } from '../../../../packages/shared/src/contracts';
 import { SPOTLIGHT_ANSWER_MAX } from '../../../../packages/shared/src/contracts';
+import { inferTrait } from '../../../../packages/prompts/src/trait.ts';
+import { bankQuestionHint } from '@/lib/promptHints';
 import { AnimatedWords, GlassCard, GlowButton } from './primitives';
 
 export interface PromptScreenProps {
@@ -14,6 +16,7 @@ export interface PromptScreenProps {
   onVoteHeatDown?: () => void;
 }
 const heat: Record<string, string> = { warmup: '#dfa7ff', spicy: '#f4a8e8', deep: '#ce9bff', dare: '#ff8aaa', debrief: '#ff8aaa' };
+const traits: TraitId[] = ['loyalty', 'chaos', 'reliability', 'warmth', 'honesty', 'spice'];
 const field = 'w-full rounded-2xl border border-white/20 bg-white/5 p-4 text-base text-white placeholder:text-white/50 focus:outline focus:outline-2 focus:outline-lime-accent';
 
 // The frozen RoundView has no structured target or trait. Infer only clear
@@ -35,6 +38,20 @@ function displayPrompt(round: RoundView, room: RoomView, you: PlayerId): string 
   // A shared named prompt may name the person reading it. IOS cannot target
   // yourself, so ask that person to choose someone else instead.
   return round.promptText.replace(selfReference, '$1someone here');
+}
+
+function mentionedTarget(round: RoundView, room: RoomView, you: PlayerId): string {
+  if (round.kind !== 'rating' && round.kind !== 'ios') return '';
+  const matches = room.players.filter((player) => {
+    const name = escapeRegExp(player.alias);
+    const prefix = round.kind === 'rating' ? '\\brate\\s+(?:how\\s+(?:well|good)\\s+)?' : '\\b(?:you\\s+and|with)\\s+';
+    return new RegExp(`${prefix}${name}(?:['’]s)?(?=$|[^\\p{L}\\p{N}])`, 'iu').test(round.promptText);
+  });
+  if (matches.length === 1) return matches[0]!.id === you ? (round.kind === 'rating' ? 'self' : '') : matches[0]!.id;
+  // A bare "you" may describe a friend *toward* you. Default to self only
+  // for clearly self-directed wording; otherwise ask the player to choose.
+  if (round.kind === 'rating' && /^(?:\s*rate\s+(?:yourself\b|your\s+own\b|your\s+(?:loyalty|chaos|reliability|warmth|honesty|spice)\b)|\s*how\s+\w+\s+(?:are|have)\s+you\b)/i.test(round.promptText)) return 'self';
+  return '';
 }
 
 // Only the small timer component updates on the clock; the question and input
@@ -86,6 +103,7 @@ export function PromptScreen(props: PromptScreenProps) {
 function PromptRound({ round, room, you, onSubmit, onVoteHeatDown }: PromptScreenProps) {
   const { question, callback } = splitCallback(round.promptText);
   const questionRound = { ...round, promptText: question };
+  const bankHint = bankQuestionHint(question, round.kind, room.players, you);
   const [submitted, setSubmitted] = useState(round.youSubmitted);
   const [error, setError] = useState('');
   const [text, setText] = useState('');
@@ -94,9 +112,8 @@ function PromptRound({ round, room, you, onSubmit, onVoteHeatDown }: PromptScree
   const [selected, setSelected] = useState('');
   const [rating, setRating] = useState(5);
   const [ios, setIos] = useState(0);
-  const trait = round.trait ?? '';
-  const about = round.about ?? '';
-
+  const [trait, setTrait] = useState<TraitId | ''>(() => round.trait ?? bankHint?.trait ?? inferTrait(question) ?? '');
+  const [about, setAbout] = useState(() => round.about ?? bankHint?.about ?? mentionedTarget(questionRound, room, you));
   const [taps, setTaps] = useState(0);
   const [voted, setVoted] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
@@ -153,7 +170,9 @@ function PromptRound({ round, room, you, onSubmit, onVoteHeatDown }: PromptScree
       })()}
       {round.kind === 'shout' && <><div className="flex items-center gap-4"><label htmlFor="shout" className="sr-only">Your word</label><input id="shout" className={`${field} min-w-0 font-bold`} style={{ fontSize: 'clamp(1.5rem, 6vw, 2.5rem)' }} maxLength={24} value={text} onChange={e => setText(e.target.value.replace(/\s/g, ''))} placeholder="ONE WORD"/><Clock deadline={round.closesAt} total={15}/></div><GlowButton disabled={!text.trim()} onClick={() => void submit({ kind: 'shout', word: text.trim() })}>Shout it</GlowButton>{timedOut && <GlowButton onClick={() => void submit({ kind: 'shout', word: text.trim() || 'Pass' })}>Retry submission</GlowButton>}</>}
       {round.kind === 'rating' && trait && about && <GlassCard className="space-y-5"><p>Rate <strong>{room.players.find(p => p.id === about)?.alias}</strong> on <strong>{trait}</strong>.</p><label className="block">Rating: {rating}/10<input className="mt-3 min-h-[48px] w-full accent-lime-accent" type="range" min={1} max={10} value={rating} onChange={e => setRating(Number(e.target.value))}/></label><GlowButton onClick={() => void submit({ kind: 'rating', trait, about, value: rating })}>Submit rating</GlowButton></GlassCard>}
+      {round.kind === 'rating' && (!trait || !about) && <GlassCard className="space-y-5"><label className="block">Trait<select className={`${field} mt-2`} value={trait} onChange={e => setTrait(e.target.value as TraitId | '')}><option className="text-black" value="">Choose a trait</option>{traits.map(t => <option className="text-black" key={t} value={t}>{t}</option>)}</select></label><label className="block">About<select className={`${field} mt-2`} value={about} onChange={e => setAbout(e.target.value)}><option className="text-black" value="">Choose who</option><option className="text-black" value="self">Myself</option>{others.map(p => <option className="text-black" key={p.id} value={p.id}>{p.alias}</option>)}</select></label><label className="block">Rating: {rating}/10<input className="mt-3 min-h-[48px] w-full accent-lime-accent" type="range" min={1} max={10} value={rating} onChange={e => setRating(Number(e.target.value))}/></label><GlowButton disabled={!trait || !about} onClick={() => { if (trait && about) void submit({ kind: 'rating', trait, about, value: rating }); }}>Submit rating</GlowButton></GlassCard>}
       {round.kind === 'ios' && about && <GlassCard><p>How close are you to <strong>{room.players.find(p => p.id === about)?.alias}</strong>?</p><fieldset className="mt-5"><legend>How close are you?</legend><div className="mt-3 grid grid-cols-2 gap-2 min-[400px]:grid-cols-4">{Array.from({ length: 7 }, (_, i) => <button type="button" key={i} aria-pressed={ios === i + 1} aria-label={`Closeness ${i + 1} of 7`} onClick={() => setIos(i + 1)} className={`min-h-[64px] rounded-xl border focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent ${ios === i + 1 ? 'border-lime-accent bg-white/10' : 'border-white/20'}`}><svg viewBox="0 0 72 40" className="mx-auto h-10 w-20 max-w-full" aria-hidden="true"><circle cx={20 + i * 1.8} cy="20" r="15" fill="#9f2cd4" fillOpacity=".65" stroke="white"/><circle cx={52 - i * 1.8} cy="20" r="15" fill="#efb4ff" fillOpacity=".5" stroke="white"/></svg><span className="text-xs">{i + 1}</span></button>)}</div></fieldset><GlowButton className="mt-5" onClick={() => void submit({ kind: 'ios', about, value: ios })}>Submit closeness</GlowButton></GlassCard>}
+      {round.kind === 'ios' && !about && <GlassCard><label className="block">About<select className={`${field} mt-2`} value={about} onChange={e => setAbout(e.target.value)}><option className="text-black" value="">Choose a player</option>{others.map(p => <option className="text-black" key={p.id} value={p.id}>{p.alias}</option>)}</select></label><fieldset className="mt-5"><legend>How close are you?</legend><div className="mt-3 grid grid-cols-2 gap-2 min-[400px]:grid-cols-4">{Array.from({ length: 7 }, (_, i) => <button type="button" key={i} aria-pressed={ios === i + 1} aria-label={`Closeness ${i + 1} of 7`} onClick={() => setIos(i + 1)} className={`min-h-[64px] rounded-xl border focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent ${ios === i + 1 ? 'border-lime-accent bg-white/10' : 'border-white/20'}`}><svg viewBox="0 0 72 40" className="mx-auto h-10 w-20 max-w-full" aria-hidden="true"><circle cx={20 + i * 1.8} cy="20" r="15" fill="#9f2cd4" fillOpacity=".65" stroke="white"/><circle cx={52 - i * 1.8} cy="20" r="15" fill="#efb4ff" fillOpacity=".5" stroke="white"/></svg><span className="text-xs">{i + 1}</span></button>)}</div></fieldset><GlowButton className="mt-5" disabled={!about || !ios} onClick={() => void submit({ kind: 'ios', about, value: ios })}>Submit closeness</GlowButton></GlassCard>}
       {round.kind === 'minigame' && <GlassCard className="text-center"><div className="flex justify-center"><Clock deadline={tapDeadline} total={5}/></div><p className="my-4 text-3xl font-bold" aria-live="polite">{taps} taps</p><GlowButton className="min-h-32 w-full text-2xl" disabled={timedOut} onClick={() => setTaps(n => Math.min(999, n + 1))}>TAP!</GlowButton>{timedOut && <GlowButton className="mt-4" onClick={() => void submit({ kind: 'minigame', score: taps })}>Submit score</GlowButton>}</GlassCard>}
       {round.kind === 'verdict' && (votingOpen
         ? <div data-testid="verdict-pickgrid" className="answer-arrival space-y-4"><p className="text-sm text-white/70">Choose one person, then lock in your private vote.</p><div className="grid grid-cols-2 gap-3">{others.map(p => <GlowButton key={p.id} aria-pressed={selected === p.id} onClick={() => setSelected(p.id)} className={selected === p.id ? 'ring-2 ring-white ring-offset-2 ring-offset-[#100019]' : 'opacity-80'}>{p.alias}</GlowButton>)}</div><GlowButton className="w-full" disabled={!selected} onClick={() => void submit({ kind: 'pick', target: selected })}>Lock in answer</GlowButton></div>
