@@ -16,9 +16,8 @@ export interface PromptScreenProps {
 const heat: Record<string, string> = { warmup: '#dfa7ff', spicy: '#f4a8e8', deep: '#ce9bff', dare: '#ff8aaa', debrief: '#ff8aaa' };
 const field = 'w-full rounded-2xl border border-white/20 bg-white/5 p-4 text-base text-white placeholder:text-white/50 focus:outline focus:outline-2 focus:outline-lime-accent';
 
-// The frozen RoundView has no structured target or trait. Infer only clear
-// bank wording; ambiguous prompts require a choice instead of silently rating
-// the wrong person/trait. The structured contract request remains necessary.
+// Rating/IOS intent comes from the authoritative RoundView field. Missing
+// assignments never expose a guessed trait/target control.
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const callbackMarker = '\n\nEarlier, someone said: “';
 function splitCallback(text: string): { question: string; callback?: string } {

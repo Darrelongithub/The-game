@@ -71,7 +71,7 @@ interface RoundSpec {
   coding: PromptCoding;
   text: string; // {P1}..{P4} placeholders, substituted like the server does
   onlyPlayers?: PlayerId[];
-  /** interim shim — see NOTES/contract-requests.md (RoundView payload) */
+  /** Authoritative rating/IOS assignment from the RoundView contract. */
   trait?: TraitId;
   about?: PlayerId;
   /** spotlight: who the room is watching (the local player may be the subject) */
@@ -598,12 +598,10 @@ export class MockTransport implements Transport {
       youSubmitted: false,
       ...(spec.kind === "verdict" ? { voteOpensAt: Date.now() + Math.min(spec.debateMs ?? 16_000, Math.max(0, ms - 2_000)) } : {}),
       ...(spec.onlyPlayers ? { onlyPlayers: spec.onlyPlayers } : {}),
-      // INTERIM SHIM (contract request filed): the round needs to tell the UI
-      // which trait/player a rating or IOS answer is about.
+      // Rating/IOS intent is carried by the round, never inferred from prose.
       ...(spec.trait ? { trait: spec.trait } : {}),
       ...(spec.about ? { about: spec.about } : {}),
-      ...(spec.coding ? { coding: spec.coding } : {}),
-    } as RoundView;
+    } satisfies RoundView;
     this.seq += 1;
     this.emitState();
     this.handlers.onRound?.(this.round);
@@ -945,7 +943,6 @@ function autoAnswer(
   players: PlayerView[]
 ): ResponseValue | null {
   const other = players.find((p) => p.id !== you)?.id ?? you;
-  const shim = round as RoundView & { trait?: TraitId; about?: PlayerId };
   switch (round.kind) {
     case "pick":
       return { kind: "pick", target: other };
@@ -953,14 +950,10 @@ function autoAnswer(
       return { kind: "text", text: "Skipped. Take that as an answer." };
     case "shout":
       return { kind: "shout", word: "chaos" };
-    case "rating": {
-      const about = shim.about && shim.about !== you ? shim.about : other;
-      return { kind: "rating", trait: shim.trait ?? "chaos", about, value: 6 };
-    }
-    case "ios": {
-      const about = shim.about && shim.about !== you ? shim.about : other;
-      return { kind: "ios", about, value: 4 };
-    }
+    case "rating":
+      return round.trait && round.about ? { kind: "rating", trait: round.trait, about: round.about, value: 6 } : null;
+    case "ios":
+      return round.about ? { kind: "ios", about: round.about, value: 4 } : null;
     case "minigame":
       return { kind: "minigame", score: 1 };
     case "dare":
