@@ -35,6 +35,18 @@ only.
 - Join = alias (2–14 chars) + consent (age 18+, terms, reveal opt-in).
 - Reconnect: session secret in sessionStorage; `visibilitychange` → re-join →
   full `RoomView` snapshot + seq. No diff replay.
+- **Accounts (optional, ROUND 4).** `POST /api/account` with a username and a
+  4–6 digit PIN returns a **one-time recovery code** — shown once, "store it,
+  there is no email". `POST /api/account/login`, `POST /api/account/recover`
+  (code rotates on use), `POST /api/account/night` (binds tonight's room to the
+  account using the player's own session secret), `GET /api/account`,
+  `DELETE /api/account` (hard wipe: identity, night links, carried suspicions).
+  The server stores scrypt hashes of the PIN, the recovery code and the token
+  seeds — never an email address, because no email field exists anywhere.
+  Token lives in `localStorage`; login pre-fills the alias suggestion (still
+  editable per night). **Guest parity is absolute:** an account is never
+  required, never gates a room, and never changes a round, a score or a claim.
+  Identity outlives the 48h room purge; a night's data does not.
 
 ## 2. Session flow
 `lobby → warmup → spicy → deep → dare → debrief → finale → closed`
@@ -131,6 +143,19 @@ pair_score(i,j) = 0.30*pickOverlap + 0.20*mutualPick + 0.20*debriefSim
   `revealOptIn` → PRIVATE Secret Card for EACH of the two.
 - **Confidence:** high = ≥3 independent signal types (and ≥70% consensus where
   applicable); med = 2; low = 1. Low-confidence negative claims are NEVER public.
+- **Formation band & graduation (ROUND 4).** The engine also keeps PRIVATE
+  suspicions — `Hypothesis` objects, INTERNAL, see §6a. A suspicion only forms
+  when its deterministic strength lands inside `HYPOTHESIS_FORM_BAND`
+  (`{lo: .35, hi: .65}`): strong enough to be worth probing, weak enough to stay
+  a suspicion. Above the band, with ≥3 independent signals meeting
+  `CONFIDENCE_RULES.high`, it **graduates**: it leaves the hypothesis set and
+  becomes an ORDINARY claim (subject to every rule above — the finale pays it
+  off like any other claim, with no memory of why the room was asking). A
+  suspicion the latest round contradicts is **refuted**; below the band is
+  noise. **One-sided material is unchanged and absolute:** it can only ever
+  graduate to a PRIVATE claim → a Secret Card on the picker's phone.
+  With accounts, unresolved suspicions survive the night as priors and are
+  quietly probed again next time (§6a). Nobody is told this is happening.
 
 ## 6. Prompt engine — providers & the code-first rule
 - **Code-first, LLM-garnish.** Deterministic code is the PRIMARY
@@ -182,6 +207,47 @@ pair_score(i,j) = 0.30*pickOverlap + 0.20*mutualPick + 0.20*debriefSim
   extract a signal: directed at someone in the room (or a pair), coded, with
   non-empty `measures` that feed the engine. A dare that targets no one and
   measures nothing is random spectacle and is banned.
+
+### 6a. The Director — the invisible selector (ROUND 4)
+The engine develops suspicions about the room and quietly interrogates them.
+**Players never see hypotheses.** No board, no event, no interlude line, no
+recap, no "what the game suspected" beat — nothing. The only player-visible
+effect of the Director is that rounds keep feeling fresh, relevant and slightly
+uncanny.
+
+- **Formation.** After EVERY round `formHypotheses(signals, log, meta, priors?)`
+  re-reads the log (mid-band rule, §5) across six kinds: `tension`, `besties`,
+  `secret`, `selfimage`, `onesided`, `freeagent`. Strength and evidence are
+  deterministic code; subjects are pseudonymous in any LLM context; `openedAt`
+  is the epoch ms of the first supporting answer (or a previous night).
+- **Selection.** `directNextRound(hypotheses, coverage, candidates, seed)` deals
+  one round at a time, seeded by the round index (replay = identical choices):
+  - **50% TEST** (`ROUND_MIX.test`) — an OPEN suspicion's subjects on its
+    dimension (`couple`/`friendship`/`trust`/`status`/`friction`/`neutral`),
+    bound into the prompt's `{P1}`/`{P2}` slots. Grok may generate targeted
+    candidates, pseudonymized and never telegraphing: "a spicy prompt that would
+    reveal whether Player 3 is into Player 5" is fine; "is Player 3 into Player
+    5?" is not. A targeted prompt must read as organic.
+  - **30% EXPLORE** (`ROUND_MIX.explore`) — the least-covered **(pair ×
+    dimension)** cell of the coverage matrix, so fresh material begets fresh
+    suspicions. `coverage` is a plain count map that never leaves the server.
+  - **20% CLASSIC** (`ROUND_MIX.classic`) — bank/callback rounds as before.
+  Lanes fall through gracefully: a test slot with nothing testable becomes
+  explore, a covered matrix becomes classic.
+- **Anti-telegraph.** Never more than `ANTI_TELEGRAPH_MAX` (2) CONSECUTIVE
+  rounds touching the same subject pair. Without it the engine machine-guns two
+  people, the room clocks it, and the invisibility breaks.
+- **Cross-night (accounts only).** Unresolved suspicions are stored per account
+  and re-mapped onto tonight's player ids as priors; the game keeps probing old
+  suspects, silently. Guests carry nothing.
+- **What players see: nothing new.** Freshness surfaces only through existing
+  channels — the selector's choices, digest teasers, callbacks — and the
+  finale's CLAIMS, which is where graduated suspicions pay off as ordinary
+  claims. The one-sided rule (§5) is untouched.
+- **Invisibility is an assertion, not a hope:** `assertNoHypothesisLeak()` runs
+  over every client-facing emit, `Hypothesis` never appears in any
+  `ServerToClientEvents` payload, and no room-log line or client-side log ever
+  contains one.
 
 ## 7. Narrator, Group Announcements & Secret decks
 - Input: `Results` + `NightDigest`. Output: public slide copy ("Player N"

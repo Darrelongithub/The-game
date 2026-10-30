@@ -1,3 +1,109 @@
+# Fix & feature report — ROUND 4: THE DIRECTOR + ACCOUNTS
+(ROUND 3 report continues below.)
+
+## ROUND 4 status: SHIPPED (contract + engine + server + accounts + tests + spec)
+
+**Hypotheses are invisible to players BY DESIGN.** The engine develops private
+suspicions about the room and quietly interrogates them; players never see a
+hypothesis — no board, no event, no interlude line, no recap, and no "what the
+game suspected" beat at the finale. The only player-visible effect is that
+rounds keep feeling fresh, relevant and slightly uncanny. Hypotheses exist to
+steer selection; the only place one can ever surface is as an ORDINARY finale
+claim it graduated into.
+
+### 1. Contract (approved edits, `packages/shared/src/contracts.ts`)
+- `Hypothesis` / `HypothesisKind` / `HypothesisStatus`, marked INTERNAL
+  ("never serialized to any client"), with the fields exactly as approved.
+- `AccountInfo { username, createdAt, nightsPlayed }` (no email field, by design).
+- Tunables: `HYPOTHESIS_FORM_BAND = { lo: 0.35, hi: 0.65 }`,
+  `ROUND_MIX = { test: 0.5, explore: 0.3, classic: 0.2 }`,
+  `ANTI_TELEGRAPH_MAX = 2`.
+- Regression test `packages/engine/test/contracts.test.ts`: band is a real
+  mid-band, the mix sums to exactly 1, the cap stays 2..4, no email-shaped field
+  exists anywhere in the source, and no `Hypothesis` rides `ServerToClientEvents`.
+
+### 2. Accounts — username + PIN + one-time recovery code (no email, ever)
+- `apps/server/src/accounts.ts`: `AccountStore` (scrypt PIN/recovery hashes,
+  hashed token seeds, case-insensitive unique usernames, failed-login lockout,
+  nights-played bookkeeping, per-account priors, hard wipe). Stored at
+  `apps/server/data/accounts.json` (0600), so identity survives the 48h room
+  purge while night data does not.
+- `apps/server/src/account-routes.ts`: `POST /api/account` (returns the code
+  ONCE — "store it, there is no email"), `/login`, `/recover` (rotates the code),
+  `/night` (binds tonight's room using the player's own session secret),
+  `GET /api/account`, `DELETE /api/account` (hard wipe). Unknown fields are
+  refused, Bearer tokens only, same-origin only, mounted before the SPA
+  catch-all. Accounts ride REST, so guest play is untouched and fully available.
+- `apps/web/src/lib/account.ts`: client helpers (localStorage token, alias
+  suggestion, attach-night, wipe). **Known gap:** the login UI itself is not
+  wired into `JoinScreen` in this round (no screen files were touched, to keep
+  the frozen UI system intact) — the helpers are ready for it.
+
+### 3. The Director (`packages/engine/src/director.ts`, pure + deterministic)
+- `formHypotheses(signals, log, meta, priors?)` / `updateHypotheses(...)`: six
+  kinds (`tension`, `besties`, `secret`, `selfimage`, `onesided`, `freeagent`),
+  MID-BAND only; above band with ≥3 independent signals it GRADUATES into an
+  ordinary claim and leaves the set; a contradicted suspicion is REFUTED; below
+  band is noise. Evidence is engine-written and pseudonymous, `openedAt` comes
+  from the log (or a previous night).
+- `directNextRound(hypotheses, coverage, candidates, seed)` / `planRound(...)`:
+  the 50/30/20 mix over a **(pair × dimension)** coverage matrix, seeded by the
+  round index, with `ANTI_TELEGRAPH_MAX` and graceful lane fallthrough.
+- **One-sided rule (unchanged, hard):** one-sided material can only graduate to
+  a PRIVATE claim → a finale Secret Card on the picker's phone.
+- **Cross-night, invisible:** unresolved suspicions ride into the next night as
+  priors (accounts only, mapped back onto tonight's pseudonymous ids). Nobody is
+  told; guests carry nothing.
+- `assertNoHypothesisLeak(payload)`: the invisibility seam.
+
+### 4. Server
+- Rounds are dealt ONE AT A TIME (`planNext` → `planRound`), so every round is
+  chosen from the freshest suspicions; the probed subjects bind into the
+  prompt's `{P1}`/`{P2}` slots; host custom prompts keep priority.
+- `refreshHypotheses()` runs after every round; graduated claims merge into the
+  finale's results as ordinary claims (subject to every existing filter).
+- `loadPriors()` / `savePriors()` around the night; `audit.directed` is an
+  in-process TEST observer only (never configured by the production entry point).
+- Every client-facing emit passes the leak guard, so a future edit that ships a
+  hypothesis fails loudly instead of quietly.
+
+### 5. What players see
+Nothing new. No `case_board` event, no interlude line, no recap, no "case
+closed" block. Freshness surfaces only through the selector's choices, the
+digest teasers and callbacks, and the finale's ordinary claims.
+
+### 6. Tests (all green; each was written to fail before the feature landed)
+- `packages/engine/test/contracts.test.ts` (6): contract/tunable invariants,
+  no-email scan, no hypothesis on the wire.
+- `packages/engine/test/director.test.ts` (14): lifecycle open → strengthen →
+  graduate/refute, mid-band-only noise, one-sided privacy, mix split 50/30/20,
+  test-mix targets open-hypothesis subjects, explore only fills starved cells, a
+  12-round night, ≤2 consecutive rounds per pair, carry-over priors keep
+  `openedAt`, determinism twice, pseudonymity of hypothesis text.
+- `apps/server/test/accounts.test.ts` (8): create/login/recover/delete-wipe,
+  case-insensitive uniqueness, recovery-code rotation and replay rejection,
+  unknown-field (no-email) refusal, PIN lockout, purge survival, guest parity.
+- `apps/server/test/director.test.ts` (6): invisibility across every emit,
+  snapshot and room-log line; one-sided gives NO public claim and only the
+  picker's finale card; anti-telegraph across a whole night; graduation appears
+  as an ordinary public claim in the finale; carried suspicions keep probing
+  (selection patterns only); identical nights select identical rounds.
+
+```
+packages/engine:  35/35 tests, tsc --noEmit clean
+apps/server:      35/35 tests, tsc --noEmit clean
+scripts/selfcheck.ts: ALL 36 CHECKS PASSED (incl. the 4 new ROUND 4 tunable checks)
+```
+
+### Known gaps / notes
+- Login/signup SCREENS are not built (helpers + REST are); see §2.
+- `savePriors` only carries suspicions whose subjects both hold accounts — a
+  guest subject dies with the night, by design.
+- Hypotheses live in memory and in the per-account prior file only; they are
+  never written to a room log (asserted in the invisibility test).
+
+---
+
 # Fix & feature report — ROUND 3: LIVE GROUP MOMENTS
 
 Two new round kinds — **spotlight** ("everyone look at X") and **verdict**
