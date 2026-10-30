@@ -9,7 +9,7 @@
 // The model proposes; deterministic code disposes: schema, dedupe, banned
 // patterns, 20–160 chars, valid {P1}..{P11}, the data-or-dead rule, and the
 // callback rule (verbatim digest quotes only — never an invented answer).
-import type { NightDigest, Prompt } from "../../shared/src/contracts.ts";
+import type { NightDigest, Prompt, PromptStyle } from "../../shared/src/contracts.ts";
 import { PHASE_KINDS, type PromptPhase } from "./bank/index.ts";
 import {
   containsVerbatimQuote,
@@ -39,6 +39,12 @@ export interface GenerateBatchInput {
   aliases?: readonly string[];
   /** Override the dedupe corpus (tests). Defaults to the whole bank. */
   bankTexts?: readonly string[];
+  /**
+   * THE SECOND VOICE: which register this request asks for. Omitted = BOTH
+   * voices in one batch (the night needs a 50/50), which is what the lobby
+   * background call uses; a targeted request can pin one register.
+   */
+  style?: PromptStyle;
 }
 
 export interface GenerateBatchReport {
@@ -99,12 +105,55 @@ const PHASE_BRIEF: Record<PromptPhase, string> = {
   dare: "Dare: social-risk only (cringe, reveals, embarrassment) — never physical danger, never illegal.",
 };
 
+/**
+ * THE SECOND VOICE — few-shots are loaded from the BANK at runtime, never
+ * invented here. A register taught without examples produces off-voice output
+ * (the live-testing lesson): ship both voices, with both example blocks.
+ */
+export function groupFewShots(phase: PromptPhase, limit = 3): Prompt[] {
+  return BANK.filter((p) => p.phase === phase && (p.style ?? "group") === "group" && (p.kind === "pick" || p.kind === "text" || p.kind === "rating"))
+    .slice(0, limit);
+}
+
+/** 4–6 confession few-shots, phase-first then any phase, in bank order. */
+export function confessionFewShots(phase: PromptPhase, limit = 5): Prompt[] {
+  const all = BANK.filter((p) => p.style === "confess" || p.kind === "confess");
+  const first = all.filter((p) => p.phase === phase);
+  const rest = all.filter((p) => p.phase !== phase);
+  return [...first, ...rest].slice(0, Math.max(4, Math.min(6, limit)));
+}
+
+function voiceBlock(input: { phase: PromptPhase; style?: PromptStyle; playerCount: number }): string[] {
+  const group = groupFewShots(input.phase, 3);
+  const confess = confessionFewShots(input.phase, 5);
+  const asked = input.style === undefined
+    ? `Write BOTH voices: about ${Math.ceil(8 / 2)} group prompts and ${Math.floor(8 / 2)} confess prompts (roughly half each).`
+    : input.style === "confess"
+      ? "Write CONFESSION prompts only (every object: \"style\": \"confess\", \"kind\": \"confess\")."
+      : "Write GROUP prompts only (every object: \"style\": \"group\").";
+  return [
+    "TWO VOICES — every prompt is written in exactly ONE voice and declares it in \"style\":",
+    asked,
+    "GROUP VOICE (\"style\":\"group\") — the room's PERCEPTION. Addressed to the room; the player names someone else.",
+    "Examples of the exact register — group voice:",
+    ...group.map((p) => `  - "${p.text}"`),
+    "CONFESSION VOICE (\"style\":\"confess\") — REALITY. Second person, self-report: the player answers about THEMSELVES,",
+    "privately, yes/no (an optional person in this room, an optional one-line note). kind MUST be \"confess\",",
+    "asksTarget MUST be false, and there is NO skip option. Start with \"Have you ever\".",
+    "Examples of the exact register — confession voice:",
+    ...confess.map((p) => `  - "${p.text}"`),
+    "A confess prompt that reads like a group prompt (\"Who here…\", \"Point at…\") is WRONG and is discarded.",
+    "A group prompt that reads like a confession (\"Have you ever…\" about yourself) is WRONG and is discarded.",
+  ];
+}
+
 function systemPrompt(input: {
   phase: PromptPhase;
   playerCount: number;
   count: number;
   quotes: string[];
   callbackTarget: number;
+  style?: PromptStyle;
 }): string {
   const kinds = PHASE_KINDS[input.phase].join(", ");
   const lines = [
@@ -112,15 +161,18 @@ function systemPrompt(input: {
     `Phase: ${input.phase}. ${PHASE_BRIEF[input.phase]}`,
     `There are exactly ${input.playerCount} players, addressed only as Player 1..Player ${input.playerCount} — never real names.`,
     `Return ONE JSON array of ${input.count} objects. No prose, no markdown.`,
+    ...voiceBlock({ phase: input.phase, playerCount: input.playerCount, ...(input.style !== undefined ? { style: input.style } : {}) }),
     "Each object:",
     '  "text": string, 20-160 characters, second person, a single question or dare,',
-    '  "kind": one of: ' + kinds + ",",
+    '  "style": "group" or "confess" (see the two voices above),',
+    '  "kind": one of: ' + kinds + ', ("confess" is the ONLY kind a confess-voice prompt may use)',
     '  "coding": one of: couple, friendship, trust, friction, rivalry, status, neutral,',
     '  "measures": string[] with 1-3 short signal names this prompt extracts,',
-    '  "asksTarget": boolean (true when the player must name someone in the room),',
+    '  "asksTarget": boolean (true when the player must name someone in the room; ALWAYS false for confessions),',
     '  "callback": boolean (see below).',
     "DATA-OR-DEAD RULE: every prompt must be directed at someone in the room (or a pair, or the group)",
-    "and must extract a real signal (a directed pick, a peer rating, closeness circles, a shout, a dare outcome).",
+    "and must extract a real signal (a directed pick, a peer rating, closeness circles, a shout, a dare outcome,",
+    "or a private self-report confession).",
     "Use placeholders {P1}..{P" + input.playerCount + "} where a player is named; never write 'Player 3' inline.",
     "BANNED: favorites, zombies, desert island, untwisted 'most likely to', generic icebreakers,",
     "anything involving minors, non-consent, explicit sexual acts, real people, or illegal acts.",
@@ -253,13 +305,15 @@ export async function generateBatchReport(input: GenerateBatchInput): Promise<Ge
       purpose: "generate",
       model: provider.modelFor("grok", "generate"),
       messages: [
-        { role: "system", content: systemPrompt({ phase: input.phase, playerCount: input.playerCount, count, quotes, callbackTarget: cbTarget }) },
+        { role: "system", content: systemPrompt({ phase: input.phase, playerCount: input.playerCount, count, quotes,
+          callbackTarget: cbTarget, ...(input.style !== undefined ? { style: input.style } : {}) }) },
         {
           role: "user",
           content: JSON.stringify({
             phase: input.phase,
             players: input.playerCount,
             count,
+            ...(input.style !== undefined ? { style: input.style } : { styleMix: "group and confess, roughly half each" }),
             nightDigest: digestPayload,
             callbacksWanted: cbTarget,
           }),
@@ -313,6 +367,7 @@ export async function generateBatchReport(input: GenerateBatchInput): Promise<Ge
       usedTexts: bankTexts,
       idPrefix: "grok",
       limit: count,
+      ...(input.style !== undefined ? { style: input.style } : {}),
     });
 
     const accepted: Prompt[] = filtered.prompts;
