@@ -16,7 +16,8 @@ const limit = <T>(promise: Promise<T>, ms = 6000): Promise<T> => new Promise((re
 const event = <T>(socket: Client, name: string): Promise<T> => new Promise((resolve) => (socket as any).once(name, resolve));
 async function socketFor(port: number): Promise<Client> {
   const socket: Client = io(`http://127.0.0.1:${port}`, { transports: ["polling", "websocket"], reconnection: false, autoConnect: false });
-  socket.on("error", () => {}); const ready = event<void>(socket, "connect"); socket.connect(); await limit(ready); return socket;
+  socket.on("error", () => {}); socket.on("state", (view) => { if (view.ready) socket.emit("ready"); });
+  const ready = event<void>(socket, "connect"); socket.connect(); await limit(ready); return socket;
 }
 
 test("same-origin HTTP static export and preview-proxy Socket.IO origins", async (t) => {

@@ -14,6 +14,7 @@ import type {
   JoinReply,
   JoinRequest,
   PlayerId,
+  ResponseValue,
   RevealView,
   RoomCode,
   RoomView,
@@ -41,10 +42,22 @@ export interface TransportHandlers {
 export interface Transport {
   readonly mode: "socket" | "mock";
   setHandlers(handlers: TransportHandlers): void;
-  create(alias: string, consent: Consent): Promise<JoinReply & { code?: RoomCode }>;
+  /** `options.demo` creates a host-only demo room (every seat puppeted from
+   *  this laptop). Omitted = an ordinary room. */
+  create(alias: string, consent: Consent, options?: { demo?: boolean }): Promise<JoinReply & { code?: RoomCode }>;
   join(req: JoinRequest): Promise<JoinReply>;
   submit(req: SubmitRequest): Promise<{ ok: boolean; error?: string }>;
   darePass(req: DarePassRequest): Promise<{ ok: boolean; error?: string }> | void;
+  /** "I'm ready for the pending reveal" — the reveal waits for every phone
+   *  (spec ROUND 4), so this is what releases the moment. */
+  ready(): void;
+  /** DEMO ROOMS ONLY (host): puppeted seats, all played from this laptop. */
+  demoAddPlayer(alias: string): Promise<{ ok: boolean; playerId?: PlayerId }>;
+  demoRemovePlayer(playerId: PlayerId): void;
+  demoSetBotMode(playerId: PlayerId, mode: "auto" | "manual"): void;
+  demoAnswerAs(p: { playerId: PlayerId; roundId: string; clientUuid: string; value: ResponseValue }): void;
+  demoAllReady(): void;
+  demoSpeed(scale: number): void;
   start(): void;
   addBot(): void;
   skipRound(): void;

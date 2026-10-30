@@ -17,6 +17,7 @@ import type {
   JoinReply,
   JoinRequest,
   PlayerId,
+  ResponseValue,
   RoomCode,
   ServerToClientEvents,
   SubmitRequest,
@@ -163,7 +164,7 @@ export class SocketTransport implements Transport {
   }
 
   /** Resolves once the socket is connected (or rejects on timeout). */
-  private ready(): Promise<GameSocket> {
+  private socketReady(): Promise<GameSocket> {
     this.connect();
     const socket = this.socket!;
     if (socket.connected) return Promise.resolve(socket);
@@ -192,10 +193,10 @@ export class SocketTransport implements Transport {
   }
 
   // ----------------------------------------------------------------- API
-  async create(alias: string, consent: Consent): Promise<JoinReply & { code?: RoomCode }> {
-    const socket = await this.ready();
+  async create(alias: string, consent: Consent, options?: { demo?: boolean }): Promise<JoinReply & { code?: RoomCode }> {
+    const socket = await this.socketReady();
     const reply = await new Promise<JoinReply & { code?: RoomCode }>((resolve) => {
-      socket.timeout(this.ackTimeoutMs).emit("create", { alias, consent }, (error, r) => {
+      socket.timeout(this.ackTimeoutMs).emit("create", { alias, consent, ...(options?.demo ? { demo: true } : {}) }, (error, r) => {
         if (error) {
           this.abandonUnacknowledgedJoin(socket);
           resolve({ ok: false, error: "The server did not answer. Please try again." });
@@ -207,7 +208,7 @@ export class SocketTransport implements Transport {
   }
 
   async join(req: JoinRequest): Promise<JoinReply> {
-    const socket = await this.ready();
+    const socket = await this.socketReady();
     const reply = await new Promise<JoinReply>((resolve) => {
       socket.timeout(this.ackTimeoutMs).emit("join", req, (error, r) => {
         if (error) {
@@ -231,7 +232,7 @@ export class SocketTransport implements Transport {
   }
 
   async submit(req: SubmitRequest): Promise<{ ok: boolean; error?: string }> {
-    const socket = await this.ready();
+    const socket = await this.socketReady();
     return new Promise((resolve) => {
       socket.timeout(this.ackTimeoutMs).emit("submit", req, (error, reply) => {
         if (error) {
@@ -252,6 +253,26 @@ export class SocketTransport implements Transport {
     // forget dare_pass event succeeded.
     return this.submit({ roundId: req.roundId, clientUuid: `pass-${uuid}`, value: { kind: "dare", status: "passed", reason } });
   }
+
+  ready(): void { this.socket?.emit("ready"); }
+
+  // ------------------------------------------------------------- demo rooms
+  async demoAddPlayer(alias: string): Promise<{ ok: boolean; playerId?: PlayerId }> {
+    const socket = await this.socketReady();
+    return new Promise((resolve) => {
+      socket.timeout(this.ackTimeoutMs).emit("demo_add_player", { alias }, (error, reply) => {
+        if (error) resolve({ ok: false });
+        else resolve(reply && typeof reply.ok === "boolean" ? reply : { ok: false });
+      });
+    });
+  }
+  demoRemovePlayer(playerId: PlayerId): void { this.socket?.emit("demo_remove_player", { playerId }); }
+  demoSetBotMode(playerId: PlayerId, mode: "auto" | "manual"): void { this.socket?.emit("demo_set_bot_mode", { playerId, mode }); }
+  demoAnswerAs(p: { playerId: PlayerId; roundId: string; clientUuid: string; value: ResponseValue }): void {
+    this.socket?.emit("demo_answer_as", p);
+  }
+  demoAllReady(): void { this.socket?.emit("demo_all_ready"); }
+  demoSpeed(scale: number): void { this.socket?.emit("demo_speed", { scale }); }
 
   start(): void { this.socket?.emit("start"); }
   addBot(): void { this.socket?.emit("add_bot"); }

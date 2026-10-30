@@ -33,6 +33,14 @@ only.
   timer + `GRACE_MS` expires. `add_bot` fills a seat with a server bot (alias
   "🤖 Bot N") so the host can test solo.
 - Join = alias (2–14 chars) + consent (age 18+, terms, reveal opt-in).
+- **Demo rooms (ROUND 4).** The host may create a room with `demo: true`: every
+  seat but the host's is puppeted from one laptop so the whole game can be
+  tested alone (`demo_add_player`, `demo_set_bot_mode` auto/manual,
+  `demo_answer_as`, `demo_all_ready`, `demo_speed` 0.1–1.0). Demo rooms start
+  with 2+ seats instead of 4. Puppet answers are ordinary log records carrying
+  `impersonatedBy` metadata that the engine ignores — scoring parity is the
+  point. The controls are host-only and demo-room-only; nothing about them
+  reaches a payload besides `RoomView.demo`.
 - Reconnect: session secret in sessionStorage; `visibilitychange` → re-join →
   full `RoomView` snapshot + seq. No diff replay.
 - **Accounts (optional, ROUND 4).** `POST /api/account` with a username and a
@@ -47,6 +55,13 @@ only.
   editable per night). **Guest parity is absolute:** an account is never
   required, never gates a room, and never changes a round, a score or a claim.
   Identity outlives the 48h room purge; a night's data does not.
+
+## 1a. Reveals wait for everyone (ROUND 4)
+A closed round's reveal is **pending**: `RoomView.ready` lists who has pressed
+`ready`, no phone shows the moment yet, and the reveal fires when every
+connected player is ready. A player who drops out stops being waited for, bots
+never block, and `REVEAL_READY_GRACE_MS` (20s) reveals anyway so one AFK phone
+cannot stall the night. The host may release it early with `skip_round`.
 
 ## 2. Session flow
 `lobby → warmup → spicy → deep → dare → debrief → finale → closed`

@@ -36,7 +36,7 @@ import type {
   SubmitRequest,
   TraitId,
 } from "@shared/contracts.ts";
-import { MIN_PLAYERS, ROUND_TIMERS_MS } from "@shared/contracts.ts";
+import { MAX_PLAYERS, MIN_PLAYERS, ROUND_TIMERS_MS } from "@shared/contracts.ts";
 import { isAlias, isResponseValue, targetsOther } from "@shared/validate.ts";
 import { clearSession, saveSession } from "./session";
 import type { Transport, TransportHandlers } from "./transport";
@@ -44,6 +44,9 @@ import type { Transport, TransportHandlers } from "./transport";
 const MOCK_CODE: RoomCode = "MOCK";
 const MOCK_SECRET = "mock-secret";
 const SNAPSHOT_KEY = "reveal.mock.snapshot";
+/** The mock mirrors the real ready gate: the reveal waits for the phone, then
+ *  the grace fires it anyway (production: REVEAL_READY_GRACE_MS = 20s). */
+const MOCK_READY_GRACE_MS = 8_000;
 
 /** Demo pace: real timers (up to 330s) would make the mock unbearable.
  *  Everything is clamped to a human-scale window. */
@@ -99,6 +102,8 @@ interface Snap {
   round: RoundView | null;
   closedAt: number;
   votes: number;
+  /** a reveal that was waiting for the room when the tab was reloaded */
+  pendingReveal?: RevealView | null;
 }
 
 const BOT_NAMES = ["🤖 Bot 1", "🤖 Bot 2", "🤖 Bot 3"];
@@ -122,6 +127,14 @@ export class MockTransport implements Transport {
   private finaleTimer: ReturnType<typeof setTimeout> | null = null;
   private heatDownVotes = 0;
   private restoredSnapshot: Snap | null = null;
+  /** ROUND 4 ready gate — the computed reveal waiting for every phone. */
+  private pendingReveal: RevealView | null = null;
+  private readyIds: PlayerId[] = [];
+  private readyTimer: ReturnType<typeof setTimeout> | null = null;
+  private demo = false;
+  /** demo rooms: which seats the host puppets, and how each one answers */
+  private readonly puppets = new Set<PlayerId>();
+  private readonly puppetModes: Record<PlayerId, "auto" | "manual"> = {};
 
   constructor() {
     this.restoredSnapshot = this.readSnapshot();
@@ -161,6 +174,7 @@ export class MockTransport implements Transport {
         round: this.round,
         closedAt: this.round?.closesAt ?? 0,
         votes: this.heatDownVotes,
+        pendingReveal: this.pendingReveal,
       };
       window.sessionStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snap));
     } catch {
@@ -182,6 +196,12 @@ export class MockTransport implements Transport {
     saveSession({ code: MOCK_CODE, you: this.you, secret: MOCK_SECRET, alias: this.alias });
     this.handlers.onConnection?.(true, { resuming: true });
 
+    if (snap.pendingReveal) {
+      // A reload during the ready gate: reopen it, waiting for this phone.
+      this.seq += 1;
+      this.publishPending(snap.pendingReveal);
+      return;
+    }
     if (snap.round) {
       // Re-open the interrupted round with a fresh (short) window, so the
       // player gets their time back rather than landing on a dead screen.
@@ -209,7 +229,7 @@ export class MockTransport implements Transport {
   }
 
   // ---------------------------------------------------------------- join
-  async create(alias: string, consent: Consent): Promise<JoinReply & { code?: RoomCode }> {
+  async create(alias: string, consent: Consent, options?: { demo?: boolean }): Promise<JoinReply & { code?: RoomCode }> {
     if (!isAlias(alias)) return { ok: false, error: "Alias must be 2–14 characters." };
     if (!consent.age) return { ok: false, error: "18+ only. This room is adults." };
     if (!consent.terms) return { ok: false, error: "You have to accept the rules." };
@@ -217,6 +237,7 @@ export class MockTransport implements Transport {
     this.you = "p1";
     this.alias = alias.trim();
     this.hostId = "p1";
+    this.demo = options?.demo === true;
     this.players = [
       { id: "p1", alias: this.alias, connected: true, isBot: false },
     ];
@@ -329,8 +350,45 @@ export class MockTransport implements Transport {
 
   skipRound(): void {
     if (this.you !== this.hostId) return;
+    if (this.pendingReveal) { this.showReveal(); return; }
     if (!this.round) return;
     this.resolveRound(null);
+  }
+
+  /** ROUND 4: "I'm ready for the pending reveal." */
+  ready(): void {
+    if (!this.pendingReveal) return;
+    if (!this.readyIds.includes(this.you)) this.readyIds.push(this.you);
+    this.seq += 1;
+    this.emitState();
+    if (this.everyoneReady()) this.showReveal();
+  }
+
+  /** Bots have no phone to miss the moment — they are always ready. */
+  private everyoneReady(): boolean {
+    return this.players.filter((p) => p.connected).every((p) => this.readyIds.includes(p.id));
+  }
+
+  private publishPending(reveal: RevealView): void {
+    this.pendingReveal = reveal;
+    // Bots have no phone to miss the moment; the human still has to tap ready.
+    this.readyIds = this.players.filter((p) => p.isBot).map((p) => p.id);
+    this.emitState();
+    if (this.readyTimer) clearTimeout(this.readyTimer);
+    this.readyTimer = setTimeout(() => { this.readyTimer = null; this.showReveal(); }, MOCK_READY_GRACE_MS);
+  }
+
+  private showReveal(): void {
+    const reveal = this.pendingReveal;
+    if (!reveal) return;
+    if (this.readyTimer) clearTimeout(this.readyTimer);
+    this.readyTimer = null;
+    this.pendingReveal = null;
+    this.readyIds = [];
+    this.handlers.onReveal?.(reveal);
+    this.seq += 1;
+    this.emitState();
+    this.next();
   }
 
   customPrompts(lines: string[]): void {
@@ -367,6 +425,8 @@ export class MockTransport implements Transport {
 
   deleteRoom(): void {
     this.stopTimer();
+    this.pendingReveal = null;
+    this.readyIds = [];
     this.players = [];
     this.round = null;
     this.phase = "closed";
@@ -384,6 +444,8 @@ export class MockTransport implements Transport {
 
   forgetSession(): void {
     this.stopTimer();
+    this.pendingReveal = null;
+    this.readyIds = [];
     this.players = [];
     this.round = null;
     this.phase = "lobby";
@@ -398,6 +460,57 @@ export class MockTransport implements Transport {
   disconnect(): void {
     this.stopTimer();
   }
+
+  // ------------------------------------------------------------- demo rooms
+  // The mock keeps the same shape as the server so the demo panel is usable
+  // offline: seats are puppets that answer themselves.
+  async demoAddPlayer(alias: string): Promise<{ ok: boolean; playerId?: PlayerId }> {
+    if (!this.demo || this.you !== this.hostId || this.phase !== "lobby") return { ok: false };
+    if (this.players.length >= MAX_PLAYERS) return { ok: false };
+    const clean = alias.trim();
+    if (!isAlias(clean) || this.players.some((p) => p.alias.toLowerCase() === clean.toLowerCase())) return { ok: false };
+    const playerId = `p${this.players.length + 1}`;
+    this.players = [...this.players, { id: playerId, alias: clean, connected: true, isBot: false }];
+    this.puppets.add(playerId);
+    this.seq += 1;
+    this.emitState();
+    return { ok: true, playerId };
+  }
+  demoRemovePlayer(playerId: PlayerId): void {
+    if (!this.demo || this.you !== this.hostId || this.phase !== "lobby") return;
+    if (!this.puppets.has(playerId)) return;
+    this.puppets.delete(playerId);
+    this.players = this.players.filter((p) => p.id !== playerId);
+    this.seq += 1;
+    this.emitState();
+  }
+  demoSetBotMode(playerId: PlayerId, mode: "auto" | "manual"): void {
+    if (!this.demo || !this.puppets.has(playerId)) return;
+    this.puppetModes[playerId] = mode;
+    if (mode === "auto" && this.pendingReveal && !this.readyIds.includes(playerId)) {
+      this.readyIds.push(playerId);
+      this.seq += 1;
+      this.emitState();
+      if (this.everyoneReady()) this.showReveal();
+    }
+  }
+  demoAnswerAs(p: { playerId: PlayerId; roundId: string; clientUuid: string; value: ResponseValue }): void {
+    if (!this.demo || !this.puppets.has(p.playerId)) return;
+    if (!this.round || this.round.roundId !== p.roundId) return;
+    // The mock cannot hold two answers at once; it releases the round so the
+    // host can keep walking the script with one seat.
+    if (!targetsOther(p.value, p.playerId) && (p.value.kind === "pick" || p.value.kind === "ios")) return;
+    this.round = { ...this.round, youSubmitted: true };
+    this.resolveRound(p.value);
+  }
+  demoAllReady(): void {
+    if (!this.demo) return;
+    this.readyIds = this.players.filter((p) => p.connected).map((p) => p.id);
+    this.seq += 1;
+    this.emitState();
+    this.showReveal();
+  }
+  demoSpeed(): void { /* the mock script owns its own pace */ }
 
   async submit(req: SubmitRequest): Promise<{ ok: boolean; error?: string }> {
     if (!this.round || req.roundId !== this.round.roundId) {
@@ -502,13 +615,10 @@ export class MockTransport implements Transport {
     const mine = answer ?? autoAnswer(spec, this.round, this.you, this.players);
     const finalAnswer: ResponseValue = mine ?? { kind: "text", text: "Passed." };
 
-    this.handlers.onReveal?.(
-      buildReveal(this.round, spec, finalAnswer, this.players, this.you)
-    );
+    const reveal = buildReveal(this.round, spec, finalAnswer, this.players, this.you);
     this.round = null;
-    this.seq += 1;
-    this.emitState();
-    this.next();
+    // ROUND 4: the reveal is PENDING until this phone (and every other) is ready.
+    this.publishPending(reveal);
   }
 
   private armTimer(ms: number): void {
@@ -521,6 +631,8 @@ export class MockTransport implements Transport {
   }
 
   private stopTimer(): void {
+    if (this.readyTimer) clearTimeout(this.readyTimer);
+    this.readyTimer = null;
     if (this.timer) clearTimeout(this.timer);
     if (this.finaleTimer) clearTimeout(this.finaleTimer);
     this.timer = null;
@@ -545,6 +657,8 @@ export class MockTransport implements Transport {
       players: this.players,
       round: this.round,
       seq: this.seq,
+      ...(this.demo ? { demo: true } : {}),
+      ...(this.pendingReveal ? { ready: [...this.readyIds] } : {}),
     };
   }
 

@@ -19,6 +19,8 @@ const once = <T>(s: Client, event: string): Promise<T> => new Promise((resolve) 
 async function connected(base: string): Promise<Client> {
   const s: Client = io(base, { transports: ["polling", "websocket"], forceNew: true, reconnection: false, autoConnect: false });
   s.on("error", () => {});
+  // Simulated phones press ready the moment a reveal is pending (ROUND 4).
+  s.on("state", (view) => { if (view.ready) s.emit("ready"); });
   const done = once<void>(s, "connect"); s.connect(); await deadline(done); return s;
 }
 const create = (s: Client, alias: string): Promise<JoinReply & { code?: string }> => new Promise((resolve) => s.emit("create", { alias, consent }, resolve));

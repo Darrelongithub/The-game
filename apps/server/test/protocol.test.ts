@@ -28,6 +28,7 @@ async function setup(t: TestContext, options: ServerOptions = {}) {
   const connect = async (): Promise<Client> => {
     const client: Client = io(base, { forceNew: true, transports: ["polling", "websocket"], reconnection: false, autoConnect: false });
     clients.push(client); client.on("error", () => {});
+    client.on("state", (view) => { if (view.ready) client.emit("ready"); });
     const ready = event<void>(client, "connect"); client.connect(); await limit(ready); return client;
   };
   return { server, connect, dir, base };

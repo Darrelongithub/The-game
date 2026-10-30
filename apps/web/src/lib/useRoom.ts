@@ -20,6 +20,7 @@ import type {
   SubmitRequest,
 } from "@shared/contracts.ts";
 import { createTransport, roundTargetsMe, transportMode, type Transport, type TransportHandlers } from "./transport";
+import { demoAnswerValue } from "./demoAnswer";
 import { clearSession, loadSession, saveSession } from "./session";
 
 export interface UseRoom {
@@ -38,7 +39,21 @@ export interface UseRoom {
   secrets: SecretDeckView | null;
   mustAnswer: boolean;
   /** lobby actions */
-  createRoom: (alias: string, consent: Consent) => Promise<JoinReply & { code?: RoomCode }>;
+  createRoom: (alias: string, consent: Consent, options?: { demo?: boolean }) => Promise<JoinReply & { code?: RoomCode }>;
+  /** "I'm ready for the pending reveal" (reveals wait for everyone) */
+  ready: () => void;
+  /** DEMO ROOMS (host only): puppeted seats played from this laptop */
+  demo: boolean;
+  demoAddPlayer: (alias: string) => Promise<{ ok: boolean; playerId?: PlayerId }>;
+  demoRemovePlayer: (playerId: PlayerId) => void;
+  demoSetBotMode: (playerId: PlayerId, mode: "auto" | "manual") => void;
+  demoAnswerAs: (playerId: PlayerId) => void;
+  demoAllReady: () => void;
+  demoSpeed: (scale: number) => void;
+  /** players still to press ready for the pending reveal; null when none is pending */
+  awaitingReady: PlayerId[] | null;
+  /** this phone has already pressed ready for the pending reveal */
+  youAreReady: boolean;
   joinRoom: (code: RoomCode, alias: string, consent: Consent) => Promise<JoinReply>;
   start: () => void;
   addBot: () => void;
@@ -182,11 +197,11 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
     setHasSession(false);
   }, []);
 
-  const createRoom = useCallback(async (alias: string, consent: Consent) => {
+  const createRoom = useCallback(async (alias: string, consent: Consent, options?: { demo?: boolean }) => {
     const t = transportRef.current ?? await transportReady.current?.catch(() => null);
     if (!t) return { ok: false, error: "Not connected yet. Please retry." } satisfies JoinReply;
     setError(null);
-    const reply = await t.create(alias, consent);
+    const reply = await t.create(alias, consent, options);
     if (reply.ok && reply.you) {
       setYou(reply.you);
       if (reply.state) setView(reply.state);
@@ -244,6 +259,24 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
     [round]
   );
 
+  const ready = useCallback(() => transportRef.current?.ready(), []);
+  const demoAddPlayer = useCallback(async (alias: string) => {
+    const t = transportRef.current;
+    if (!t) return { ok: false };
+    return t.demoAddPlayer(alias);
+  }, []);
+  const demoRemovePlayer = useCallback((playerId: PlayerId) => transportRef.current?.demoRemovePlayer(playerId), []);
+  const demoSetBotMode = useCallback((playerId: PlayerId, mode: "auto" | "manual") => transportRef.current?.demoSetBotMode(playerId, mode), []);
+  const demoAllReady = useCallback(() => transportRef.current?.demoAllReady(), []);
+  const demoSpeed = useCallback((scale: number) => transportRef.current?.demoSpeed(scale), []);
+  /** Send a plausible answer for a puppeted seat on the open round. */
+  const demoAnswerAs = useCallback((playerId: PlayerId) => {
+    const t = transportRef.current;
+    if (!t || !round || !view) return;
+    const value = demoAnswerValue(round, playerId, view.players);
+    if (!value) return;
+    t.demoAnswerAs({ playerId, roundId: round.roundId, clientUuid: clientUuid(), value });
+  }, [round, view]);
   const start = useCallback(() => transportRef.current?.start(), []);
   const addBot = useCallback(() => transportRef.current?.addBot(), []);
   const skipRound = useCallback(() => transportRef.current?.skipRound(), []);
@@ -257,6 +290,14 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
 
   const isHost = Boolean(view && you && view.hostId === you);
   const mustAnswer = useMemo(() => roundTargetsMe(round, you), [round, you]);
+  // A reveal is pending while the snapshot carries a `ready` list: whoever is
+  // not on it has not looked up yet, and the moment waits for them.
+  const awaitingReady = useMemo<PlayerId[] | null>(() => {
+    if (!view?.ready) return null;
+    const readyIds = new Set(view.ready);
+    return view.players.filter((p) => p.connected && !readyIds.has(p.id)).map((p) => p.id);
+  }, [view]);
+  const youAreReady = Boolean(view?.ready && you && view.ready.includes(you));
 
   return {
     mode,
@@ -275,6 +316,16 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
     mustAnswer,
     createRoom,
     joinRoom,
+    ready,
+    demo: Boolean(view?.demo),
+    demoAddPlayer,
+    demoRemovePlayer,
+    demoSetBotMode,
+    demoAnswerAs,
+    demoAllReady,
+    demoSpeed,
+    awaitingReady,
+    youAreReady,
     start,
     addBot,
     skipRound,

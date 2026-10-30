@@ -36,7 +36,7 @@ export function JoinScreen({
   hasSession: boolean;
   busy: boolean;
   error: string | null;
-  onCreate: (alias: string, consent: Consent) => Promise<JoinReply & { code?: RoomCode }>;
+  onCreate: (alias: string, consent: Consent, options?: { demo?: boolean }) => Promise<JoinReply & { code?: RoomCode }>;
   onJoin: (code: RoomCode, alias: string, consent: Consent) => Promise<JoinReply>;
 }) {
   const [tab, setTab] = useState<Tab>("create");
@@ -44,6 +44,8 @@ export function JoinScreen({
   const [code, setCode] = useState("");
   const [revealOptIn, setRevealOptIn] = useState(true);
   const [showPrivacyOptions, setShowPrivacyOptions] = useState(false);
+  // ROUND 4: a demo room lets one host play every seat on one laptop.
+  const [demoRoom, setDemoRoom] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -70,7 +72,7 @@ export function JoinScreen({
     const consent: Consent = { age: true, terms: true, revealOptIn };
     try {
       const reply = tab === "create"
-        ? await onCreate(alias.trim(), consent)
+        ? await onCreate(alias.trim(), consent, demoRoom ? { demo: true } : undefined)
         : await onJoin(code, alias.trim(), consent);
       if (!reply.ok) setLocalError(reply.error ?? "Could not get in.");
     } catch (err) {
@@ -121,6 +123,24 @@ export function JoinScreen({
                   autoCapitalize="characters" spellCheck={false} inputMode="text" />
                 <p className="text-[11px] text-white/45 mb-4">Paste or type the four characters from your host.</p>
               </>}
+
+              {tab === "create" && (
+                <button
+                  type="button"
+                  onClick={() => setDemoRoom((value) => !value)}
+                  aria-pressed={demoRoom}
+                  className={clsx(
+                    "mb-4 flex min-h-[48px] w-full items-center justify-between rounded-xl px-3 text-left text-xs",
+                    demoRoom ? "bg-lime-accent/15 text-lime-accent" : "bg-white/5 text-white/55"
+                  )}
+                >
+                  <span>
+                    Demo room
+                    <span className="block text-[11px] text-white/40">Test the whole game alone on this laptop.</span>
+                  </span>
+                  <span className="text-[10px] uppercase tracking-[0.18em]">{demoRoom ? "on" : "off"}</span>
+                </button>
+              )}
 
               <div className="mb-4 flex flex-wrap items-center gap-x-4">
                 <button type="button" onClick={() => setShowPrivacyOptions((value) => !value)} aria-expanded={showPrivacyOptions}
