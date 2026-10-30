@@ -227,12 +227,18 @@ export function computeResults(
     const ba = directedPicks(picks, b, a, (c) => c === "couple");
     if (ab.hits < SPARK_MIN_MUTUAL || ba.hits < SPARK_MIN_MUTUAL) continue;
     const s = signalFor(a, b);
+    // R27: a spark is an announcement, not a reward for two mutual picks.
+    // Reuse the R18 confidence machinery: at least three INDEPENDENT measured
+    // signal types (componentsUsed clearing the existing support bars) must
+    // support the pair. No new score, weight or threshold is introduced.
+    const supports = pairSupportCount(s, s.coupleEvidence);
+    if (supports < CONFIDENCE_RULES.high.independentSignals) continue;
     sparkClaims.push({
       id: `spark-${a}-${b}`,
       type: "spark",
       subjects: [a, b],
       audience: "private", // ALWAYS private → Secret Cards
-      confidence: confidenceFromCount(pairSupportCount(s, s.coupleEvidence)),
+      confidence: confidenceFromCount(supports),
       evidence: [
         `${pseudoOf(meta, a)} and ${pseudoOf(meta, b)} picked each other on couple-coded rounds.`,
         ...pairEvidenceLines(meta, s).slice(0, 2),

@@ -19,6 +19,7 @@ import {
   resolveGeminiModel,
 } from "../../shared/src/contracts.ts";
 import { CallGuard, callGuard, type CallPurpose } from "./guard.ts";
+import { aliasPattern, replaceAliasTokens } from "../../../lib/aliases.ts";
 
 export type Lane = "grok" | "gemini";
 
@@ -95,27 +96,11 @@ function keyOf(value: string | null | undefined): string | null {
   return trimmed.length === 0 ? null : trimmed;
 }
 
-/**
- * Alias matcher: whole-token, case-insensitive, unicode-aware. Word boundaries
- * matter — a two-letter alias like "Mo" must not rewrite `"model"` in a JSON
- * body (which would corrupt the request AND leak nothing but still break it).
- */
-function aliasPattern(alias: string): RegExp | null {
-  const clean = alias.trim().normalize("NFC");
-  if (clean.length < 2) return null;
-  const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "giu");
-}
-
-/** Rewrite any known alias to a neutral in-room reference (pseudonyms only). */
+/** Rewrite eligible aliases in one whole-word pass (shared R22 policy). */
 export function redactAliases(text: string, aliases: readonly string[] | undefined): string {
   if (!text || !aliases || aliases.length === 0) return text;
-  let out = text.normalize("NFC");
-  for (const alias of aliases) {
-    const pattern = typeof alias === "string" ? aliasPattern(alias) : null;
-    if (pattern) out = out.replace(pattern, "someone in the room");
-  }
-  return out;
+  return replaceAliasTokens(text, aliases.filter((alias) => typeof alias === "string")
+    .map((alias) => ({ alias, replacement: "someone in the room" })));
 }
 
 /** True when a payload still contains a real alias (used by tests/asserts). */

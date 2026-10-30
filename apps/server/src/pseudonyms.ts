@@ -1,4 +1,5 @@
 import { pseudonym } from "../../../packages/shared/src/contracts.ts";
+import { replaceAliasTokens } from "../../../lib/aliases.ts";
 
 export interface AliasEntry { alias: string; id: string; }
 
@@ -7,19 +8,14 @@ export function aliasTable(players: AliasEntry[]): { alias: string; token: strin
   return players.map((p, i) => ({ alias: p.alias.normalize("NFC"), token: pseudonym(i) }));
 }
 
-/** Replace whole alias tokens only. Unicode letters/digits/underscore count as word characters. */
+/** Whole-word, escaped, case-insensitive replacement in one pass. The shared
+ * ALIAS_REPLACE_MIN policy also protects short names from accidental recoding. */
 export function pseudonymizeText(text: string, players: AliasEntry[]): string {
-  text = text.normalize("NFC");
-  const table = aliasTable(players).sort((a, b) => b.alias.length - a.alias.length || a.token.localeCompare(b.token));
-  for (const entry of table) {
-    const escaped = entry.alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, "giu");
-    text = text.replace(re, entry.token);
-  }
-  return text;
+  return replaceAliasTokens(text, aliasTable(players).map(({ alias, token }) => ({ alias, replacement: token })));
 }
 
-/** Swap provider pseudonyms back only when an entire Player N token matches. */
+/** One callback-based pass: aliases containing `$&` stay literal, and a newly
+ * restored alias is never consumed by a later Player N replacement. */
 export function restoreAliases(text: string, players: AliasEntry[]): string {
-  return text.replace(/\bPlayer (1[01]|[1-9])\b/g, (match, n: string) => players[Number(n) - 1]?.alias ?? match);
+  return text.replace(/\bPlayer (1[01]|[1-9])\b/gi, (match, n: string) => players[Number(n) - 1]?.alias ?? match);
 }
