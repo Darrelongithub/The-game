@@ -7,7 +7,7 @@
 //
 // Pure functions only: no I/O, no randomness, no provider calls. Every drop is
 // reported with a reason so the caller can log it (never to players).
-import { MAX_PLAYERS, type Prompt, type PromptCoding, type RoundKind } from "../../shared/src/contracts.ts";
+import { MAX_PLAYERS, type Prompt, type PromptCoding, type PromptStyle, type RoundKind } from "../../shared/src/contracts.ts";
 import { ANY_BRACE_RE, PHASE_KINDS, type PromptPhase } from "./bank/index.ts";
 import { jaccard, normalizeForDedupe } from "./text.ts";
 
@@ -37,6 +37,8 @@ export const ROUND_KINDS: readonly RoundKind[] = [
   "dare",
   "pair_dare",
   "debrief",
+  // THE SECOND VOICE: a private self-report round (yes/no + optional target).
+  "confess",
 ] as const;
 
 /** Kinds a self-rating may use (they feed blind spots — evaluative traits only). */
@@ -122,7 +124,10 @@ export const ROOM_REFERENCES: readonly RegExp[] = [
 ];
 
 /** Round kinds whose answer is necessarily someone in the room (contract §3). */
-const INHERENTLY_DIRECTED: ReadonlySet<RoundKind> = new Set(["pick", "ios", "pair_dare", "debrief"]);
+// A confession is a self-report ABOUT this room ("Have you ever…"): it always
+// extracts a signal (a private yes/no, an optional target, a note), so it is
+// directed by construction — the data-or-dead rule is satisfied, not waived.
+const INHERENTLY_DIRECTED: ReadonlySet<RoundKind> = new Set(["pick", "ios", "pair_dare", "debrief", "confess"]);
 /** Group-signal kinds: a shout word / tap-war score is room data (digest §15). */
 const GROUP_SIGNAL: ReadonlySet<RoundKind> = new Set(["shout", "minigame"]);
 
@@ -148,6 +153,11 @@ const KIND_ALIASES: Record<string, RoundKind> = {
   pair_dare_round: "pair_dare",
   follow_up: "debrief",
   followup: "debrief",
+  confession: "confess",
+  confessional: "confess",
+  selfreport: "confess",
+  self_report: "confess",
+  haveyouever: "confess",
 };
 
 const CODING_ALIASES: Record<string, PromptCoding> = {
@@ -173,6 +183,8 @@ export interface CandidateShape {
   id?: unknown;
   phase?: unknown;
   kind?: unknown;
+  /** THE SECOND VOICE: "group" (default) or "confess" (self-report). */
+  style?: unknown;
   text?: unknown;
   measures?: unknown;
   coding?: unknown;
@@ -195,6 +207,7 @@ export type DropReason =
   | "not-room-directed"
   | "data-or-dead"
   | "id-used"
+  | "style"
   | "duplicate";
 
 export interface Dropped {
@@ -310,6 +323,15 @@ export function normalizeKind(raw: unknown): RoundKind | null {
   return KIND_ALIASES[key] ?? null;
 }
 
+/** THE SECOND VOICE: which register a candidate is written in. */
+export function normalizeStyle(raw: unknown): PromptStyle | null {
+  if (typeof raw !== "string") return null;
+  const key = raw.trim().toLowerCase().replace(/[\s_-]+/g, "");
+  if (key === "group" || key === "room" || key === "pick") return "group";
+  if (key === "confess" || key === "confession" || key === "selfreport" || key === "haveyouever") return "confess";
+  return null;
+}
+
 export function normalizeCoding(raw: unknown): PromptCoding | null {
   if (typeof raw !== "string") return null;
   const key = raw.trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -328,6 +350,8 @@ export interface FilterContext {
   idPrefix?: string;
   /** Max accepted prompts (default 15). */
   limit?: number;
+  /** THE SECOND VOICE: when set, only candidates in this register survive. */
+  style?: PromptStyle;
   minChars?: number;
   maxChars?: number;
 }
@@ -382,6 +406,18 @@ export function normalizeCandidate(
     return { reason: "kind", detail: `${kind} is not a ${ctx.phase} kind` };
   }
 
+  // Style is a hard register: a confess prompt is kind "confess", and a
+  // confess-style candidate can never masquerade as a group prompt or back.
+  const declaredStyle = normalizeStyle(c.style);
+  if (c.style !== undefined && declaredStyle === null) return { reason: "style", detail: String(c.style) };
+  const style: PromptStyle = declaredStyle ?? ctx.style ?? (kind === "confess" ? "confess" : "group");
+  if (ctx.style !== undefined && style !== ctx.style) {
+    return { reason: "style", detail: `${style} is not the requested ${ctx.style} voice` };
+  }
+  if ((style === "confess") !== (kind === "confess")) {
+    return { reason: "style", detail: `kind ${kind} cannot be written in the ${style} voice` };
+  }
+
   const coding = normalizeCoding(c.coding);
   if (!coding) return { reason: "coding", detail: String(c.coding) };
 
@@ -416,7 +452,7 @@ export function normalizeCandidate(
   }
 
   return {
-    prompt: { id, source: "grok", phase: ctx.phase, kind, text, measures, coding, asksTarget },
+    prompt: { id, source: "grok", phase: ctx.phase, kind, text, measures, coding, asksTarget, style },
   };
 }
 

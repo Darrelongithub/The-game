@@ -5,7 +5,7 @@
 // if the lane is silent, if the budget is spent, if the night is offline, the
 // bank still fills every slot. Host custom lines sit in front of the bank for
 // their phase because the host asked for them tonight.
-import type { NightDigest, Prompt } from "../../shared/src/contracts.ts";
+import type { NightDigest, Prompt, PromptStyle } from "../../shared/src/contracts.ts";
 import {
   bankCounts,
   loadBank,
@@ -154,7 +154,7 @@ export class PromptProvider {
    */
   async generateInBackground(
     phase: PromptPhase,
-    opts: { count?: number; digest?: NightDigest | null; playerCount?: number } = {},
+    opts: { count?: number; digest?: NightDigest | null; playerCount?: number; style?: PromptStyle } = {},
   ): Promise<Prompt[]> {
     const state = this.generationState(phase);
     if (state.inFlight) return [];
@@ -170,6 +170,7 @@ export class PromptProvider {
         count: opts.count,
         provider: this.provider,
         aliases: this.aliases,
+        ...(opts.style !== undefined ? { style: opts.style } : {}),
       });
       this.augment(report.prompts);
       this.generationByPhase.set(phase, {

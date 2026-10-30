@@ -35,6 +35,10 @@ export function demoAnswerValue(round: RoundView, seat: PlayerId, players: Playe
     case "dare":
     case "pair_dare":
       return { kind: "dare", status: "done" };
+    case "confess":
+      // A demo seat confesses about itself; alternate so a rehearsal shows both
+      // sides of the count. No target: a confession is never about someone else.
+      return { kind: "confess", yes: index % 2 === 0 };
     default:
       return { kind: "text", text: TEXTS[index % TEXTS.length]! };
   }

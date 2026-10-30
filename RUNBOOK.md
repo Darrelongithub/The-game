@@ -18,15 +18,45 @@ is not restricted to localhost. Stop the host with Ctrl+C. The command builds
 `apps/web/out/` and serves it from the game server's origin on port 3001.
 
 No `.env` is required. With neither API key set, the finished game uses the
-bank and templates without internet after installation. Optional settings:
+bank and templates without internet after installation. Prompt generation also
+tries local Ollama, with no key required. Optional settings:
 
 ```sh
 cp .env.example .env
-# Edit .env only if desired; HOST, PORT, XAI_API_KEY and GEMINI_API_KEY are optional.
+# Edit .env only if desired; HOST, PORT, GEN_BASE, GEN_MODEL and cloud keys are optional.
 ```
 
 Already-set environment variables take precedence over `.env`. Never commit or
 share `.env`, room logs, session secrets or API keys.
+
+## Local prompt generation (host laptop)
+
+1. Install Ollama on the **same laptop** as the Node game server and start the
+   Ollama service (normally bound to localhost port 11434).
+2. Download the model once: `ollama pull dolphin-mistral`.
+3. Leave the defaults in `.env`, or set:
+   ```sh
+   GEN_BASE=http://localhost:11434/v1
+   GEN_MODEL=dolphin-mistral
+   ```
+4. Optional service check from the laptop: `curl http://localhost:11434/v1/models`.
+   Then run `npm run host` normally. After changing `.env`, restart the host.
+
+`GEN_MODEL` wins over the dormant legacy `XAI_MODEL` override. Generation uses
+OpenAI-compatible `/chat/completions` without an Authorization header. It does
+not use xAI, Google, an API key, or a cloud account. Existing cloud analysis and
+reveal settings are independent and unchanged.
+
+Do **not** expose Ollama to the LAN or put its URL in browser code: players'
+phones talk only to the game server on port 3001. `localhost` here means the
+server laptop. If the server is containerized, localhost is the container, so
+configure `GEN_BASE` to a host-reachable address instead.
+
+If Ollama is stopped, the model is missing, a request times out, or returned
+prompts fail validation, bank prompts keep the game running. Generation remains
+background-only with the existing eight-second request deadline; a slow laptop
+may therefore use mostly bank prompts. No successful generation is required to
+start or finish a night. Download dependencies and the model before going offline.
 
 ## Solo test
 
@@ -194,20 +224,38 @@ oracle, and removes the files afterward. Do not use this fixture with real playe
 
 ## Round list (what a night actually runs)
 
-Each heat phase opens with its normal rounds and closes with its live moments:
+Each heat phase opens with its group question rounds, deals two private
+confessions, and closes with its live moments:
 
-| phase | rounds | live moments |
-|---|---|---|
-| warmup | 3 questions (pick / shout / text …) | 1 spotlight |
-| spicy | 3 questions (pick / rating / ios …) | 1 spotlight, 1 verdict |
-| deep | 3 questions (text / minigame / pick …) | 1 spotlight, 1 verdict |
-| dare | 2 dares + the pair dare | 1 spotlight, 1 verdict |
-| debrief | 2 private pair texts (onlyPlayers) | — |
+| phase | group rounds | confessions | live moments |
+|---|---|---|---|
+| warmup | 4 (pick / pick / shout / text) | 2 | 1 spotlight |
+| spicy | 4 (pick / pick / rating / ios) | 2 | 1 spotlight, 1 verdict |
+| deep | 4 (text / minigame / pick / pick) | 2 | 1 spotlight, 1 verdict |
+| dare | 2 dares + the pair dare | — | 1 spotlight, 1 verdict |
+| debrief | 2 private pair texts (onlyPlayers) | — | — |
+
+A group seed that carries a paired confession may also be followed by its twin
+1–3 rounds later (at most once per phase), which adds one extra confess round to
+that phase.
 
 **spotlight (25s):** one player is watched; everyone else captions them in ≤80
 characters. The subject's own phone shows a decoy question or an idle screen and
 never the real prompt. The reveal is a caption wall that ends on the subject's
 own decoy answer (~8s).
+
+**confess (20s):** the same "Have you ever…" question on every phone, answered
+about yourself — Yes or No, an optional person to point at (only after a Yes),
+an optional one-liner. There is **no skip button**: leaving it closes as
+MISSING, and a missing answer is never turned into a "no". The reveal obeys the
+heat: in **warmup (warm tier)** the room only sees the count — "4 of 7 said
+yes." — with notes shown as "Someone wrote: …"; in **spicy, deep and dare (spicy
+tier)** the YES answers are named by alias and yes-notes are attributed, while a
+NO is only ever a number and a note attached to a no stays anonymous. That rule
+holds in every tier, including the finale: if the room's group guess and the
+confessions disagree you will see one "Perception and reality" slide that names
+the room's guess and counts the yeses ("The room was sure it was Player 3. Two
+people just said yes.") — never a no, never a name behind a no.
 
 **verdict (105s):** the room argues for 90 seconds with phones face-down, then
 everyone secretly picks at the same time (15s, self excluded). The reveal is a

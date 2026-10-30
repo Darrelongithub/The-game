@@ -9,6 +9,7 @@ import {
   type PlayerId,
   type RoomMeta,
 } from "../../shared/src/contracts.ts";
+import { confessionComponent } from "./confess.ts";
 import {
   assertScorableMeta,
   buildDebriefSims,
@@ -25,23 +26,32 @@ import {
   type RatingIndex,
 } from "./internal.ts";
 
-export interface PairWeights {
-  pickOverlap: number;
-  mutualPick: number;
-  debriefSim: number;
-  iosMean: number;
-  traitAgreement: number;
-}
+export type PairComponent = PairSignal["componentsUsed"][number];
+export type PairWeights = Record<PairComponent, number>;
+
+/**
+ * THE SECOND VOICE is EVIDENCE, never a scoring component: "confession" carries
+ * weight 0, so it never moves pair_score — it only counts toward the
+ * ≥3-independent-types rule (see results.pairSupportCount). The frozen spec §5
+ * weights are untouched.
+ */
+export const DEFAULT_PAIR_WEIGHTS: PairWeights = { ...DEFAULT_WEIGHTS, confession: 0 };
+
+/** The raw 0..1 value of one pair component (absent optional ones read 0). */
+export const pairComponentValue = (
+  s: Pick<PairSignal, PairComponent | "componentsUsed">,
+  key: PairComponent,
+): number => (key === "confession" ? s.confession ?? 0 : s[key]);
 
 /** Weighted pair_score from raw components (spec §5 formula). */
 export function pairScoreOf(
-  s: Pick<PairSignal, "pickOverlap" | "mutualPick" | "debriefSim" | "iosMean" | "traitAgreement" | "componentsUsed">,
-  weights: PairWeights = DEFAULT_WEIGHTS,
+  s: Pick<PairSignal, PairComponent | "componentsUsed">,
+  weights: PairWeights = DEFAULT_PAIR_WEIGHTS,
 ): number {
   const used = s.componentsUsed;
   const denominator = used.reduce((sum, key) => sum + weights[key], 0);
   if (denominator <= 0) return 0;
-  return clamp01(used.reduce((sum, key) => sum + weights[key] * s[key], 0) / denominator);
+  return clamp01(used.reduce((sum, key) => sum + weights[key] * pairComponentValue(s, key), 0) / denominator);
 }
 
 /** One direction of trait agreement: self-ratings of `of` vs peer ratings of `of` written by `by`. */
@@ -118,6 +128,10 @@ export function computeSignals(allRecords: LogRecord[], meta: RoomMeta): PairSig
       if (dba !== undefined) dirs.push(dba);
       const traitAgreement = dirs.length === 0 ? 0 : meanOf(dirs);
 
+      // THE SECOND VOICE: a confess answer WITH a target feeds the pair
+      // machinery as its own component type. Evidence only — weight 0.
+      const confession = confessionComponent(log, a, b);
+
       const components = {
         pickOverlap: clamp01(pickOverlap),
         mutualPick: clamp01(mutualPick),
@@ -131,13 +145,15 @@ export function computeSignals(allRecords: LogRecord[], meta: RoomMeta): PairSig
       if (debriefSims.has(pairKey(a, b))) componentsUsed.push("debriefSim");
       if (iab !== undefined || iba !== undefined) componentsUsed.push("iosMean");
       if (dab !== undefined || dba !== undefined) componentsUsed.push("traitAgreement");
+      if (confession.used) componentsUsed.push("confession");
       out.push({
         room: meta.roomId,
         a,
         b,
         ...components,
+        ...(confession.used ? { confession: confession.value } : {}),
         componentsUsed,
-        pairScore: pairScoreOf({ ...components, componentsUsed }, DEFAULT_WEIGHTS),
+        pairScore: pairScoreOf({ ...components, ...(confession.used ? { confession: confession.value } : {}), componentsUsed }),
         coupleEvidence: clamp01(coupleEvidence),
         friendEvidence: clamp01(friendEvidence),
         negativeMutual: clamp01(negativeMutual),

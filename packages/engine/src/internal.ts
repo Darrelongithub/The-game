@@ -35,6 +35,8 @@ export const ENGINE_TUNING = {
     debriefSim: 0.6, // a measured similarity must clear this evidence bar
     iosMean: 0.65,
     traitAgreement: 0.8, // uniform-random ratings average ~0.633; 0.8 means mean |self-peer| <= 1.8
+    /** A confess self-report counts as an independent type above this share. */
+    confession: 0.5,
   },
   /** Rivals need a mid-range pair_score: close enough to matter, not a ship. */
   rivalPairScoreMid: { min: 0.2, max: 0.65 },

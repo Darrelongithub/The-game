@@ -14,6 +14,7 @@ import {
   SPICY_TIER,
   type Prompt,
   type PromptCoding,
+  type PromptStyle,
   type RoundKind,
 } from "../../../shared/src/contracts.ts";
 
@@ -26,9 +27,11 @@ export const BANK_PHASES: readonly PromptPhase[] = ["warmup", "spicy", "deep", "
 
 /** Round kinds that make sense in each phase (spec §3 + the bank's own mix). */
 export const PHASE_KINDS: Record<PromptPhase, readonly RoundKind[]> = {
-  warmup: ["pick", "text", "shout", "rating", "ios", "minigame"],
-  spicy: ["pick", "text", "shout", "rating", "ios", "minigame"],
-  deep: ["pick", "text", "shout", "rating", "ios", "minigame"],
+  // "confess" — THE SECOND VOICE: a private self-report round. Same question to
+  // everyone, answered about themselves (yes/no + optional target + note).
+  warmup: ["pick", "text", "shout", "rating", "ios", "minigame", "confess"],
+  spicy: ["pick", "text", "shout", "rating", "ios", "minigame", "confess"],
+  deep: ["pick", "text", "shout", "rating", "ios", "minigame", "confess"],
   dare: ["dare", "pair_dare", "debrief"],
 };
 
@@ -98,11 +101,17 @@ export interface BankOptions {
 export function loadBank(opts: BankOptions = {}): Prompt[] {
   const spicy = opts.spicy ?? spicyTierEnabled();
   const out: Prompt[] = [];
+  const stamp = (row: BankEntry): Prompt => ({
+    ...row,
+    source: "bank",
+    // Back-compat: an untagged row is a GROUP question ("Who here…").
+    style: row.style ?? (row.kind === "confess" ? "confess" : "group"),
+  });
   for (const phase of BANK_PHASES) {
-    for (const row of RAW_BANK.phases[phase]) out.push({ ...row, source: "bank" });
+    for (const row of RAW_BANK.phases[phase]) out.push(stamp(row));
     if (spicy) {
       for (const row of RAW_BANK.unhinged) {
-        if (row.phase === phase) out.push({ ...row, source: "bank" });
+        if (row.phase === phase) out.push(stamp(row));
       }
     }
   }

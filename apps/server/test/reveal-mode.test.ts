@@ -48,7 +48,7 @@ const event = <T>(client: Client, name: string, predicate: (payload: T) => boole
     (client as any).on(name, handler);
   });
 
-const ALL_KINDS: RoundKind[] = ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare", "debrief", "spotlight", "verdict"];
+const ALL_KINDS: RoundKind[] = ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare", "debrief", "spotlight", "verdict", "confess"];
 const fastTimers = (ms: number): Record<RoundKind, number> =>
   Object.fromEntries(ALL_KINDS.map((kind) => [kind, ms])) as Record<RoundKind, number>;
 const connect = async (base: string, clients: Client[]): Promise<Client> => {
@@ -134,6 +134,7 @@ async function playNight(
     if (round.youSubmitted || round.expectsAnswer === false) return;
     if (round.onlyPlayers && !round.onlyPlayers.includes(myId)) return;
     const value: ResponseValue = round.kind === "shout" ? { kind: "shout", word: "chaos" }
+      : round.kind === "confess" ? { kind: "confess", yes: true, note: "Yes, and I would do it again." }
       : round.kind === "text" || round.kind === "spotlight" ? { kind: "text", text: "An answer from the host seat." }
       : round.kind === "debrief" ? { kind: "text", text: "The pair debrief stayed private." }
       : round.kind === "rating" ? { kind: "rating", trait: round.trait!, about: round.about!, value: 6 }

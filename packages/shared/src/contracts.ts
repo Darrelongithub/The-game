@@ -30,7 +30,13 @@ export type RoundKind =
 //               moment; the subject gets a DECOY round and never sees it.
 //   verdict   — open discussion for VERDICT_DISCUSS_MS, then a simultaneous
 //               secret pick; the reveal is a Group Announcement mini-finale.
-| "spotlight" | "verdict";
+| "spotlight" | "verdict"
+// THE SECOND VOICE (CONFESS ROUNDS). A confess round asks the SAME question of
+// everyone and every player answers about THEMSELVES, privately: yes/no, an
+// optional target and an optional one-line note. Group rounds ("Who here…")
+// capture the room's perception; confess rounds ("Have you ever…") capture
+// reality. No skip option — a non-answer stays missing, never "no".
+| "confess";
 
 export type PromptCoding =
 | "couple" | "friendship" | "trust" | "friction" | "tease" | "rivalry" | "status" | "neutral";
@@ -44,7 +50,26 @@ export interface Prompt {
     measures: string[];
     coding: PromptCoding;
     asksTarget: boolean;
+    /** THE SECOND VOICE: which register this prompt is written in.
+     *  "group"   — addressed to the room, everyone picks someone else.
+     *  "confess" — second person, self-report ("Have you ever…"), answered
+     *              about the player themselves.
+     *  Absent means "group" (back-compat for host lines and old rows). */
+    style?: PromptStyle;
+    /** PAYOFF: links a group seed to the confess seed on the SAME topic. The
+     *  director may schedule the confess twin 1–3 rounds after its group twin
+     *  — the room's perception, then the room's reality. */
+    twinId?: string;
 }
+
+/** THE 50/50 — prompts come in two voices; the night balances them. */
+export type PromptStyle = "group" | "confess";
+/** Share of QUESTION rounds per style. Sums to 1 (selfcheck asserts it). */
+export const STYLE_MIX = { group: 0.5, confess: 0.5 } as const;
+/** A confession's optional one-line note — a digest gold nugget, not an essay. */
+export const CONFESS_NOTE_MAX = 140;
+/** How long after its group twin a confess twin may be scheduled (rounds). */
+export const TWIN_WINDOW = { min: 1, max: 3 } as const;
 
 // ---------- Responses & log ----------
 export type TraitId = "loyalty" | "chaos" | "reliability" | "warmth" | "honesty" | "spice";
@@ -58,6 +83,10 @@ export type ResponseValue =
 | { kind: "rating"; trait: TraitId; about: PlayerId; value: number }  // 1..10, ≠ self
 | { kind: "ios"; about: PlayerId; value: number }                     // 1..7, ≠ self
 | { kind: "minigame"; score: number }
+// CONFESS: a private self-report. No "skip" — a non-answer simply never lands
+// in the log and stays MISSING (never converted to "no"). `target` is the
+// optional "…someone in this room?" subject; `note` is a one-line aside.
+| { kind: "confess"; yes: boolean; target?: PlayerId; note?: string }
 | { kind: "dare"; status: "done" | "passed"; reason?: string };       // reason REQUIRED iff passed, ≤140
 
 export interface LogRecord {
@@ -107,7 +136,12 @@ export interface PairSignal {
     pickOverlap: number;         // 0..1
     mutualPick: number;          // 0..1
     debriefSim: number;          // 0..1; componentsUsed distinguishes measured zero from missing
-    componentsUsed: ("pickOverlap" | "mutualPick" | "debriefSim" | "iosMean" | "traitAgreement")[];
+    componentsUsed: ("pickOverlap" | "mutualPick" | "debriefSim" | "iosMean" | "traitAgreement" | "confession")[];
+    /** THE SECOND VOICE (0..1): how often this pair named each other in confess
+     *  answers. Optional — absent means no confess evidence. EVIDENCE ONLY:
+     *  it counts toward the ≥3-independent-types rule and is never sufficient
+     *  alone (it carries weight 0 in the pair formula). */
+    confession?: number;
     iosMean: number;             // 0..1
     traitAgreement: number;      // 0..1
     pairScore: number;           // weighted, 0..1
@@ -210,6 +244,27 @@ export interface InterludeView {
 }
 
 export interface RevealItem { alias: string; text: string; }
+
+/**
+ * CONFESS REVEAL — the room's aggregate answer. SECRECY RULES ARE HARD:
+ *   • WARM tier (warmup): COUNTS ONLY. No names, no hints, no attribution.
+ *   • SPICY tier (spicy/deep): YES answers are attributed (alias only, never a
+ *     PlayerId); NO answers are NEVER attributed in any tier — only the count.
+ *   • Notes are anonymised at warm ("someone wrote: …"), attributed at spicy.
+ * A non-answer is MISSING: it is never folded into the "no" count.
+ */
+export interface ConfessRevealView {
+    tier: "warm" | "spicy";
+    yes: number;                 // how many said yes (count only)
+    no: number;                  // how many said no — COUNT ONLY, never who
+    of: number;                  // players in the room this round was asked of
+    missing: number;             // phones that never answered (∉ yes, ∉ no)
+    /** SPICY only: YES answers, by alias. A "no" never appears here. */
+    attributed?: { alias: string; note?: string }[];
+    /** Notes. `alias` absent = anonymised ("someone wrote: …"). */
+    notes?: { alias?: string; text: string }[];
+}
+
 export interface RevealView {
     roundId: string;
     summary: string;
@@ -228,6 +283,8 @@ export interface RevealView {
     slide?: FinaleSlide;
     /** verdict: couple-coded prompts get confetti on the land beat. */
     celebrate?: boolean;
+    /** confess rounds: the aggregate answer under the secrecy rules above. */
+    confess?: ConfessRevealView;
 }
 
 export type SlideBeat = "tease" | "escalate" | "land";
@@ -430,6 +487,8 @@ export const ROUND_TIMERS_MS: Record<RoundKind, number> = {
     // Live moments. Spotlight = 25s of captioning. Verdict = 90s of arguing
     // with phones face-down, then 15s of secret simultaneous picking.
     spotlight: 25_000, verdict: VERDICT_DISCUSS_MS + VERDICT_VOTE_MS,
+    // CONFESS: a private yes/no — no essay, no skip. The timer closes it.
+    confess: 20_000,
 };
 
 export const REVEAL_HOLD_MS = 4200;
@@ -473,7 +532,7 @@ export const PROVIDERS = {
         // Analysis-only lane. Batched tags and debrief similarity are local
         // analysis aids; finale copy is deterministic/Grok and never Gemini.
         tag: "gemini-3.5-flash-lite",       // cheap classification, one batch call
-        analyze: "gemini-3.1-pro-preview",  // pair-dare debrief judgment
+        analyze: "gemini-3.5-flash-lite",    // pair-dare debrief judgment
     },
 } as const;
 
