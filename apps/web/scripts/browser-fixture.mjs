@@ -10,8 +10,10 @@ delete process.env.GEMINI_API_KEY;
 const dir = mkdtempSync(join(tmpdir(), 'reveal-browser-test-'));
 const server = createGameServer({
   dataDir: dir,
-  // Accelerate interludes/bots, not the player input deadlines.
-  botDelayMs: [1200, 1600], revealHoldMs: 900, interludeHoldMs: 900, graceMs: 1500,
+  // Test-only timing: keep enough time to interact and to see the live reveals
+  // land, without making automated players wait through three 90s debates.
+  botDelayMs: [1200, 1600], revealHoldMs: 4500, interludeHoldMs: 900, graceMs: 250,
+  roundTimers: { spotlight: 6000, verdict: 10_000 }, verdictDiscussMs: 2200,
   services: {
     ...integratedServices,
     buildSecrets(results, digest, meta) {

@@ -49,14 +49,16 @@ Prompt generation starts in the lobby, before answers exist. During play a local
 callback adds a clearly marked verbatim excerpt from an earlier public text
 answer to one eligible non-host prompt per later phase. It skips the callback
 when there is no suitable answer, or it would exceed the prompt length limit;
-private debriefs are never candidates. Warmup includes a text round, and the
-same neutral tap-war bank prompt appears in the deep phase.
+private debriefs are never candidates, and authored spotlight/verdict prompts
+remain unchanged. Warmup includes a text round, and the same neutral tap-war
+bank prompt appears in the deep phase.
 
 When a Gemini key is present, pseudonymized public text can be tagged once in
 the background during debrief. A completed positive tag may supply a bounded
 style hint to narration; numeric scores and claims always use deterministic
-local tags, regardless of provider output or timing. Private debriefs are never
-sent to a provider and use local similarity only. Reconnect rotation supports a
+local tags, regardless of provider output or timing. Spotlight cover answers
+are not classified; their already-revealed punchlines may appear in the public
+digest. Private debriefs are never sent to a provider and use local similarity only. Reconnect rotation supports a
 nonce-bound retry across a dropped acknowledgement for updated clients; older
 clients retain same-socket recovery.
 See `NOTES/contract-requests.md` for frozen-contract gaps, including worst-case

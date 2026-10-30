@@ -107,6 +107,11 @@ h1, h2, h3, .font-display {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  /* Before hydration updates the motion preference, don't hide the wall. */
+  [data-testid="caption-item"], [data-testid="caption-punchline"] {
+    opacity: 1 !important;
+    transform: none !important;
+  }
 }
 
 /* ------------------------------------------------------------------ */

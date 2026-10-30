@@ -24,7 +24,8 @@ test("production defaults use the full bank and deterministic engine in a comple
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (() => { throw new Error("network access in no-key game"); }) as typeof fetch;
   const dir = mkdtempSync(join(tmpdir(), "reveal-integrated-"));
-  const server = createGameServer({ dataDir: dir, botDelayMs: [2, 5], revealHoldMs: 3, interludeHoldMs: 3 });
+  const server = createGameServer({ dataDir: dir, botDelayMs: [2, 5], revealHoldMs: 3, interludeHoldMs: 3, graceMs: 0,
+    roundTimers: { spotlight: 300, verdict: 300 }, verdictDiscussMs: 0 });
   const port = await server.listen(0, "127.0.0.1", false);
   const host: Client = io(`http://127.0.0.1:${port}`, { reconnection: false, autoConnect: false });
   host.on("error", () => {});
@@ -41,7 +42,7 @@ test("production defaults use the full bank and deterministic engine in a comple
   const seen = new Set<string>(), shown: RoundView[] = [];
   host.on("round", (round: RoundView) => {
     if (!round.youSubmitted && !shown.some((r) => r.roundId === round.roundId)) shown.push(round);
-    if (round.youSubmitted || seen.has(round.roundId) || (round.onlyPlayers && !round.onlyPlayers.includes(made.you))) return;
+    if (round.youSubmitted || round.expectsAnswer === false || seen.has(round.roundId) || (round.onlyPlayers && !round.onlyPlayers.includes(made.you))) return;
     seen.add(round.roundId);
     let value: ResponseValue;
     switch (round.kind) {
@@ -52,6 +53,8 @@ test("production defaults use the full bank and deterministic engine in a comple
       case "ios": value = { kind: "ios", about: "p2", value: 5 }; break;
       case "minigame": value = { kind: "minigame", score: 23 }; break;
       case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
+      case "spotlight": value = { kind: "text", text: "A playful caption for the room." }; break;
+      case "verdict": value = { kind: "pick", target: "p2" }; break;
     }
     host.emit("submit", { roundId: round.roundId, clientUuid: `host-${round.roundId}`, value }, () => {});
   });

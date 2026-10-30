@@ -61,8 +61,11 @@ function traitAgreementDirection(index: RatingIndex, of: PlayerId, by: PlayerId)
   return scores.length === 0 ? undefined : meanOf(scores);
 }
 
-export function computeSignals(log: LogRecord[], meta: RoomMeta): PairSignal[] {
+export function computeSignals(allRecords: LogRecord[], meta: RoomMeta): PairSignal[] {
   assertScorableMeta(meta);
+  // Spotlight decoys answer a cover question, not the moment: they can never
+  // move a signal. (The server also filters them out before calling us.)
+  const log = allRecords.filter((rec) => rec.decoy !== true);
   const ids = playerIdsSorted(meta);
   const picks = getPicks(log);
   const ratings = buildRatingIndex(log);

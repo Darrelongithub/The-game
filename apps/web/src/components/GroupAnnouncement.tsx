@@ -61,10 +61,13 @@ function useCountUp(running: boolean, instant: boolean, durationMs: number): num
 export function GroupAnnouncement({
   slide,
   skipToEnd = false,
+  celebrate = true,
   onDone,
 }: {
   slide: FinaleSlide
   skipToEnd?: boolean
+  /** confetti on the land beat — couple-coded verdicts only (spec §3) */
+  celebrate?: boolean
   onDone?: () => void
 }) {
   const reduced = usePrefersReducedMotion()
@@ -110,13 +113,15 @@ export function GroupAnnouncement({
   useEffect(() => {
     if (phase !== 'land' || fireRef.current) return
     fireRef.current = true
-    fireConfettiBurst({ particleCount: 160, y: 0.5 })
-    fireConfettiSides()
+    if (celebrate) {
+      fireConfettiBurst({ particleCount: 160, y: 0.5 })
+      fireConfettiSides()
+    }
     haptic([16, 40, 24])
     sfx.landBoom()
     markDone()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase])
+  }, [phase, celebrate])
 
   const running = phase === 'count'
   const count = useCountUp(running, reduced, COUNT_UP_MS)

@@ -28,7 +28,9 @@ const services = {
     return result;
   },
 };
-const server = createGameServer({ dataDir: join(dir, 'data'), services, revealHoldMs: 100, interludeHoldMs: 100 });
+const fast = process.env.SMOKE_FAST === '1';
+const server = createGameServer({ dataDir: join(dir, 'data'), services, revealHoldMs: 100, interludeHoldMs: 100,
+  ...(fast ? { roundTimers: { spotlight: 7000, verdict: 8000 }, verdictDiscussMs: 1000, graceMs: 100 } : {}) });
 const roomFor = (socket) => server.rooms.rooms.get(socket.data.roomCode);
 
 function update(room) {

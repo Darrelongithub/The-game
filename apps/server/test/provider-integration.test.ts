@@ -23,7 +23,8 @@ async function setup(t: TestContext, fakeFetch: typeof fetch, services?: GameSer
   process.env.XAI_API_KEY = "synthetic-xai-key"; process.env.GEMINI_API_KEY = "synthetic-gemini-key";
   globalThis.fetch = fakeFetch;
   const dir = mkdtempSync(join(tmpdir(), "reveal-provider-test-"));
-  const server = createGameServer({ dataDir: dir, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, services });
+  const server = createGameServer({ dataDir: dir, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, graceMs: 0,
+    roundTimers: { spotlight: 300, verdict: 300 }, verdictDiscussMs: 0, services });
   const port = await server.listen(0, "127.0.0.1", false);
   const clients: Client[] = [];
   t.after(async () => {
@@ -100,7 +101,7 @@ test("real integration filters generated prompts and sends only pseudonymous pub
   for (let i = 0; i < clients.length; i++) {
     clients[i]!.on("round", (round: RoundView) => {
       if (i === 0) rounds.push(round);
-      if (round.youSubmitted || seen[i]!.has(round.roundId) || (round.onlyPlayers && !round.onlyPlayers.includes(ids[i]!))) return;
+      if (round.youSubmitted || round.expectsAnswer === false || seen[i]!.has(round.roundId) || (round.onlyPlayers && !round.onlyPlayers.includes(ids[i]!))) return;
       seen[i]!.add(round.roundId);
       const target = ids[(i + 1) % ids.length]!;
       let value: ResponseValue;
@@ -113,6 +114,8 @@ test("real integration filters generated prompts and sends only pseudonymous pub
         case "ios": value = { kind: "ios", about: target, value: 5 }; break;
         case "minigame": value = { kind: "minigame", score: 23 }; break;
         case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
+        case "spotlight": value = { kind: "text", text: "Alice.* is enjoying this synthetic moment." }; break;
+        case "verdict": value = { kind: "pick", target }; break;
       }
       const submit = () => clients[i]!.emit("submit", { roundId: round.roundId, clientUuid: `synthetic-${i}-${round.roundId}`, value }, (result) => { if (!result.ok) errors.push(result.error ?? "submission rejected"); });
       // Give the synthetic, immediate tag response time to finish while the
@@ -196,10 +199,14 @@ test("pending public tagging never blocks scoring and is cancelled on disposal",
   const provider = integratedServices.createPromptProvider({ roomId: "synthetic-analysis" });
   const meta: RoomMeta = { roomId: "synthetic-analysis", players: [1, 2, 3, 4].map((n) => ({ id: `p${n}`, alias: `Player ${n}` })), revealOptIn: ["p1", "p2", "p3", "p4"] };
   const base: LogRecord = { at: 1, roomId: meta.roomId, roundId: "public", promptId: "p", roundKind: "text", coding: "trust", playerId: "p1", value: { kind: "text", text: "A completely synthetic public answer." }, latencyMs: 1 };
-  const log: LogRecord[] = [base, { ...base, roundId: "private", roundKind: "debrief", value: { kind: "text", text: "PRIVATE_DEBRIEF_MARKER" } }];
+  const log: LogRecord[] = [base,
+    { ...base, roundId: "private", roundKind: "debrief", value: { kind: "text", text: "PRIVATE_DEBRIEF_MARKER" } },
+    { ...base, roundId: "cover", roundKind: "spotlight", decoy: true, value: { kind: "text", text: "COVER_ANSWER_MARKER" } },
+  ];
   const pending = provider.prepareAnalysis!(log);
   await limit(ready);
   assert.ok(!body.includes("PRIVATE_DEBRIEF_MARKER"));
+  assert.ok(!body.includes("COVER_ANSWER_MARKER"), "spotlight cover answers are not sent for classification");
   const signals = integratedServices.computeSignals(log, meta);
   assert.deepEqual(integratedServices.computeResults(signals, log, meta, provider), integratedServices.computeResults(signals, log, meta), "pending network work falls back synchronously");
   provider.dispose!(); await limit(pending);

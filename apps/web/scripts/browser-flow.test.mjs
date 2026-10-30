@@ -39,12 +39,15 @@ const isVisible = async (locator) => locator.isVisible().catch(() => false);
 
 async function answer(page, label, index) {
   if (await isVisible(page.getByText(/they're talking/i))) return 'spectating';
+  if (await isVisible(page.getByTestId('idle-cover'))) return 'spotlight-idle';
+  const isVerdict = await isVisible(page.getByTestId('verdict-debate')) || await isVisible(page.getByTestId('verdict-pickgrid'));
+  if (isVerdict) await page.getByTestId('verdict-pickgrid').waitFor({ timeout: 10_000 });
   const lock = page.getByRole('button', { name: 'Lock in answer' });
   if (await isVisible(lock)) {
     assert.ok(await lock.isDisabled(), `${label} must select before locking in`);
     await page.locator('main button[aria-pressed]').first().click();
     await lock.click();
-    return 'pick';
+    return isVerdict ? 'verdict' : 'pick';
   }
   if (await isVisible(page.locator('#shout'))) {
     await page.locator('#shout').fill('spark');
@@ -69,9 +72,10 @@ async function answer(page, label, index) {
     return 'ios';
   }
   if (await isVisible(page.locator('#answer'))) {
+    const isSpotlight = await page.locator('#answer').getAttribute('maxlength') === '80';
     await page.locator('#answer').fill(`Synthetic answer from ${label} for round ${index}.`);
     await page.getByRole('button', { name: 'Submit', exact: true }).click();
-    return 'text';
+    return isSpotlight ? 'spotlight' : 'text';
   }
   if (await isVisible(page.getByRole('button', { name: "We're back" }))) {
     await page.getByRole('button', { name: "We're back" }).click(); return 'pair dare';
@@ -121,12 +125,17 @@ try {
   }
   await host.getByRole('button', { name: /Start the night/ }).click();
   const seenKinds = new Set();
-  for (let i = 1; i <= 14; i++) {
+  let callbackSeen = false;
+  for (let i = 1; i <= 21; i++) {
     await Promise.all([waitForRound(host, i), waitForRound(guest, i)]);
     for (const [page, name] of [[host, 'host'], [guest, 'guest']]) {
       const question = await page.locator('main h1').first().innerText();
       assert.ok(question.trim().length > 0, `${name} sees round ${i}'s question`);
-      assert.doesNotMatch(question, /\{P\d+\}/, 'no unsubstituted placeholder reaches the UI');
+      assert.doesNotMatch(question, /\{(?:P\d+|S)\}/, 'no unsubstituted placeholder reaches the UI');
+      if (await isVisible(page.getByTestId('callback-note'))) {
+        callbackSeen = true;
+        assert.match(await page.getByTestId('callback-note').innerText(), /Earlier, someone said:/);
+      }
     }
     if (i === 1) {
       assert.equal(await host.locator('.question-arrival').evaluate((el) => getComputedStyle(el).animationName), 'content-arrival', 'normal motion has a question entrance');
@@ -137,15 +146,17 @@ try {
       await guest.reload();
       await waitForRound(guest, i);
     }
-    if (i === 4) {
-      for (const page of [host, guest]) {
-        assert.ok(await page.getByTestId('callback-note').isVisible(), 'a real earlier answer is shown as a callback');
-        assert.match(await page.getByTestId('callback-note').innerText(), /Earlier, someone said:/);
-      }
-    }
     const kinds = await Promise.all([answer(host, 'host', i), answer(guest, 'guest', i)]);
     for (const kind of kinds) seenKinds.add(kind);
     console.log(`round ${i}: ${kinds.join(' / ')}`);
+    if (kinds.some((kind) => kind === 'spotlight' || kind === 'spotlight-idle')) {
+      await Promise.all([host.getByTestId('caption-wall').waitFor({ timeout: 10_000 }), guest.getByTestId('caption-wall').waitFor({ timeout: 10_000 })]);
+      for (const page of [host, guest]) assert.equal(await page.getByTestId('caption-item').count(), 3, 'each non-subject caption appears exactly once');
+      assert.equal(await guest.getByTestId('caption-item').first().evaluate((el) => getComputedStyle(el).opacity), '1', 'reduced-motion captions are visible immediately');
+    }
+    if (kinds.includes('verdict')) {
+      await Promise.all([host.getByTestId('ga-subject').waitFor({ timeout: 10_000 }), guest.getByTestId('ga-subject').waitFor({ timeout: 10_000 })]);
+    }
   }
   await Promise.all([host.getByTestId('finale-screen').waitFor({ timeout: 20_000 }), guest.getByTestId('finale-screen').waitFor({ timeout: 20_000 })]);
   const finishStory = async (page, label) => {
@@ -170,9 +181,10 @@ try {
   await guest.getByRole('button', { name: 'Close secret deck' }).click();
   await guest.getByRole('button', { name: 'Done', exact: true }).click();
   await guest.locator('#alias').waitFor({ timeout: 10_000 });
-  for (const kind of ['pick', 'shout', 'minigame', 'rating', 'ios', 'text', 'dare']) assert.ok(seenKinds.has(kind), `played ${kind}`);
+  for (const kind of ['pick', 'shout', 'minigame', 'rating', 'ios', 'text', 'dare', 'spotlight', 'verdict']) assert.ok(seenKinds.has(kind), `played ${kind}`);
+  assert.ok(callbackSeen, 'a real earlier answer appears as a callback');
   assert.deepEqual(errors, [], 'no browser runtime errors');
-  console.log('BROWSER FLOW PASSED: two real mobile sessions, invite, reload, all 14 questions, complete finale, exit and reduced motion');
+  console.log('BROWSER FLOW PASSED: two real mobile sessions, invite, reload, all 21 rounds, live reveals, complete finale, exit and reduced motion');
 } catch (error) {
   if (browser) {
     for (const [i, context] of browser.contexts().entries()) {

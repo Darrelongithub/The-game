@@ -2,7 +2,7 @@
 // components/play/PlayScreen.tsx — Agent A's phase router for the night itself.
 //
 // Wiring (post-merge): it now renders OTHER AGENTS' real screens:
-//   round     → src/screens/PromptScreen   (B1/B2 input surface, all 9 kinds,
+//   round     → src/screens/PromptScreen   (B1/B2 input surface, all 11 kinds,
 //                                           onlyPlayers spectator handling)
 //   interlude → src/screens/InterludeScreen
 //   reveal    → src/screens/RevealScreen

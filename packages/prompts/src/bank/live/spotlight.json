@@ -1,0 +1,102 @@
+[
+  {
+    "id": "live-sp-01",
+    "phase": "warmup",
+    "kind": "spotlight",
+    "text": "Who is {S} looking at right now? Name.",
+    "coding": "couple",
+    "measures": ["liveNameCluster"],
+    "cluster": "name",
+    "spicy": false
+  },
+  {
+    "id": "live-sp-02",
+    "phase": "warmup",
+    "kind": "spotlight",
+    "text": "Who here is {S} trying to impress?",
+    "coding": "couple",
+    "measures": ["liveNameCluster"],
+    "cluster": "name",
+    "spicy": false
+  },
+  {
+    "id": "live-sp-03",
+    "phase": "spicy",
+    "kind": "spotlight",
+    "text": "{S} walks into a room. Who do they scan for first?",
+    "coding": "couple",
+    "measures": ["liveNameCluster"],
+    "cluster": "name",
+    "spicy": false
+  },
+  {
+    "id": "live-sp-04",
+    "phase": "spicy",
+    "kind": "spotlight",
+    "text": "What is {S} actually thinking? One line.",
+    "coding": "status",
+    "measures": ["liveCaption"],
+    "cluster": "text",
+    "spicy": false
+  },
+  {
+    "id": "live-sp-05",
+    "phase": "deep",
+    "kind": "spotlight",
+    "text": "Caption {S} in real time.",
+    "coding": "status",
+    "measures": ["liveCaption"],
+    "cluster": "text",
+    "spicy": false
+  },
+  {
+    "id": "live-sp-06",
+    "phase": "deep",
+    "kind": "spotlight",
+    "text": "If {S} got arrested tonight — what for?",
+    "coding": "friction",
+    "measures": ["liveCaption"],
+    "cluster": "text",
+    "spicy": false
+  },
+  {
+    "id": "live-sp-07",
+    "phase": "deep",
+    "kind": "spotlight",
+    "text": "What's {S} hiding behind that face right now?",
+    "coding": "trust",
+    "measures": ["liveCaption"],
+    "cluster": "text",
+    "spicy": false
+  },
+  {
+    "id": "live-sp-08",
+    "phase": "dare",
+    "kind": "spotlight",
+    "text": "Caption {S} in real time.",
+    "coding": "status",
+    "measures": ["liveCaption"],
+    "cluster": "text",
+    "spicy": false
+  },
+  {
+    "id": "live-sp-09",
+    "phase": "dare",
+    "kind": "spotlight",
+    "text": "If {S} got arrested tonight — what for?",
+    "coding": "friction",
+    "measures": ["liveCaption"],
+    "cluster": "text",
+    "spicy": false
+  },
+  {
+    "id": "live-sp-10",
+    "phase": "spicy",
+    "kind": "spotlight",
+    "text": "Who is {S} undressing with their eyes? Name.",
+    "coding": "couple",
+    "measures": ["liveNameCluster"],
+    "cluster": "name",
+    "spicy": true
+  }
+]

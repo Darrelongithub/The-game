@@ -5,8 +5,8 @@
 > full-game Chromium regression. The remaining real-device, LAN and live-provider
 > checks below still apply; see the current runbook and package READMEs. The
 > intermittent server-test failure noted below was traced to counting only
-> rounds where the host participates; the follow-up now checks all 14 observed
-> rounds and every eligible host response.
+> rounds where the host participates; the follow-up checks every observed
+> round (including the later live moments) and every eligible host response.
 
 ## Decision: **NO-GO for game night**
 

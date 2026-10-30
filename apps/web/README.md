@@ -42,7 +42,7 @@ npm run test:live     # optional: same-contract smoke against a running server
 CHROMIUM_PATH=/path/to/chromium npm run test:browser
 ```
 
-`test:mock` drives `MockTransport` end-to-end and asserts: all nine round
+`test:mock` drives `MockTransport` end-to-end and asserts: all eleven round
 kinds, a passed dare **with** a verbatim reason, `pair_dare` + two `debrief`
 rounds carrying `onlyPlayers` (one spectated), an interlude with a digest
 teaser, a reveal with items, a broadcast-safe finale (slides + summary only),
@@ -79,7 +79,7 @@ landed; `src/components/play/PlayScreen.tsx` now routes to them:
 | Beat | Rendered by |
 |---|---|
 | intro | `components/OpeningSequence.tsx` (B2) — gated once per session by Agent A (`intro-done`) |
-| round | `screens/PromptScreen.tsx` — all 9 kinds + `onlyPlayers` spectator |
+| round | `screens/PromptScreen.tsx` — all 11 kinds + `onlyPlayers` spectator |
 | interlude | `screens/InterludeScreen.tsx` |
 | reveal | `screens/RevealScreen.tsx` |
 | finale | `components/FinaleScreen.tsx` (B2) — broadcast-safe slides, GroupAnnouncement, ShareCard, press-and-hold secret deck |

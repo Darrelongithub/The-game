@@ -50,8 +50,11 @@ function publish(): void {
 delete process.env.XAI_API_KEY;
 delete process.env.GEMINI_API_KEY;
 const services = createProductionServices((room, observed) => weights.set(room, new Map(observed)));
+const fast = process.env.SMOKE_FAST === '1';
+if (fast) console.log('SMOKE_FAST: isolated fixture uses shortened live-moment timers; assertions are unchanged.');
 const server = createGameServer({
   dataDir: join(directory, 'data'), services, revealHoldMs: 10, interludeHoldMs: 10,
+  ...(fast ? { roundTimers: { spotlight: 7000, verdict: 8000 }, verdictDiscussMs: 1000, graceMs: 100 } : {}),
   audit: {
     persisted(roomCode, file, request) { persist.push({ roomCode, file, ...request }); },
     decks(roomCode, roomId, players, decks, results) {
@@ -86,7 +89,7 @@ async function main(): Promise<void> {
 try {
   const port = await server.listen(0, '127.0.0.1', false);
   const child = spawn(process.execPath, ['--import', 'tsx', 'scripts/bots.ts'], {
-    cwd: process.cwd(), stdio: 'inherit', env: { ...process.env, XAI_API_KEY: '', GEMINI_API_KEY: '', SMOKE_URL: `http://127.0.0.1:${port}`, SMOKE_ORACLE: oraclePath, SMOKE_TIMEOUT_MS: '120000' },
+    cwd: process.cwd(), stdio: 'inherit', env: { ...process.env, XAI_API_KEY: '', GEMINI_API_KEY: '', SMOKE_URL: `http://127.0.0.1:${port}`, SMOKE_ORACLE: oraclePath, SMOKE_TIMEOUT_MS: '420000' },
   });
   const code = await new Promise<number>((resolve, reject) => {
     child.once('error', reject);

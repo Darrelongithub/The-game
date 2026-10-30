@@ -78,8 +78,9 @@ class IntegratedPromptProvider implements PromptProvider {
   prepareAnalysis(log: LogRecord[]): Promise<void> {
     if (this.analysis || this.disposed) return this.analysis ?? Promise.resolve();
     // The caller supplies pseudonymized records. Only answers already revealed
-    // publicly are eligible; never send private pair debriefs to a provider.
-    const records = log.filter((record) => record.roundKind !== "debrief" && record.value.kind === "text");
+    // publicly are eligible for classification; never classify private pair
+    // debriefs or cover answers. Cover answers are used in the public digest.
+    const records = log.filter((record) => record.roundKind !== "debrief" && record.decoy !== true && record.value.kind === "text");
     this.analysis = (async () => {
       const tags = await tagBatch(records.map((record) => record.value.kind === "text" ? record.value.text : ""),
         { room: this.roomId, provider: this.provider });
