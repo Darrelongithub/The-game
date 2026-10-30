@@ -94,6 +94,7 @@ test("integrated no-key server completes a game on the injectable adapter", { ti
   const server = createGameServer({ dataDir, services, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, graceMs: 0, verdictDiscussMs: 0, roundTimers: { spotlight: 300, verdict: 300 } });
   const port = await server.listen(0, "127.0.0.1", false);
   const socket = io(`http://127.0.0.1:${port}`, { reconnection: false });
+  socket.on("state", (view) => { if (view.ready) socket.emit("ready"); });
   t.after(async () => { socket.disconnect(); await server.close(); rmSync(dataDir, { recursive: true, force: true }); });
   await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("connect_error", reject); });
   const created = await socket.timeout(2000).emitWithAck("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" } });

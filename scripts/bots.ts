@@ -77,7 +77,13 @@ async function connect(socket: GameSocket): Promise<void> {
   await connected;
 }
 function install(bot: Bot, socket: GameSocket): void {
-  socket.on('state', state => { bot.state = state; phases.add(state.phase); });
+  socket.on('state', state => {
+    bot.state = state;
+    phases.add(state.phase);
+    // ROUND 4 — reveals wait for everyone. A scripted player is always looking,
+    // so it presses ready the moment a moment is pending.
+    if (state.ready) socket.emit('ready');
+  });
   socket.on('round', round => {
     phases.add(round.phase);
     if (round.kind === 'spotlight' || round.kind === 'verdict') liveKinds.add(round.kind);

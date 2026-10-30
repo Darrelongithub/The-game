@@ -200,6 +200,8 @@ async function main() {
   const { FinaleScreen } = await import('../FinaleScreen')
   const { SecretDeck } = await import('../SecretDeck')
   const { HoldToReveal } = await import('../HoldToReveal')
+  const { ReadyScreen } = await import('../ReadyScreen')
+  const { DemoPanel } = await import('../DemoPanel')
   const { SoundToggle } = await import('../SoundToggle')
   const sound = await import('../sound')
   const { demoFinale } = await import('../__demo__/demoFinale')

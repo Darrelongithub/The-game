@@ -70,6 +70,8 @@ export interface LogRecord {
     value: ResponseValue;
     at: number;                  // epoch ms
     latencyMs: number;           // round open → submit. Night-Digest fuel.
+    /** DEMO ROOMS ONLY: host identity for puppeted seats; ignored by the engine. */
+    impersonatedBy?: PlayerId;
     /** Spotlight decoy answer: the subject's throwaway reply to the cover
      *  round. EXCLUDED from every signal, score and claim (data-or-dead does
      *  not apply — it answers nothing). It is digest gold only: it pairs with
@@ -189,6 +191,15 @@ export interface RoomView {    // PUBLIC — contains nothing private
     players: PlayerView[];
     round: RoundView | null;
     seq: number;
+    /** Demo room: the host plays every seat from one laptop (spec §1). Demo
+     *  rooms are the only place the `demo_*` events are accepted; gameplay,
+     *  scoring and claims are identical to a real room. */
+    demo?: boolean;
+    /** Present ONLY while a reveal is pending: the players who have pressed
+     *  `ready` for it. The reveal waits for everyone (a reconnecting phone
+     *  must not miss the moment) and fires after `REVEAL_READY_GRACE_MS`
+     *  regardless. Absent at every other moment. */
+    ready?: PlayerId[];
 }
 
 export interface InterludeView {
@@ -312,17 +323,33 @@ export interface SubmitRequest { roundId: string; clientUuid: string; value: Res
 export interface DarePassRequest { roundId: string; reason: string; }   // reason REQUIRED, ≤140
 
 export type ClientToServerEvents = {
-    create: (p: { alias: string; consent: Consent; profile?: ProfileAnswers; role?: JoinRole }, reply: (r: JoinReply & { code?: RoomCode }) => void) => void;
+    create: (p: { alias: string; consent: Consent; profile?: ProfileAnswers; role?: JoinRole; demo?: boolean }, reply: (r: JoinReply & { code?: RoomCode }) => void) => void;
     join: (p: JoinRequest, reply: (r: JoinReply) => void) => void;
     display_join: (p: { roomCode: RoomCode }, reply: (r: { ok: boolean; state?: RoomView; error?: string }) => void) => void;
     submit: (p: SubmitRequest, reply: (r: { ok: boolean; error?: string }) => void) => void;
     dare_pass: (p: DarePassRequest) => void;
+    /** "I'm ready for the pending reveal" — every player's round-trip to the
+     *  room reveal. The reveal waits for each connected player (up to
+     *  REVEAL_READY_GRACE_MS) so nobody misses the moment. */
+    ready: () => void;
     start: () => void;                                   // host only
     add_bot: () => void;                                 // host only (fill seats / solo test)
     skip_round: () => void;                              // host only
     custom_prompts: (p: { lines: string[] }) => void;    // host only, lobby, ≤10 lines, ≤160 chars each
     vote_heat_down: () => void;
     delete_room: () => void;                             // ANY player
+
+    // ---------- DEMO ROOMS: host-only, demo rooms only, puppeted seats only ----------
+    // A demo room lets one host play every seat from one laptop so the whole
+    // game can be tested alone. The engine is untouched: a puppet's answers are
+    // ordinary LogRecords (plus `impersonatedBy` metadata it ignores).
+    demo_add_player: (p: { alias: string }, reply: (r: { ok: boolean; playerId?: PlayerId }) => void) => void;
+    demo_remove_player: (p: { playerId: PlayerId }) => void;
+    /** auto = the puppet answers and readies itself; manual = it waits for the host. */
+    demo_set_bot_mode: (p: { playerId: PlayerId; mode: "auto" | "manual" }) => void;
+    demo_answer_as: (p: { playerId: PlayerId; roundId: string; clientUuid: string; value: ResponseValue }) => void;
+    demo_all_ready: () => void;                          // shortcut: mark every seat ready
+    demo_speed: (p: { scale: number }) => void;          // 0.1..1.0 timer scale
 };
 
 export type ServerToClientEvents = {
@@ -406,6 +433,11 @@ export const ROUND_TIMERS_MS: Record<RoundKind, number> = {
 };
 
 export const REVEAL_HOLD_MS = 4200;
+/** THE READY GATE (ROUND 4). A finished round's reveal is PENDING until every
+ *  connected player presses ready — a phone in a pocket, a bathroom break or a
+ *  reconnect must not cost anyone the moment. After this long the reveal fires
+ *  anyway, so a single AFK phone can never stall the night. */
+export const REVEAL_READY_GRACE_MS = 20_000;
 export const INTERLUDE_HOLD_MS = 3200;
 export const GRACE_MS = 8000;         // extra wait after timer for stragglers
 export const PICK_ROUNDS_PER_PHASE = 2;

@@ -13,6 +13,7 @@
     "bundle:check": "node scripts/check-bundle.mjs",
     "selfcheck": "npx -y tsx scripts/selfcheck.ts",
     "smoke": "npx tsx scripts/bots.ts",
+    "smoke:demo": "npx tsx scripts/demo-smoke.ts",
     "typecheck": "node scripts/typecheck.mjs",
     "smoke:oracle": "node scripts/smoke-with-oracle.mjs",
     "smoke:verified": "tsx scripts/verified-smoke.ts",

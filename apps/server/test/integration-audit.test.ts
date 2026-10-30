@@ -30,6 +30,8 @@ test("production defaults use the full bank and deterministic engine in a comple
   const port = await server.listen(0, "127.0.0.1", false);
   const host: Client = io(`http://127.0.0.1:${port}`, { reconnection: false, autoConnect: false });
   host.on("error", () => {});
+  // A simulated phone presses ready the moment a reveal is pending (ROUND 4).
+  host.on("state", (view) => { if (view.ready) host.emit("ready"); });
   t.after(async () => {
     host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true });
     globalThis.fetch = originalFetch;
@@ -75,12 +77,10 @@ test("production defaults use the full bank and deterministic engine in a comple
     assert.ok(excerpt && publicTexts.some((text) => text.includes(excerpt)), "callback quotes an earlier public answer verbatim");
   }
   const pickCodings = new Set(rows.filter((r) => r.roundKind === "pick").map((r) => r.coding));
-  assert.ok(rows.some((r) => r.roundKind === "pick"), "the no-key night records real pick answers");
-  const bankCodings = new Set((['warmup', 'spicy', 'deep'] as const).flatMap((phase) => bankForPhase(phase).filter((prompt) => prompt.kind === "pick").map((prompt) => prompt.coding)));
-  assert.ok(bankCodings.has("friendship") && bankCodings.has("couple") && (bankCodings.has("friction") || bankCodings.has("rivalry")),
-    `the production bank supports positive, romantic and negative nomination signals (played: ${[...pickCodings].join(', ')})`);
+  assert.ok(pickCodings.has("friendship") && pickCodings.has("couple") && (pickCodings.has("friction") || pickCodings.has("rivalry")),
+    "a no-key night must be capable of positive, romantic and negative nomination signals");
   assert.ok(rows.some((r) => r.promptId === "w6"), "group-signal bank prompts with asksTarget=false must remain playable");
-  assert.ok(bankForPhase("dare").some((prompt) => prompt.id === "dd5" && prompt.kind === "pair_dare"), "the packaged pair dare remains in the production bank");
+  assert.ok(rows.some((r) => r.promptId === "dd5"), "the packaged pair dare must not be discarded");
   const meta: RoomMeta = { roomId: rows[0]!.roomId, players: [1, 2, 3, 4].map((i) => ({ id: `p${i}`, alias: `Player ${i}` })), revealOptIn: ["p1", "p2", "p3", "p4"] };
   const signals = computeSignals(rows, meta);
   const expected = computeResults(signals, rows, meta);
@@ -99,6 +99,8 @@ test("host custom prompts use the complete hard-block guard", async (t) => {
   const port = await server.listen(0, "127.0.0.1", false);
   const host: Client = io(`http://127.0.0.1:${port}`, { reconnection: false, autoConnect: false });
   host.on("error", () => {});
+  // A simulated phone presses ready the moment a reveal is pending (ROUND 4).
+  host.on("state", (view) => { if (view.ready) host.emit("ready"); });
   t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const connected = event<void>(host, "connect"); host.connect(); await limit(connected);
   await new Promise((resolve) => host.emit("create", { alias: "Host", consent, profile }, resolve));
@@ -113,6 +115,8 @@ test("custom prompts cannot silently wrap an out-of-roster placeholder onto anot
   const port = await server.listen(0, "127.0.0.1", false);
   const host: Client = io(`http://127.0.0.1:${port}`, { reconnection: false, autoConnect: false });
   host.on("error", () => {});
+  // A simulated phone presses ready the moment a reveal is pending (ROUND 4).
+  host.on("state", (view) => { if (view.ready) host.emit("ready"); });
   t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const connected = event<void>(host, "connect"); host.connect(); await limit(connected);
   await new Promise((resolve) => host.emit("create", { alias: "Host", consent, profile }, resolve));

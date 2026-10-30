@@ -19,6 +19,8 @@ import { PromptScreen } from "@/screens/PromptScreen";
 import { InterludeScreen } from "@/screens/InterludeScreen";
 import { RevealScreen } from "@/screens/RevealScreen";
 import { FinaleScreen } from "@/components/FinaleScreen";
+import { ReadyScreen } from "@/components/ReadyScreen";
+import { DemoPanel } from "@/components/DemoPanel";
 import { Flame } from "@/components/Flame";
 
 export function PlayScreen({ room }: { room: UseRoom }) {
@@ -64,6 +66,20 @@ function PlayContent({ room }: { room: UseRoom }) {
     return <RevealScreen reveal={reveal} onComplete={() => setWatchedReveal(reveal.roundId)} />;
   }
 
+  // ROUND 4 — the reveal waits for everyone. The snapshot carries `ready`
+  // only while a moment is pending, so this screen owns that gap.
+  if (view.ready) {
+    return (
+      <ReadyScreen
+        players={view.players}
+        you={you}
+        youAreReady={room.youAreReady}
+        awaiting={room.awaitingReady ?? []}
+        onReady={room.ready}
+      />
+    );
+  }
+
   if (round) {
     // PromptScreen needs a resolved PlayerId for `you`; a resumed tab has it
     // from sessionStorage before the first snapshot lands.
@@ -89,10 +105,17 @@ function PlayContent({ room }: { room: UseRoom }) {
 
 function PlayControls({ room }: { room: UseRoom }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showDemo, setShowDemo] = useState(false);
   return (
     <>
       <div className="fixed bottom-2 right-2 z-[60] flex gap-2" role="group" aria-label="Room controls">
-        {room.isHost && room.round && !room.finale && (
+        {room.demo && room.isHost && (
+          <button type="button" onClick={() => setShowDemo((value) => !value)} aria-expanded={showDemo}
+            className="min-h-[48px] rounded-xl border border-lime-accent/40 bg-[#0d0617]/95 px-3 text-xs text-lime-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent">
+            Demo
+          </button>
+        )}
+        {room.isHost && (room.round || room.view?.ready) && !room.finale && (
           <button type="button" onClick={room.skipRound} className="min-h-[48px] rounded-xl border border-white/20 bg-[#0d0617]/95 px-3 text-xs text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent">
             Skip round
           </button>
@@ -101,6 +124,29 @@ function PlayControls({ room }: { room: UseRoom }) {
           Delete room
         </button>
       </div>
+      {showDemo && room.demo && room.view && (
+        <div className="fixed inset-0 z-[70] overflow-y-auto bg-black/75 p-4" role="dialog" aria-modal="true" aria-label="Demo controls">
+          <div className="mx-auto w-full max-w-md">
+            <DemoPanel
+              players={room.view.players}
+              you={room.you}
+              phase={room.view.phase}
+              round={room.round}
+              awaitingReady={room.awaitingReady}
+              onAddPlayer={(alias) => void room.demoAddPlayer(alias)}
+              onRemovePlayer={room.demoRemovePlayer}
+              onSetMode={room.demoSetBotMode}
+              onAnswerAs={room.demoAnswerAs}
+              onAllReady={room.demoAllReady}
+              onSpeed={room.demoSpeed}
+            />
+            <button type="button" onClick={() => setShowDemo(false)}
+              className="mt-3 min-h-[48px] w-full rounded-xl border border-white/25 bg-[#0d0617] text-sm text-white">
+              Back to the game
+            </button>
+          </div>
+        </div>
+      )}
       {confirmDelete && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4" role="alertdialog" aria-modal="true" aria-labelledby="play-delete-title" onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") setConfirmDelete(false); }}>
           <div className="glass-card w-full max-w-sm bg-[#0d0617] p-5">

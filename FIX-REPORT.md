@@ -281,7 +281,7 @@ now 420s.
 
 ## R1–R20 remediation carry-forward — adapted to current `main`
 
-This section records the R1–R20 branch status (the ROUND 4 report above is historical). The branch has not yet been reconciled with the latest `main`: its newer ready-gate and demo-room changes overlap these files. A local merge attempt exposed conflicts across server, UI, contract, and test code; it was aborted rather than resolving those conflicts by selecting either side wholesale. The PR remains blocked until those features are adapted together and the full suites rerun.
+This section records the R1–R20 status after reconciling with the latest `main` (the ROUND 4 report above is historical). The merge adapts the remediation alongside main's reveal-ready gate and demo-room flow, preserving both sets of behavior rather than choosing one side wholesale. The merged contract, server, UI, and tests were revalidated together.
 
 ### Remediation and regression status
 
@@ -312,8 +312,8 @@ This section records the R1–R20 branch status (the ROUND 4 report above is his
 
 - `npm ci`: passed; 0 audit vulnerabilities.
 - `npm run typecheck`: passed across server, web, engine, narrator, and prompts after the final source edits.
-- Server: **57/57** tests passed, including full-game, restart replay, protocol, provider integration, account, and bot coverage.
-- Engine: **40/40** passed. Same-log results, digest and secrets are deeply equal. Latest 11-player fixture: **1,829.3 ms**, below the 2-second regression ceiling. Prior recorded baseline: **278.8 ms**; the current result is slower, though still within the guard.
+- Server: **68/68** tests passed, including demo-mode, reveal-ready gate, full-game, restart replay, protocol, provider integration, account, and bot coverage.
+- Engine: **40/40** passed. Same-log results, digest and secrets are deeply equal. Latest 11-player fixture: **1,057.1 ms**, below the 2-second regression ceiling. Prior recorded baseline: **278.8 ms**; the current result is slower, though still within the guard.
 - Prompts: **104/104** passed. Narrator: **81/81** passed. Web: **39 SSR checks**, all UI/socket/mock/privacy regressions, and **1/1** transport regression passed.
 - `npm run selfcheck`: **36 checks passed**.
 - `SMOKE_FAST=1 npm run smoke:verified`: passed; phases, public finale equality, secret ownership/limits, duplicate persistence, active/finale resume, dare pass, deletion, and live moments verified with keys disabled.
