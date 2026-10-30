@@ -33,3 +33,26 @@ Known gaps / checkout discrepancy:
   reveal path uses Grok (Gemini reveal is explicitly disabled). `.env.example`
   already pins GEMINI_MODEL=gemini-3.5-flash-lite. Per the instruction not to
   touch analysis/reveal, those runtime paths and shared defaults are preserved.
+
+## Completion pass — setup docs and real HTTP transport
+
+Created `packages/prompts/test/local-http.test.ts`: starts an ephemeral local
+OpenAI-compatible HTTP server and exercises native fetch through the production
+Provider/facade. Confirms the endpoint, default model, absence of authentication,
+validated generation, and playable bank prompts across every phase after a
+model-not-found HTTP response. This is a protocol regression, not real Ollama
+inference.
+
+Updated `README.md`, `RUNBOOK.md`, and `apps/server/README.md` with local model
+installation/download, host-local networking, optional health check, environment
+precedence, restart guidance, and the existing timeout/fallback behavior.
+
+Completion regression results:
+- Prompt suite: 107 tests, 107 pass, 0 fail.
+- Prompt typecheck: exit 0.
+- Root `npm run typecheck`: exit 0 (all configured workspaces).
+- Root `npm run selfcheck`: ALL 36 CHECKS PASSED.
+- `git diff --check`: exit 0.
+
+No additional contract requests or dependencies. Real host-laptop inference
+remains the only environment-specific verification not performed here.
