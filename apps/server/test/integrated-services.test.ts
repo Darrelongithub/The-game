@@ -119,6 +119,7 @@ test("integrated no-key server completes a game on the injectable adapter", { ti
       case "minigame": value = { kind: "minigame", score: 20 }; break;
       case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
       case "spotlight": value = { kind: "text", text: "Watching the room right now." }; break;
+      case "confess": value = { kind: "confess", yes: true }; break;
       case "verdict": value = { kind: "pick", target: "p2" }; break;
     }
     socket.emit("submit", { roundId: round.roundId, clientUuid: `integrated-${round.roundId}`, value }, (reply: { ok: boolean; error?: string }) => { if (!reply.ok) submissionErrors.push(reply.error ?? "rejected"); });

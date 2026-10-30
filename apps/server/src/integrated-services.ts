@@ -1,5 +1,5 @@
-import { DEFAULT_WEIGHTS, type LogRecord } from "../../../packages/shared/src/contracts.ts";
-import { buildNightDigest, buildSecrets, computeResults, computeSignals, logRecordId } from "../../../packages/engine/src/index.ts";
+import { type LogRecord } from "../../../packages/shared/src/contracts.ts";
+import { DEFAULT_PAIR_WEIGHTS, buildNightDigest, buildSecrets, computeResults, computeSignals, logRecordId } from "../../../packages/engine/src/index.ts";
 import { PromptProvider as FullPromptProvider, Provider, selectFromBank, tagText } from "../../../packages/prompts/src/index.ts";
 import { buildSkeleton, SYSTEM_PROMPT, writeFinale } from "../../../packages/narrator/src/index.ts";
 import type { GameServices, PromptProvider } from "./services.ts";
@@ -42,7 +42,7 @@ export function createIntegratedServices(
         const text = value.kind === "text" ? value.text : value.kind === "shout" ? value.word : value.kind === "dare" ? value.reason ?? "" : "";
         return [logRecordId(record), tagText(text)] as const;
       }));
-      return computeResults(signals, log, meta, DEFAULT_WEIGHTS, (id) => tags.get(id) ?? [],
+      return computeResults(signals, log, meta, DEFAULT_PAIR_WEIGHTS, (id) => tags.get(id) ?? [],
         onJokerWeights ? (weights) => onJokerWeights(meta.roomId, weights) : undefined);
     },
     buildNightDigest,

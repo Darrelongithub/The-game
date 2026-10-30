@@ -17,6 +17,7 @@ import {
   meanOf,
 } from "./internal.ts";
 import { clusterNames, decoyPairings, decoyQuote, nameClusterTeaser } from "./live.ts";
+import { confessAnswers } from "./confess.ts";
 
 const QUOTE_MIN_LEN = 20;
 const QUOTE_MAX_LEN = 160;
@@ -146,6 +147,21 @@ export function buildNightDigest(allRecords: LogRecord[], meta: RoomMeta): Night
         );
       }
     }
+  }
+
+  // ---------- the second voice: yes-rate temperature + anonymised notes ----------
+  // A room that keeps saying yes is warm. This is a TEMPERATURE read for the
+  // interlude — counts only, never a name, and it never gates anything.
+  {
+    const answers = confessAnswers(log);
+    if (answers.length >= 3) {
+      const yes = answers.filter((a) => a.yes).length;
+      pickTeasers.push(`${yes} of ${answers.length} confessions tonight were a yes.`);
+    }
+    // Notes are digest gold. They stay ANONYMISE-ONLY here: the reveal decides
+    // attribution by tier, the digest never does.
+    const notes = answers.flatMap((a) => (a.note && a.note.trim().length >= 8 ? [a.note.trim()] : []));
+    for (const note of notes.slice(0, 2)) pickTeasers.push(`Someone wrote: \u201c${note.slice(0, 120)}\u201d`);
   }
 
   // ---------- self vs room gaps, biggest first ----------

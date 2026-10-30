@@ -57,6 +57,7 @@ test("production defaults use the full bank and deterministic engine in a comple
       case "minigame": value = { kind: "minigame", score: 23 }; break;
       case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
       case "spotlight": value = { kind: "text", text: "A playful caption for the room." }; break;
+      case "confess": value = { kind: "confess", yes: true }; break;
       case "verdict": value = { kind: "pick", target: "p2" }; break;
     }
     host.emit("submit", { roundId: round.roundId, clientUuid: `host-${round.roundId}`, value }, () => {});

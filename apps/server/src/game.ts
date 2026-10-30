@@ -184,6 +184,11 @@ function canonicalValue(value: ResponseValue): ResponseValue {
     case "rating": return { kind: "rating", trait: value.trait, about: value.about, value: value.value };
     case "ios": return { kind: "ios", about: value.about, value: value.value };
     case "minigame": return { kind: "minigame", score: value.score };
+    case "confess": return {
+      kind: "confess", yes: value.yes,
+      ...(value.target !== undefined ? { target: value.target } : {}),
+      ...(value.note !== undefined ? { note: value.note } : {}),
+    };
     case "dare": return value.status === "passed" ? { kind: "dare", status: "passed", reason: value.reason } : { kind: "dare", status: "done" };
   }
 }
@@ -194,6 +199,9 @@ function redactValue(value: ResponseValue, players: Player[]): ResponseValue {
   if (value.kind === "text") return { ...value, text: pseudonymizeText(value.text, players) };
   if (value.kind === "shout") return { ...value, word: pseudonymizeText(value.word, players) };
   if (value.kind === "dare" && value.reason) return { ...value, reason: pseudonymizeText(value.reason, players) };
+  // A confess NOTE is free text too: an alias typed into it must be scrubbed
+  // before anything downstream (digest, reveal copy, providers) sees it.
+  if (value.kind === "confess" && value.note) return { ...value, note: pseudonymizeText(value.note, players) };
   return { ...value };
 }
 function asSafePrompt(x: unknown, phase: HeatPhase): x is Prompt {
@@ -201,10 +209,12 @@ function asSafePrompt(x: unknown, phase: HeatPhase): x is Prompt {
   const p = x as Prompt;
   return typeof p.id === "string" && p.id.length > 0 && p.phase === phase &&
     ["bank", "host", "grok"].includes(p.source) &&
-    ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare"].includes(p.kind) &&
+    ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare", "confess"].includes(p.kind) &&
     typeof p.text === "string" && p.text.trim().length > 0 && p.text.length <= 160 && validPlaceholders(p.text) &&
     Array.isArray(p.measures) && p.measures.length > 0 && p.measures.every((m) => typeof m === "string" && m.length > 0) &&
-    ["couple", "friendship", "trust", "friction", "tease", "rivalry", "status", "neutral"].includes(p.coding) && typeof p.asksTarget === "boolean";
+    ["couple", "friendship", "trust", "friction", "tease", "rivalry", "status", "neutral"].includes(p.coding) && typeof p.asksTarget === "boolean" &&
+    (p.style === undefined || p.style === "group" || p.style === "confess") &&
+    (p.twinId === undefined || typeof p.twinId === "string");
 }
 
 export class RoomManager {
@@ -947,6 +957,7 @@ export class RoomManager {
         // Live moments. A bot cannot know whether it is the spotlight subject
         // (the cover round looks identical), so it always sends a short text —
         // exactly what the server expects from both sides of the moment.
+        case "confess": value = { kind: "confess", yes: room.rng() < 0.5 }; break;
         case "spotlight": value = { kind: "text", text: ["Just vibing, honestly.", "Watching the room.", "Thinking about food.", "Nothing, I swear."][rand(4)]! }; break;
         case "verdict": value = { kind: "pick", target: other }; break;
       }

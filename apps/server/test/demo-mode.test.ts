@@ -74,6 +74,7 @@ const SEATS = ["Maya", "Kofi", "Zuri"];
 /** A legal answer for any round kind, so a scripted seat can be answered. */
 function valueFor(round: RoundView, other: string): any {
   switch (round.kind) {
+    case "confess": return { kind: "confess", yes: true };
     case "pick": case "verdict": return { kind: "pick", target: other };
     case "shout": return { kind: "shout", word: "static" };
     case "rating": return { kind: "rating", trait: round.trait!, about: round.about!, value: 6 };

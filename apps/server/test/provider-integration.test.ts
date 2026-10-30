@@ -117,6 +117,7 @@ test("real integration filters generated prompts and sends only pseudonymous pub
         case "minigame": value = { kind: "minigame", score: 23 }; break;
         case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
         case "spotlight": value = { kind: "text", text: "Alice.* is enjoying this synthetic moment." }; break;
+        case "confess": value = { kind: "confess", yes: true }; break;
         case "verdict": value = { kind: "pick", target }; break;
       }
       const submit = () => clients[i]!.emit("submit", { roundId: round.roundId, clientUuid: `synthetic-${i}-${round.roundId}`, value }, (result) => { if (!result.ok) errors.push(result.error ?? "submission rejected"); });

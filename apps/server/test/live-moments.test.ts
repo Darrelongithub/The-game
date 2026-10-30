@@ -109,6 +109,7 @@ test("spotlight: rotation holds, the subject never sees the question, decoys nev
         case "ios": value = { kind: "ios", about: round.about!, value: 5 }; break;
         case "minigame": value = { kind: "minigame", score: 20 + i }; break;
         case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
+        case "confess": value = { kind: "confess", yes: i % 2 === 0 }; break;
         case "verdict": value = { kind: "pick", target: ids[(i + 1) % ids.length]! }; break;
       }
       outcome = value;

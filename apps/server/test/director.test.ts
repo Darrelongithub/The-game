@@ -108,6 +108,7 @@ const submitValue = (socket: Client, me: string, round: RoundView, ids: string[]
     : ids[0] === me ? ids[1]! : ids[1] === me ? ids[2]! : others[0]!;
   let value: ResponseValue;
   switch (round.kind) {
+    case "confess": value = { kind: "confess", yes: true }; break;
     case "pick": case "verdict": value = { kind: "pick", target }; break;
     case "shout": value = { kind: "shout", word: "chaos" }; break;
     case "rating": value = { kind: "rating", trait: round.trait!, about: round.about!, value: 9 }; break;

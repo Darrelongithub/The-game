@@ -192,6 +192,7 @@ test("one host and three in-server bots can finish the entire game without API k
       case "minigame": value = { kind: "minigame", score: 23 }; break;
       case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
       case "spotlight": value = { kind: "text", text: "Watching the room right now." }; break;
+      case "confess": value = { kind: "confess", yes: true }; break;
       case "verdict": value = { kind: "pick", target: "p2" }; break;
     }
     host.emit("submit", { roundId: round.roundId, clientUuid: `host-${round.roundId}`, value }, () => {});

@@ -110,6 +110,7 @@ test("five real sockets complete all rounds; public finale is identical; private
         case "dare": value = i === 0 ? { kind: "dare", status: "passed", reason: "Alice.* is watching." } : { kind: "dare", status: "done" }; break;
         case "pair_dare": value = { kind: "dare", status: "done" }; break;
         case "spotlight": value = { kind: "text", text: `Live caption number ${i}.` }; break;
+        case "confess": value = { kind: "confess", yes: i % 2 === 0, ...(i % 2 === 0 ? { target: target } : {}) }; break;
         case "verdict": value = { kind: "pick", target }; break;
       }
       const directed = value.kind === "pick" ? value.target : value.kind === "ios" ? value.about : value.kind === "rating" && value.about !== "self" ? value.about : undefined;

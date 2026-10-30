@@ -130,8 +130,11 @@ export function computeSignals(allRecords: LogRecord[], meta: RoomMeta): PairSig
     if (deb.length > 0) componentsUsed.push("debriefSim");
     if (log.some(r => r.value.kind === "ios" && ((r.playerId === a && r.value.about === b) || (r.playerId === b && r.value.about === a)))) componentsUsed.push("iosMean");
     if (agreement.length > 0) componentsUsed.push("traitAgreement");
-    const weights = componentsUsed.reduce((sum, key) => sum + DEFAULT_WEIGHTS[key], 0);
-    const pairScore = weights ? componentsUsed.reduce((sum, key) => sum + DEFAULT_WEIGHTS[key] * ({pickOverlap, mutualPick, debriefSim, iosMean, traitAgreement})[key], 0) / weights : 0;
+    // "confession" is evidence with weight 0 (it never moves pair_score).
+    const pairWeights = { ...DEFAULT_WEIGHTS, confession: 0 };
+    const values = { pickOverlap, mutualPick, debriefSim, iosMean, traitAgreement, confession: 0 };
+    const weights = componentsUsed.reduce((sum, key) => sum + pairWeights[key], 0);
+    const pairScore = weights ? componentsUsed.reduce((sum, key) => sum + pairWeights[key] * values[key], 0) / weights : 0;
     out.push({ room: meta.roomId, a, b, pickOverlap, mutualPick, debriefSim, iosMean, traitAgreement, pairScore, componentsUsed,
       coupleEvidence: mutual("couple"), friendEvidence: mutual("friendship"),
       negativeMutual: Math.max(mutual("friction"), mutual("rivalry")) });
