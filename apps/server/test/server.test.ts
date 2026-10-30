@@ -52,8 +52,8 @@ test("LAN banner includes every non-loopback IPv4 URL and a QR code", () => {
     docker0: [{ address: "172.17.0.1", family: "IPv4", internal: false, cidr: "172.17.0.1/16", netmask: "255.255.0.0", mac: "00:00:00:00:00:03" }],
     hotspot: [{ address: "10.0.0.2", family: "IPv4", internal: false, cidr: "10.0.0.2/24", netmask: "255.255.255.0", mac: "00:00:00:00:00:02" }],
   };
-  assert.deepEqual(lanAddresses(fake), ["10.0.0.2", "172.17.0.1", "192.168.1.20"]);
-  assert.equal(selectLanAddress(fake), "192.168.1.20", "prefer Wi-Fi over hotspot and virtual bridge addresses");
+  assert.deepEqual(lanAddresses(fake), ["192.168.1.20", "10.0.0.2", "172.17.0.1"]);
+  assert.equal(selectLanAddress(fake), "192.168.1.20", "QR selection follows the printed private-LAN preference order");
   const original = console.log, output: string[] = [];
   try { console.log = (...args: unknown[]) => output.push(args.join(" ")); bootBanner(3001, "0.0.0.0", fake); } finally { console.log = original; }
   const text = output.join("\n");
