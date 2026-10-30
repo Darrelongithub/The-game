@@ -10,7 +10,7 @@
 // patterns, 20–160 chars, valid {P1}..{P11}, the data-or-dead rule, and the
 // callback rule (verbatim digest quotes only — never an invented answer).
 import type { NightDigest, Prompt, PromptStyle } from "../../shared/src/contracts.ts";
-import { PHASE_KINDS, type PromptPhase } from "./bank/index.ts";
+import { PHASE_KINDS, UNHINGED_IDS, maxPlaceholderIndex, type PromptPhase } from "./bank/index.ts";
 import {
   containsVerbatimQuote,
   filterCandidates,
@@ -156,10 +156,18 @@ function systemPrompt(input: {
   style?: PromptStyle;
 }): string {
   const kinds = PHASE_KINDS[input.phase].join(", ");
+  // Never send the unhinged tier to a provider. Prefer this phase, and only
+  // use other phases if the eligible phase bank cannot supply six examples.
+  const eligible = BANK.filter((p) => !UNHINGED_IDS.includes(p.id) && maxPlaceholderIndex(p.text) <= input.playerCount);
+  const seeds = [...eligible.filter((p) => p.phase === input.phase), ...eligible.filter((p) => p.phase !== input.phase)].slice(0, 6);
   const lines = [
-    "You write prompts for a private 18+ party game played by a group of friends in one room.",
+    "You write prompts for a private 18+ party game: CLOSE FRIENDS in one room answering on phones.",
+    "Prompts address the GROUP about the GROUP, with flirty, teasing, roast-your-friends, inside-joke energy.",
+    "Be punchy: one sentence. No disclaimers, no moralizing. Reference players only via {P1}..{Pn} placeholders.",
     `Phase: ${input.phase}. ${PHASE_BRIEF[input.phase]}`,
     `There are exactly ${input.playerCount} players, addressed only as Player 1..Player ${input.playerCount} — never real names.`,
+    "Bank examples for inspiration (do not copy):",
+    ...seeds.map((p) => `  - ${p.text}`),
     `Return ONE JSON array of ${input.count} objects. No prose, no markdown.`,
     ...voiceBlock({ phase: input.phase, playerCount: input.playerCount, ...(input.style !== undefined ? { style: input.style } : {}) }),
     "Each object:",

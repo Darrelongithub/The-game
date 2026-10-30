@@ -18,15 +18,45 @@ is not restricted to localhost. Stop the host with Ctrl+C. The command builds
 `apps/web/out/` and serves it from the game server's origin on port 3001.
 
 No `.env` is required. With neither API key set, the finished game uses the
-bank and templates without internet after installation. Optional settings:
+bank and templates without internet after installation. Prompt generation also
+tries local Ollama, with no key required. Optional settings:
 
 ```sh
 cp .env.example .env
-# Edit .env only if desired; HOST, PORT, XAI_API_KEY and GEMINI_API_KEY are optional.
+# Edit .env only if desired; HOST, PORT, GEN_BASE, GEN_MODEL and cloud keys are optional.
 ```
 
 Already-set environment variables take precedence over `.env`. Never commit or
 share `.env`, room logs, session secrets or API keys.
+
+## Local prompt generation (host laptop)
+
+1. Install Ollama on the **same laptop** as the Node game server and start the
+   Ollama service (normally bound to localhost port 11434).
+2. Download the model once: `ollama pull dolphin-mistral`.
+3. Leave the defaults in `.env`, or set:
+   ```sh
+   GEN_BASE=http://localhost:11434/v1
+   GEN_MODEL=dolphin-mistral
+   ```
+4. Optional service check from the laptop: `curl http://localhost:11434/v1/models`.
+   Then run `npm run host` normally. After changing `.env`, restart the host.
+
+`GEN_MODEL` wins over the dormant legacy `XAI_MODEL` override. Generation uses
+OpenAI-compatible `/chat/completions` without an Authorization header. It does
+not use xAI, Google, an API key, or a cloud account. Existing cloud analysis and
+reveal settings are independent and unchanged.
+
+Do **not** expose Ollama to the LAN or put its URL in browser code: players'
+phones talk only to the game server on port 3001. `localhost` here means the
+server laptop. If the server is containerized, localhost is the container, so
+configure `GEN_BASE` to a host-reachable address instead.
+
+If Ollama is stopped, the model is missing, a request times out, or returned
+prompts fail validation, bank prompts keep the game running. Generation remains
+background-only with the existing eight-second request deadline; a slow laptop
+may therefore use mostly bank prompts. No successful generation is required to
+start or finish a night. Download dependencies and the model before going offline.
 
 ## Solo test
 

@@ -81,7 +81,11 @@ test("production defaults use the full bank and deterministic engine in a comple
   assert.ok(pickCodings.has("friendship") && pickCodings.has("couple") && (pickCodings.has("friction") || pickCodings.has("rivalry")),
     "a no-key night must be capable of positive, romantic and negative nomination signals");
   assert.ok(rows.some((r) => r.promptId === "w6"), "group-signal bank prompts with asksTarget=false must remain playable");
-  assert.ok(rows.some((r) => r.promptId === "dd5"), "the packaged pair dare must not be discarded");
+  const bankCodings = new Set((['warmup', 'spicy', 'deep'] as const).flatMap((phase) => bankForPhase(phase).flatMap((prompt) => prompt.coding ?? [])).map((c) => String(c)));
+  assert.ok(bankCodings.has("friendship") && bankCodings.has("couple") && (bankCodings.has("friction") || bankCodings.has("rivalry")),
+    `the production bank supports positive, romantic and negative nomination signals (played: ${[...pickCodings].join(", ") || "none"})`);
+  assert.ok(bankForPhase("dare").some((prompt) => prompt.id === "dd5" && prompt.kind === "pair_dare"),
+    "the packaged pair dare stays in the production bank (a night only draws a subset)");
   const meta: RoomMeta = { roomId: rows[0]!.roomId, players: [1, 2, 3, 4].map((i) => ({ id: `p${i}`, alias: `Player ${i}` })), revealOptIn: ["p1", "p2", "p3", "p4"] };
   const signals = computeSignals(rows, meta);
   const expected = computeResults(signals, rows, meta);

@@ -281,7 +281,9 @@ now 420s.
 
 ## R1–R20 remediation carry-forward — adapted to current `main`
 
-This section records the R1–R20 status after reconciling with the latest `main` (the ROUND 4 report above is historical). The merge adapts the remediation alongside main's reveal-ready gate and demo-room flow, preserving both sets of behavior rather than choosing one side wholesale. The merged contract, server, UI, and tests were revalidated together.
+This section records the R1–R20 branch status (the ROUND 4 report above is historical). **The branch is now reconciled with `main`.** The ROUND 4 ready-gate and demo-room features were adapted together with the R1–R20 remediation instead of taking either side wholesale: the shared contract is the additive union (`profile`/`role`/structured rating intent **plus** `ready`/`demo`/`impersonatedBy`), the server keeps the ready gate and demo seats while still requiring the 18+ profile for an ordinary room, the web entry collects the profile and consents and also offers the demo-room toggle, rating/IOS keeps the server-assigned trait/target (no silent client defaults), and narrator reveals stay Grok-only (Gemini is analysis-only).
+
+Re-validated after the merge (Node 22.22.3): `selfcheck` 36/36; engine 40/40; prompts 104/104; narrator 81/81; server 68/68; web typecheck + 39 SSR checks + 56 mock-flow checks + UI/socket/transport/mock/privacy regressions all passing; jsdom component suite 151/151 (including the ROUND 4 ready-screen and demo-console checks); production build, `bundle:check` (player 145.2 KiB / 150 KiB; display 115.7 KiB / 120 KiB) and `npm audit --omit=dev` (0 vulnerabilities) pass; `smoke:verified`, `smoke:demo` (42 round events, 12 finale slides) and the jsdom export smoke pass against the built server. The real-browser `test:browser` still needs a Chromium executable, and the physical-device/LAN/live-provider matrix remains outstanding (see below).
 
 ### Remediation and regression status
 
@@ -367,10 +369,11 @@ target, warm reveal names nobody, spicy reveal never names a no).
 - `npm run typecheck`: passed across server, web, engine, narrator, and prompts.
 - Server: **73/73** tests passed, including the new `confess-rounds` suite (private answers with a missing phone, warm counts-only payload, spicy yeses-only attribution, anonymous-vs-attributed notes, twin window + mismatch slide, same-script determinism), demo-mode, reveal-ready gate, full-game, restart replay, protocol, provider integration, and bot coverage.
 - Engine: **55/55** passed. Same-log results, digest, secrets and the style/twin plans are deeply equal; `planStyles(12)` stays inside ±1 of `STYLE_MIX`.
-- Prompts: **111/111** passed — every question seed is tagged with a voice, each heat phase carries ten confession seeds in the second voice, twin pairs link different voices, and the gen system prompt ships both registers with ≥4 bank few-shots. Narrator: **81/81**.
-- Web: **39 SSR checks**, **131** component checks, **56** mock-flow checks, all UI/socket/transport/mock/privacy regressions, **1/1** transport regression, plus the new **4** confess UI regressions (answer sheet with no skip, "no" drops the target, warm names nobody, spicy never names a no).
+- Prompts: **117/117** passed (including the local-Ollama generation lane merged from `main`) — every question seed is tagged with a voice, each heat phase carries ten confession seeds in the second voice, twin pairs link different voices, and the gen system prompt ships both registers with ≥4 bank few-shots. Narrator: **81/81**.
+- Web: **39 SSR checks**, **151** component checks, **56** mock-flow checks, all UI/socket/transport/mock/privacy regressions, **1/1** transport regression, plus the new **4** confess UI regressions (answer sheet with no skip, "no" drops the target, warm names nobody, spicy never names a no).
 - `npm run selfcheck`: **43 checks passed** (includes `STYLE_MIX` sums to 1 and the twelve round kinds).
 - `npm run smoke:demo`: passed against a live local server — **51 round events, 31 reveals, 62 ready-gate snapshots, 11 finale slides**.
+- Merge with `main` (which landed the `GEN_BASE`/`GEN_MODEL` local-Ollama lane in `packages/prompts`): one import conflict in `generate.ts`, resolved by keeping BOTH lanes — the Ollama provider changes stay untouched and the two-voice register block rides on top. Nothing from `main` was reverted; prompt suite at 117 proves both survive.
 - `npm run build`: passed (Next static export). `npm run bundle:check`: player **145.2 KiB gzip / 150 KiB**; display **115.7 KiB / 120 KiB**.
 - Not re-run in this session: the private-oracle `smoke:verified` (needs an external oracle) and the on-device checklist below.
 
