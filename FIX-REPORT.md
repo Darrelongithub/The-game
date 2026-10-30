@@ -281,7 +281,7 @@ now 420s.
 
 ## R1–R20 remediation carry-forward — adapted to current `main`
 
-This section is the current branch status (the ROUND 4 report above is historical). The integration preserved the newer `main` architecture and tests; it did not resolve the merge by selecting either side wholesale.
+This section records the R1–R20 branch status (the ROUND 4 report above is historical). The branch has not yet been reconciled with the latest `main`: its newer ready-gate and demo-room changes overlap these files. A local merge attempt exposed conflicts across server, UI, contract, and test code; it was aborted rather than resolving those conflicts by selecting either side wholesale. The PR remains blocked until those features are adapted together and the full suites rerun.
 
 ### Remediation and regression status
 
