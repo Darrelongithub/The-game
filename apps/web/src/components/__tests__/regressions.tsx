@@ -26,6 +26,7 @@ async function main() {
   const { createRoot } = await import('react-dom/client')
   const { renderToString } = await import('react-dom/server')
   const { JoinScreen } = await import('../JoinScreen')
+  const { LobbyScreen } = await import('../LobbyScreen')
   const { PlayScreen } = await import('../play/PlayScreen')
   const { PromptScreen } = await import('../../screens/PromptScreen')
   const { HoldToReveal } = await import('../HoldToReveal')
@@ -87,6 +88,86 @@ async function main() {
     await click(button(host, 'Join room'))
     assert.equal(joined.code, 'AB2C'); assert.equal(joined.consent.revealOptIn, true)
     w.history.replaceState({}, '', '/')
+  })
+
+  await check('lobby copies the Host screen link and preserves existing controls', async (root, host) => {
+    dom.reconfigure({ url: 'https://party.example:4321/?room=OLD&token=private#invite' })
+    const copied: string[] = []
+    Object.defineProperty(w.navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => { copied.push(text) } } })
+    let started = 0, added = 0
+    const lobbyView: RoomView = { ...view, phase: 'lobby', round: null, demo: true }
+    const props = {
+      you: 'p1', isHost: true, mode: 'socket' as const,
+      onStart: () => { started++ }, onAddBot: () => { added++ },
+      onCustomPrompts: () => {}, onDelete: () => {}, onHeatDown: () => {},
+      demoPanel: <p>Demo console remains</p>,
+    }
+    try {
+      await render(root, <LobbyScreen {...props} view={lobbyView} code="AB2C" />)
+      assert.ok(host.textContent?.includes('Host screen — open this on the host laptop / TV. The reveal plays here.'))
+      const display = host.querySelector<HTMLAnchorElement>('a[href="/display?code=AB2C"]')
+      assert.ok(display, 'the existing public display link remains')
+      assert.equal(display.textContent, 'Open public display')
+      assert.equal(display.target, '_blank')
+      assert.equal(display.rel, 'noreferrer')
+      const copy = button(host, 'Copy host screen link')
+      assert.ok(copy); assert.equal(copy.disabled, false)
+      await click(copy)
+      assert.deepEqual(copied, ['https://party.example:4321/display?code=AB2C'], 'copy the public-display URL, without invite parameters or fragment')
+      assert.ok(button(host, 'Host screen link copied'), 'successful copying is acknowledged')
+
+      assert.ok(button(host, 'Copy invite link'))
+      await click(button(host, 'Copy invite link'))
+      assert.equal(copied[1], 'https://party.example:4321/?room=AB2C', 'the existing invite button still copies a player invite')
+      assert.ok(button(host, 'Invite link copied'))
+      assert.ok(button(host, 'Host screen link copied'), 'the two copy states are independent')
+      assert.ok(players.every((player) => host.textContent?.includes(player.alias)))
+      assert.ok(host.textContent?.includes('Demo console remains'))
+      assert.ok(button(host, 'Custom prompts')); assert.ok(button(host, 'Vote to keep the heat')); assert.ok(button(host, 'Delete room'))
+      await click(button(host, 'Start the night')); await click(button(host, 'Add bot'))
+      assert.equal(started, 1); assert.equal(added, 1)
+
+      await render(root, <LobbyScreen {...props} view={{ ...lobbyView, code: 'ZX9W' }} code={null} />)
+      assert.ok(host.querySelector('a[href="/display?code=ZX9W"]'), 'the link uses the room snapshot when code is null')
+      await click(button(host, 'Copy host screen link'))
+      assert.equal(copied[2], 'https://party.example:4321/display?code=ZX9W', 'copy follows room changes')
+    } finally {
+      delete w.navigator.clipboard
+      dom.reconfigure({ url: 'http://localhost/' })
+    }
+  })
+
+  await check('Host screen link stays available to guests when clipboard access fails', async (root, host) => {
+    dom.reconfigure({ url: 'http://192.168.1.42:3001/?room=OLD#invite' })
+    Object.defineProperty(w.navigator, 'clipboard', { configurable: true, value: undefined })
+    const lobbyView: RoomView = { ...view, phase: 'lobby', round: null }
+    const props = {
+      you: 'p2', isHost: false, mode: 'socket' as const, code: null,
+      onStart: () => {}, onAddBot: () => {}, onCustomPrompts: () => {}, onDelete: () => {}, onHeatDown: () => {},
+    }
+    try {
+      await render(root, <LobbyScreen {...props} view={lobbyView} />)
+      assert.ok(host.textContent?.includes('Host screen — open this on the host laptop / TV. The reveal plays here.'))
+      assert.ok(host.textContent?.includes('Waiting on the host'))
+      assert.ok(host.querySelector('a[href="/display?code=AB2C"]'), 'guests retain the existing display link')
+      await click(button(host, 'Copy host screen link'))
+      const fallback = host.querySelector<HTMLInputElement>('input[aria-label="Host screen link"]')
+      assert.ok(fallback, 'the URL is available for manual copying without Clipboard API')
+      assert.equal(fallback.readOnly, true)
+      assert.equal(fallback.value, 'http://192.168.1.42:3001/display?code=AB2C')
+      await act(async () => fallback.focus())
+      assert.equal(fallback.selectionStart, 0); assert.equal(fallback.selectionEnd, fallback.value.length)
+
+      Object.defineProperty(w.navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new Error('denied') } } })
+      await render(root, <LobbyScreen {...props} view={{ ...lobbyView, code: 'ZX9W' }} />)
+      await click(button(host, 'Copy host screen link'))
+      assert.equal(host.querySelector<HTMLInputElement>('input[aria-label="Host screen link"]')?.value, 'http://192.168.1.42:3001/display?code=ZX9W', 'denied clipboard permission also exposes the current URL')
+      await click(button(host, 'Copy invite link'))
+      assert.equal(host.querySelector<HTMLInputElement>('input[aria-label="Invite link"]')?.value, 'http://192.168.1.42:3001/?room=ZX9W', 'the existing invite fallback remains')
+    } finally {
+      delete w.navigator.clipboard
+      dom.reconfigure({ url: 'http://localhost/' })
+    }
   })
 
   await check('connection errors while creating a room are shown instead of escaping', async (root, host) => {

@@ -334,3 +334,4 @@ Automated coverage is green, but no real Android or iPhone device results have b
 |---|---|---|---|---|
 | Android | _pending_ | _pending_ | **REQUIRES HUMAN** | _pending_ |
 | iPhone | _pending_ | _pending_ | **REQUIRES HUMAN** | _pending_ |
+- Agent H3 — Added lobby Host screen labeling and link copying (with LAN fallback), preserving public-display and invite actions; SSR, web/component tests, build, bundle check, and selfcheck (36/36) passed.
