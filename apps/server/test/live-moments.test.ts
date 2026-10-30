@@ -44,7 +44,7 @@ async function setup(t: TestContext, options: ServerOptions = {}) {
   const dir = mkdtempSync(join(tmpdir(), "reveal-live-"));
   const server = createGameServer({
     dataDir: dir, revealHoldMs: 20, interludeHoldMs: 20, graceMs: 30, botDelayMs: [5, 20],
-    roundTimers: { pick: 60, text: 60, shout: 60, rating: 60, ios: 60, minigame: 60, dare: 60, pair_dare: 60, debrief: 60, spotlight: 120, verdict: 400 },
+    roundTimers: { pick: 60, text: 60, shout: 60, rating: 60, ios: 60, minigame: 60, dare: 60, pair_dare: 60, debrief: 60, spotlight: 120, verdict: 400, confess: 400 },
     verdictDiscussMs: 0, ...options,
   });
   const port = await server.listen(0, "127.0.0.1", false);
@@ -109,6 +109,7 @@ test("spotlight: rotation holds, the subject never sees the question, decoys nev
         case "ios": value = { kind: "ios", about: round.about!, value: 5 }; break;
         case "minigame": value = { kind: "minigame", score: 20 + i }; break;
         case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
+        case "confess": value = { kind: "confess", yes: i % 2 === 0 }; break;
         case "verdict": value = { kind: "pick", target: ids[(i + 1) % ids.length]! }; break;
       }
       outcome = value;
@@ -185,7 +186,7 @@ test("spotlight: rotation holds, the subject never sees the question, decoys nev
 });
 
 test("verdict: phones down during the debate, votes stay secret until the reveal", { timeout: 20000 }, async (t) => {
-  const { connect, dir } = await setup(t, { roundTimers: { pick: 60, text: 60, shout: 60, rating: 60, ios: 60, minigame: 60, dare: 60, pair_dare: 60, debrief: 60, spotlight: 120, verdict: 900 }, verdictDiscussMs: 400 });
+  const { connect, dir } = await setup(t, { roundTimers: { pick: 60, text: 60, shout: 60, rating: 60, ios: 60, minigame: 60, dare: 60, pair_dare: 60, debrief: 60, spotlight: 120, verdict: 900, confess: 400 }, verdictDiscussMs: 400 });
   const clients = await Promise.all([connect(), connect(), connect(), connect()]);
   const aliases = ["Host", "Brian", "Chao", "Diana"];
   const made = await create(clients[0]!, aliases[0]!); assert.ok(made.ok && made.code);
@@ -274,7 +275,7 @@ test("verdict: phones down during the debate, votes stay secret until the reveal
 });
 
 test("bots answer both live kinds without help", { timeout: 20000 }, async (t) => {
-  const { connect } = await setup(t, { roundTimers: { pick: 60, text: 60, shout: 60, rating: 60, ios: 60, minigame: 60, dare: 60, pair_dare: 60, debrief: 60, spotlight: 200, verdict: 1500 }, verdictDiscussMs: 500, botDelayMs: [5, 20] });
+  const { connect } = await setup(t, { roundTimers: { pick: 60, text: 60, shout: 60, rating: 60, ios: 60, minigame: 60, dare: 60, pair_dare: 60, debrief: 60, spotlight: 200, verdict: 1500, confess: 400 }, verdictDiscussMs: 500, botDelayMs: [5, 20] });
   const host = await connect();
   const made = await create(host, "Host"); assert.ok(made.ok);
   for (let i = 0; i < 3; i++) host.emit("add_bot");
@@ -371,7 +372,7 @@ test("decoy records never reach signals or claims; the digest pairs them instead
 });
 
 test("round data round-trips through the JSONL log with the decoy flag intact", async (t) => {
-  const { connect, dir } = await setup(t, { roundTimers: { pick: 60, text: 60, shout: 60, rating: 60, ios: 60, minigame: 60, dare: 60, pair_dare: 60, debrief: 60, spotlight: 120, verdict: 400 } });
+  const { connect, dir } = await setup(t, { roundTimers: { pick: 60, text: 60, shout: 60, rating: 60, ios: 60, minigame: 60, dare: 60, pair_dare: 60, debrief: 60, spotlight: 120, verdict: 400, confess: 400 } });
   const clients = await Promise.all([connect(), connect(), connect(), connect()]);
   const made = await create(clients[0]!); assert.ok(made.ok && made.code);
   const ids = [made.you!];

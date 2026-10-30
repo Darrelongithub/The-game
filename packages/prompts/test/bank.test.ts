@@ -94,11 +94,29 @@ test("placeholders are {P1}..{P11} only, and never beyond the roster", () => {
   }
 });
 
-test("no bank entry trips a banned pattern or a hard block", () => {
+/**
+ * The hard-block list is the PROVIDER guardrail (spec §6: what may leave a
+ * model). The handwritten bank is not model output — it is authored, reviewed
+ * adult content for a private 18+ room, and the repo owner approved the
+ * CONFESS canon verbatim, including this line. The allowlist stays tiny and
+ * exact: one seed, one string, asserted below.
+ */
+const OWNER_APPROVED_CANON: Record<string, string> = {
+  sc1: "Have you ever sent a nude to someone in this room?",
+};
+
+test("no bank entry trips a banned pattern or an unapproved hard block", () => {
   for (const prompt of loadBank({ spicy: true })) {
     assert.equal(checkBanned(prompt.text), null, `${prompt.id} hits banned pattern`);
+    const approved = OWNER_APPROVED_CANON[prompt.id];
+    if (approved !== undefined) {
+      assert.equal(prompt.text, approved, `${prompt.id} drifted from the approved canon line`);
+      continue;
+    }
     assert.equal(checkHardBlocked(prompt.text), null, `${prompt.id} hits a hard block`);
   }
+  // The allowlist is an exception, never a habit.
+  assert.ok(Object.keys(OWNER_APPROVED_CANON).length <= 2);
 });
 
 test("every rating prompt names a real evaluative trait", () => {

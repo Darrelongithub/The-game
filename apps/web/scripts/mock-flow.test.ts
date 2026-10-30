@@ -93,6 +93,7 @@ function answerFor(r: RoundView): ResponseValue {
     case "debrief": return { kind: "text", text: "They said they already knew. I said nothing back." };
     case "spotlight": return { kind: "text", text: "Watching the door, honestly." };
     case "verdict": return { kind: "pick", target: other };
+    case "confess": return { kind: "confess", yes: true };
   }
 }
 
