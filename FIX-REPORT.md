@@ -1,6 +1,6 @@
 # Remediation report
 
-**Decision: NO-GO.** This turn implements the requested shared-contract baseline and the pick-target privacy correction, but does not complete the P0 blockers or the remainder of R1–R17. Do not run a real game night on this branch as a remediated release.
+**Decision: NO-GO — REQUIRES HUMAN DEVICE TESTING.** R1–R20 implementation and automated regression work is complete on this branch. A real Android + iPhone pass has not been performed; do not merge or treat this as a release-ready build until the device checklist below is completed and recorded.
 
 ## Completed
 
@@ -11,12 +11,12 @@
 - **Contract integration cleanup:** Added empty profile maps to existing RoomMeta fixtures and adjusted stale Gemini `reveal` model references so the contract typechecks. This is compile compatibility only; it does not implement profile collection or route finale narration through Grok.
   - Evidence: `npm run typecheck` passed.
 
-## Not completed / release blockers
+## Completed remediation requirements
 
-- **R1 — rating/IOS subjects:** Implemented server-assigned non-self subjects and rating traits, submit enforcement, personalized RoundView metadata, live submitted IDs, and removed client dropdowns. Regression test checks four personalized rating views. IOS uses the same assignment path; an explicit IOS-only metadata assertion remains desirable.
+- **R1 — rating/IOS subjects:** Implemented server-assigned non-self subjects and rating traits, submit enforcement, personalized RoundView metadata, live submitted IDs, and removed client dropdowns. Protocol regressions verify all four rating assignments and each IOS subject; SSR regression verifies the assigned subject/trait is displayed.
 - **R2 — solo dares:** One rotating performer per dare; only that phone can answer, prompts are substituted without naming the performer, spectators see the same prompt, and `performerId` is persisted.
 - **R3 — pair dares:** Both players receive identical “You two:” instructions. A pass blocks the other player from marking it done; both must submit a required reason, recorded separately. Debriefs remain `onlyPlayers`-private.
-- **R5 — profile collection/enforcement:** Added a `PROFILE_QUESTIONS`-driven join flow for age, relationship, dating history, private-crush status, and tonight intent; age is hard-gated at 18+, and existing consent choices remain required. Create and first-time join now validate and store bounded profile data; room metadata carries profiles into the engine, bots receive deterministic neutral profiles, and resume/reclaim paths retain the seat's stored profile. Added protocol regressions for missing create/join profiles. Raw profile answers are not included in RoomView or shown directly in UI. Regression coverage rejects missing profiles at both creation and first join. The web mock-flow (53 checks), Socket.IO transport test, strict typecheck, selfcheck (34/34), server suite (20/20), and engine/prompts/narrator suite (171/171) passed. This R5 item is ready for its per-item commit; later requirements remain outstanding.
+- **R5 — profile collection/enforcement:** Added a `PROFILE_QUESTIONS`-driven join flow for age, relationship, dating history, private-crush status, and tonight intent; age is hard-gated at 18+, and existing consent choices remain required. Create and first-time join now validate and store bounded profile data; room metadata carries profiles into the engine, bots receive deterministic neutral profiles, and resume/reclaim paths retain the seat's stored profile. Added protocol regressions for missing create/join profiles. Raw profile answers are not included in RoomView or shown directly in UI. Regression coverage rejects missing profiles at both creation and first join. The web mock-flow (53 checks), Socket.IO transport test, strict typecheck, selfcheck, server validation, and profile UI SSR checks passed. The R5 implementation and profile-required mock/bot flows are committed.
 - **R6 — rejoin:** Resume credentials stay stable; active credential replay cannot displace an already-connected seat; disconnected seat can be reclaimed mid-round by alias + room code. Protocol test verifies same seat and active-round snapshot.
 - **R7 — pseudonymization:** Implemented Unicode word-boundary substitution, stable alias table, and deterministic swap-back; tests cover Ian/Brian, overlapping aliases, and reverse mapping.
 - **R8 — statistical gates:** Spark requires at least two mutual couple-coded picks in each direction; consensus uses the picker threshold and allows below-threshold claims only when unanimous, capped at medium confidence. Secret generation suppresses low-confidence claims. Single-mutual spark regression passes. Consensus high confidence now requires the same target on the same coding to clear the threshold in three independent rounds. A 500-night n=4 randomized regression recorded 0 high-confidence consensus false positives (≤2%).
@@ -29,7 +29,7 @@
 - **R15 — generated prompt share:** The server now prioritizes available Grok-generated prompts in non-pick slots after host-authored prompts, while retaining designated pick slots to preserve the R11 density floor. Regression verifies Grok-over-bank preference and host precedence.
 - **R16 — display-role/stage UI:** Added a broadcast-only display join path that does not create a player seat, require consent/profile, or receive private cards. Server sends sanitized public state/round, reveal, interlude, and finale events; display prompts omit personalized assignment/pass metadata. Added `/display?code=...` UI and a lobby link to launch it. Socket regression verifies public stage/finale delivery, no player credentials, no control authority, and zero secret-deck events.
 - **R17 — bundle/audit:** The player client remains lazily loaded after the intro; added `npm run bundle:check` to enforce gzip first-load caps (player ≤150 KiB, display ≤120 KiB). Latest production build measured player 145.5 KiB and display 115.8 KiB. `npm audit --audit-level=moderate` reports zero vulnerabilities. No Android/iPhone real-device pass was performed.
-- **Bot/acceptance verification:** Latest full test run passed **190/190 tests**; `npm run smoke:verified` passed the external-socket phase, finale equality, secret ownership/deck-limit, duplicate persistence, active/finale resume, dare-pass, and deletion checks. These do not cover unfinished profiles, performer/pair-dare behavior, display role, or restart replay.
+- **Automated acceptance verification:** Full workspaces suites pass (server, web SSR, engine including the 11-player perf test, prompts, and narrator); additional UI component checks, mock flow, Socket.IO transport, and `npm run smoke:verified` pass. The verified bot suite covers phases, finale equality, secret ownership/deck limits, duplicate persistence, active/finale resume, dare pass, and deletion. Dedicated protocol regressions cover profiles, assigned rating/IOS targets, solo/pair dares, display privacy, prompt selection, and JSONL replay.
 
 ## Follow-up clarifications R18–R20
 
@@ -39,11 +39,25 @@
 
 ## Validation run
 
-- `npx -y tsx scripts/selfcheck.ts` — PASS (34/34).
-- `npm run typecheck` — PASS.
+- `npm test --workspaces --if-present` — PASS, **238 tests** across server (25), web SSR (39), engine (21, including 11-player performance), narrator (57), and prompts (96).
+- `npm run test:components` — PASS, 102 checks.
+- `npm run test:mock --workspace @reveal/web` — PASS, 53 mock-flow checks.
+- `npm run test:transport --workspace @reveal/web` — PASS, socket transport regression.
+- `npm run typecheck` — PASS; `npm run selfcheck` — PASS, 34/34 tunable/invariant checks.
 - `npm run smoke:verified` — PASS: phases, finale equality, secret ownership/deck limits, duplicate persistence, active/finale resume, dare pass, deletion.
-- `npx tsx --test packages/engine/test/engine.test.ts packages/engine/test/performance.test.ts` — PASS (engine regressions, noise output, deterministic equality, measured-only pair score, and 11-player perf).
-- `npx tsx --test apps/server/test/pseudonyms.test.ts` — PASS (2 tests).
-- `npx tsx --test apps/server/test/protocol.test.ts` — PASS (7 tests, including R1–R3, stable credential and alias reclaim).
-- `npx tsx --test apps/server/test/*.test.ts packages/engine/test/*.test.ts packages/prompts/test/*.test.ts packages/narrator/test/*.test.ts` — PASS (190/190).
-- **Real-device test script (requires human):** On one Android phone and one iPhone, create a room, join four players, background/kill one tab mid-round, clear its session storage, reclaim with alias + room code, complete a rating/IOS round and both dare types, verify no pick identities appear before finale, then verify the big-screen display receives public beats only and no private deck. Confirm the room resumes after a server restart. Record OS/browser versions and results before release.
+- `npm run build` — PASS; `npm run bundle:check` — PASS (player 145.5/150 KiB gzip, display 115.8/120 KiB gzip).
+- `npm audit --audit-level=moderate` — PASS, zero vulnerabilities.
+
+### REQUIRES HUMAN — 10-minute real-device acceptance (Android + iPhone)
+
+Use the same Wi-Fi/hotspot and a four-player room (the two real phones plus two desktop/browser seats). Record device model, OS version, browser and result for every step.
+
+1. **0:00–1:00 — join/profile:** Open the host URL on Android and the room link/QR on iPhone. Complete profile + consent on both; verify under-18 ages are blocked and neither raw profile is shown in the lobby.
+2. **1:00–2:00 — assigned rounds:** On rating and IOS prompts, verify each phone sees a named non-self subject (and rating trait), has no subject dropdown, and can submit successfully.
+3. **2:00–4:00 — solo and pair dares:** On solo dare, verify only the named performer can act. On pair dare, verify both assigned phones see the same dare; submit a pass reason on one, then confirm the other cannot mark it done and both reasons are required/recorded.
+4. **4:00–5:00 — pick privacy:** Submit picks from both phones; confirm neither phone or public display reveals picker→target identities before the finale.
+5. **5:00–6:00 — reconnect/reclaim:** Background the Android browser during a round, return and verify active resume; then clear that tab's site session storage and use alias + room code to reclaim the same seat without creating a duplicate.
+6. **6:00–8:00 — display/private separation:** Open `/display?code=ROOM` on a large screen. Verify public stage/finale beats update, display has no player controls/credentials, and secret decks/facts never appear there. Check each opt-in player's private deck only on that player's phone.
+7. **8:00–10:00 — restart/final check:** Restart the host server once the room has records; rejoin and verify the persisted log produces the same finale/results. Record any failure, screenshots only if consented, and mark Android and iPhone separately PASS/FAIL.
+
+Until this checklist is completed and recorded, status remains **NO-GO / REQUIRES HUMAN** and no merge is authorized.
