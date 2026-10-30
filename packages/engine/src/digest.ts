@@ -16,6 +16,7 @@ import {
   getPicks,
   meanOf,
 } from "./internal.ts";
+import { clusterNames, decoyPairings, decoyQuote, nameClusterTeaser } from "./live.ts";
 
 const QUOTE_MIN_LEN = 20;
 const QUOTE_MAX_LEN = 160;
@@ -24,7 +25,12 @@ const GAGS_MAX = 10;
 
 const hasLetterOrDigit = (s: string): boolean => /[\p{L}\p{N}]/u.test(s);
 
-export function buildNightDigest(log: LogRecord[], meta: RoomMeta): NightDigest {
+export function buildNightDigest(allRecords: LogRecord[], meta: RoomMeta): NightDigest {
+  // Spotlight decoys answered a cover question: they never count as quotes,
+  // latencies, gags or clusters on their own. They come back in through the
+  // pairing line below, which is the whole point of them.
+  const log = allRecords.filter((rec) => rec.decoy !== true);
+
   // ---------- quotes: ≤12, length 20–160, deduped, never emoji-only ----------
   // Debrief texts are private and are never quoted publicly.
   const seenQuoteText = new Set<string>();
@@ -46,10 +52,13 @@ export function buildNightDigest(log: LogRecord[], meta: RoomMeta): NightDigest 
     });
   });
   // "Best" = most substantive first (word count, then length, then earliest).
-  const quotes = quoteCandidates
+  const ranked = quoteCandidates
     .sort((x, y) => y.words - x.words || y.text.length - x.text.length || x.index - y.index)
-    .slice(0, QUOTES_MAX)
     .map(({ alias, text, context }) => ({ alias, text, context }));
+  // Decoy pairings lead the quote list: "While the room captioned X, X wrote…"
+  const pairings = decoyPairings(allRecords, meta);
+  const paired = pairings.map(decoyQuote);
+  const quotes = [...paired, ...ranked].slice(0, QUOTES_MAX);
 
   // ---------- stats: latencies, dodges, minigame ----------
   let fastest: { alias: string; ms: number } | undefined;
@@ -97,8 +106,16 @@ export function buildNightDigest(log: LogRecord[], meta: RoomMeta): NightDigest 
     .sort((x, y) => y.count - x.count || (x.word < y.word ? -1 : 1))
     .slice(0, GAGS_MAX);
 
+  // ---------- name clusters: ONE teaser per spotlight round, never a claim ----------
+  // "6 of 7 wrote the same name for X." Live observation is fun, not evidence.
+  const clusterTeasers: string[] = [];
+  for (const pairing of pairings) {
+    const teaser = nameClusterTeaser(clusterNames(pairing.captions, meta.players), pairing.subjectAlias);
+    if (teaser) clusterTeasers.push(teaser);
+  }
+
   // ---------- pick-cluster teasers: counts only, never a finale spoiler ----------
-  const pickTeasers: string[] = [];
+  const pickTeasers: string[] = [...clusterTeasers];
   {
     const picks = getPicks(log);
     if (picks.length > 0) {

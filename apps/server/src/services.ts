@@ -4,6 +4,7 @@ import {
   type NightDigest, type PairSignal, type PlayerId, type Prompt, type PromptCoding,
   type Results, type RoomMeta, type SecretCard, type TraitId,
 } from "../../../packages/shared/src/contracts.ts";
+import { clusterNames, decoyPairings, decoyQuote, nameClusterTeaser } from "../../../packages/engine/src/live.ts";
 
 export type HeatPhase = Prompt["phase"];
 export interface PromptProvider {
@@ -67,7 +68,9 @@ const average = (xs: number[]): number => xs.length ? xs.reduce((a, b) => a + b,
 const aliasOf = (meta: RoomMeta, id: string): string => meta.players.find((p) => p.id === id)?.alias ?? "Someone";
 
 /** Conservative offline implementations, replaceable by the scoring agent's pure API. */
-export function computeSignals(log: LogRecord[], meta: RoomMeta): PairSignal[] {
+export function computeSignals(allRecords: LogRecord[], meta: RoomMeta): PairSignal[] {
+  // Decoy answers never score.
+  const log = allRecords.filter((r) => r.decoy !== true);
   const out: PairSignal[] = [];
   const players = meta.players.map((p) => p.id).sort();
   for (let i = 0; i < players.length; i++) for (let j = i + 1; j < players.length; j++) {
@@ -172,7 +175,10 @@ export function computeResults(signals: PairSignal[], log: LogRecord[], meta: Ro
   return { roomId: meta.roomId, claims, pairScores: signals, ...(ship?.free ? { freeAgent: ship.free } : {}), computedAt: log.reduce((n, r) => Math.max(n, r.at), 0) };
 }
 
-export function buildNightDigest(log: LogRecord[], meta: RoomMeta): NightDigest {
+export function buildNightDigest(allRecords: LogRecord[], meta: RoomMeta): NightDigest {
+  // Spotlight decoys answer a cover question: never quotes, latencies or gags
+  // on their own — only the pairing line below may use them (ROUND 3).
+  const log = allRecords.filter((r) => r.decoy !== true);
   const quotes: NightDigest["quotes"] = [], dodges: NightDigest["dodges"] = [];
   const stats: NightDigest["stats"] = {}, gags = new Map<string, number>(), dodgeCounts = new Map<string, number>();
   const seen = new Set<string>();
@@ -196,8 +202,16 @@ export function buildNightDigest(log: LogRecord[], meta: RoomMeta): NightDigest 
     if (self.length && peers.length) selfVsRoom.push({ alias: player.alias, trait, self: average(self), roomMean: average(peers) });
   }
   const picks = log.filter((r) => r.value.kind === "pick").length;
-  return { quotes: quotes.slice(0, 12), stats, runningGags: [...gags].filter(([, count]) => count > 1).map(([word, count]) => ({ word, count })),
-    pickTeasers: picks ? [`The room has already made ${picks} choices.`] : [], dodges, selfVsRoom };
+  // Decoy pairing is the digest's best line: the room captioned them while they
+  // answered something else. It leads the quotes and adds one cluster teaser.
+  const pairings = decoyPairings(allRecords, meta);
+  const paired = pairings.map(decoyQuote);
+  const clusterTeasers = pairings.flatMap((pairing) => {
+    const teaser = nameClusterTeaser(clusterNames(pairing.captions, meta.players), pairing.subjectAlias);
+    return teaser ? [teaser] : [];
+  });
+  return { quotes: [...paired, ...quotes].slice(0, 12), stats, runningGags: [...gags].filter(([, count]) => count > 1).map(([word, count]) => ({ word, count })),
+    pickTeasers: [...clusterTeasers, ...(picks ? [`The room has already made ${picks} choices.`] : [])], dodges, selfVsRoom };
 }
 
 export function buildSecrets(results: Results, digest: NightDigest, meta: RoomMeta): Map<PlayerId, SecretCard[]> {

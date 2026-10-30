@@ -5,7 +5,8 @@ import type { Server, Socket } from "socket.io";
 import {
   DARE_ROUNDS, GRACE_MS, HEAT_ORDER, IDLE_TTL_HOURS, INTERLUDE_HOLD_MS,
   MAX_PLAYERS, MIN_PLAYERS, RETENTION_HOURS, REVEAL_HOLD_MS, ROOM_CODE_ALPHABET,
-  ROOM_CODE_LENGTH, ROUNDS_PER_PHASE, ROUND_TIMERS_MS, SECRET_DECK_MAX, TRAITS, pseudonym,
+  ROOM_CODE_LENGTH, ROUNDS_PER_PHASE, ROUND_TIMERS_MS, SECRET_DECK_MAX, SPOTLIGHT_ANSWER_MAX,
+  SPOTLIGHT_REVEAL_MS, TRAITS, VERDICT_DISCUSS_MS, VERDICT_REVEAL_MS, VERDICT_VOTE_MS, pseudonym,
   type ClientToServerEvents, type Consent, type FinaleSlide, type FinaleView, type InterludeView,
   type JoinReply, type LogRecord, type NightDigest, type Phase, type PlayerId, type Prompt,
   type ResponseValue, type RevealView, type RoomMeta, type RoomView, type RoundKind,
@@ -13,6 +14,7 @@ import {
 } from "../../../packages/shared/src/contracts.ts";
 import { isAlias, isRoomCode, playerCountOk, validSubmit } from "../../../packages/shared/src/validate.ts";
 import { BankPromptProvider, fallbackServices, type GameServices, type HeatPhase, type PromptProvider } from "./services.ts";
+import { DECOYS, SPOTLIGHT_IDLE_LINE, liveKindInPhase, livePrompt, liveSeeds, type LiveSeed } from "../../../packages/prompts/src/bank/live/index.ts";
 import { checkBanned, checkHardBlocked } from "../../../packages/prompts/src/filter.ts";
 
 type SocketData = { roomCode?: string; playerId?: string };
@@ -20,8 +22,24 @@ type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<stri
 type GameIO = Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 type Stage = "lobby" | "round" | "reveal" | "interlude" | "finale-building" | "finale" | "deleted";
 interface Player { id: string; alias: string; consent: Consent; secret: string; isBot: boolean; connected: boolean; socketId?: string; }
-interface Definition { prompt: Prompt; phase: Phase; kind: RoundKind; text: string; onlyPlayers?: string[]; }
-interface LiveRound extends Definition { id: string; index: number; startedAt: number; closesAt: number; responses: Map<string, ResponseValue>; }
+interface Definition {
+  prompt: Prompt; phase: Phase; kind: RoundKind; text: string; onlyPlayers?: string[];
+  /** spotlight: the player the room is watching. Their round view is a cover. */
+  subjectId?: string;
+  /** spotlight: the cover question this subject sees instead of the real one. */
+  decoyText?: string;
+  /** spotlight: the subject gets no question at all — an idle cover screen. */
+  idle?: boolean;
+  /** spotlight: "name" seeds produce a name cluster (digest teaser), "text" seeds are captions. */
+  cluster?: "name" | "text";
+  /** verdict: couple-coded verdicts celebrate on the land beat. */
+  couple?: boolean;
+}
+interface LiveRound extends Definition {
+  id: string; index: number; startedAt: number; closesAt: number; responses: Map<string, ResponseValue>;
+  /** verdict: the secret simultaneous pick opens here (discussion before it). */
+  voteOpensAt?: number;
+}
 interface SeenSubmit { roundId: string; fingerprint: string; }
 interface TimedEvent<T> { value: T; endsAt: number; }
 interface Room {
@@ -30,6 +48,8 @@ interface Room {
   provider: PromptProvider; prepared: boolean; usedIds: Set<string>; custom: Prompt[]; log: LogRecord[];
   currentHeat?: HeatPhase; queue: Definition[]; round: LiveRound | null; pair?: [string, string];
   interactions: Map<string, number>; seen: Map<string, SeenSubmit>; votes: Set<string>;
+  /** spotlight rotation: each player at most once a night, never back-to-back. */
+  spotlighted: Set<string>; lastSubject?: string;
   pendingHeatDown?: HeatPhase; reveal?: TimedEvent<RevealView>; interlude?: TimedEvent<InterludeView>;
   finale?: FinaleView; decks: Map<string, SecretDeckView>; rng: () => number;
   timer?: ReturnType<typeof setTimeout>; botTimers: Set<ReturnType<typeof setTimeout>>;
@@ -40,6 +60,8 @@ export interface GameOptions {
   now?: () => number;
   /** Testing seams, not environment overrides; production uses the frozen tunables. */
   roundTimers?: Partial<Record<RoundKind, number>>;
+  /** Testing seam for the verdict debate window (production: VERDICT_DISCUSS_MS). */
+  verdictDiscussMs?: number;
   graceMs?: number;
   revealHoldMs?: number;
   interludeHoldMs?: number;
@@ -134,7 +156,8 @@ export class RoomManager {
     room.log.length = 0; room.decks.clear(); room.seen.clear(); room.interactions.clear(); room.votes.clear(); room.usedIds.clear();
     room.players.forEach((p) => { p.secret = ""; p.alias = ""; }); room.players.length = 0;
     room.round = null; room.queue = []; room.custom = []; room.pair = undefined; room.reveal = undefined; room.interlude = undefined; room.finale = undefined;
-    room.currentHeat = undefined; room.pendingHeatDown = undefined; room.provider.dispose?.(); room.provider = new BankPromptProvider();
+    room.currentHeat = undefined; room.pendingHeatDown = undefined; room.spotlighted.clear(); room.lastSubject = undefined;
+    room.provider.dispose?.(); room.provider = new BankPromptProvider();
   }
   private code(): string {
     for (let tries = 0; tries < 10000; tries++) {
@@ -173,9 +196,23 @@ export class RoomManager {
       players: room.players.map(({ id, alias, connected, isBot }) => ({ id, alias, connected, isBot })),
       round: room.round ? this.roundView(room.round, playerId) : null, seq: room.seq };
   }
+  /**
+   * The ONLY place a round is rendered for a phone, which makes it the only
+   * place the spotlight secret has to be kept.
+   *
+   * A spotlight subject gets the cover round — a decoy question or an idle
+   * screen — and NEVER the real promptText. The real question does not ride
+   * `state`, `round`, `reveal` or any other emit to that socket, and the reveal
+   * payload carries captions only (never the question).
+   */
   private roundView(round: LiveRound, playerId: string): RoundView {
-    return { roundId: round.id, index: round.index, phase: round.phase, kind: round.kind, promptText: round.text,
-      closesAt: round.closesAt, youSubmitted: round.responses.has(playerId), ...(round.onlyPlayers ? { onlyPlayers: [...round.onlyPlayers] } : {}) };
+    const cover = round.kind === "spotlight" && round.subjectId === playerId;
+    const promptText = cover ? (round.idle ? SPOTLIGHT_IDLE_LINE : round.decoyText ?? SPOTLIGHT_IDLE_LINE) : round.text;
+    return { roundId: round.id, index: round.index, phase: round.phase, kind: round.kind, promptText,
+      closesAt: round.closesAt, youSubmitted: round.responses.has(playerId),
+      ...(round.onlyPlayers ? { onlyPlayers: [...round.onlyPlayers] } : {}),
+      ...(round.voteOpensAt !== undefined ? { voteOpensAt: round.voteOpensAt } : {}),
+      ...(cover && round.idle ? { expectsAnswer: false } : {}) };
   }
   private eachSocket(room: Room, fn: (socket: GameSocket, player: Player) => void): void {
     for (const p of room.players) if (!p.isBot && p.connected && p.socketId) {
@@ -207,7 +244,7 @@ export class RoomManager {
       let provider: PromptProvider;
       try { provider = this.services.createPromptProvider(id); } catch { provider = new BankPromptProvider(); }
       const room: Room = { id, code, createdAt: now, lastActivity: now, file, hostId: player.id, players: [player], phase: "lobby", stage: "lobby", seq: 1, nextPlayer: 2, roundIndex: 0,
-        provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set() };
+        provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set() };
       this.rooms.set(code, room); socket.data = { roomCode: code, playerId: player.id }; void socket.join(code);
       ack({ ok: true, code, you: player.id, secret: player.secret, state: this.view(room, player.id) });
       this.states(room);
@@ -342,7 +379,7 @@ export class RoomManager {
     const desired: RoundKind[] = phase === "warmup" ? ["pick", "shout", "minigame"] : phase === "spicy" ? ["pick", "rating", "ios"] : phase === "deep" ? ["text", "rating", "pick"] : [...Array<RoundKind>(DARE_ROUNDS).fill("dare"), "pair_dare"];
     const slots = phase === "dare" ? desired : desired.slice(0, ROUNDS_PER_PHASE);
     const chosen = new Set<string>();
-    return slots.map((kind) => {
+    const rounds = slots.map((kind) => {
       const permitted = (p: Prompt): boolean => phase === "dare" ? p.kind === kind : !["dare", "pair_dare", "debrief"].includes(p.kind);
       const candidates = pool.filter((p) => permitted(p) && !chosen.has(p.id));
       const prompt = candidates.find((p) => p.source === "host" && !room.usedIds.has(p.id)) ??
@@ -351,6 +388,39 @@ export class RoomManager {
       chosen.add(prompt.id);
       return { prompt, phase, kind: prompt.kind, text: prompt.text };
     });
+    // LIVE MOMENTS (spec §3): ~1 spotlight per phase from warmup on, ~1 verdict
+    // per phase from spicy on. Both close the phase: the room ends on a moment
+    // (eyes on one person, then the room's own verdict) instead of a question.
+    const spotlight = this.spotlightDefinition(room, phase);
+    const verdict = this.verdictDefinition(room, phase);
+    return [...rounds, ...(spotlight ? [spotlight] : []), ...(verdict ? [verdict] : [])];
+  }
+  /**
+   * Pick tonight's subject and cover. Rotation is per night: every player is
+   * spotlighted at most once and never twice in a row (the previous subject is
+   * excluded even when seats changed).
+   */
+  private spotlightDefinition(room: Room, phase: HeatPhase): Definition | undefined {
+    if (!liveKindInPhase("spotlight", phase)) return undefined;
+    const candidates = room.players.filter((p) => !room.spotlighted.has(p.id) && p.id !== room.lastSubject);
+    if (!candidates.length) return undefined;
+    const seeds: LiveSeed[] = liveSeeds("spotlight", phase, { excludeIds: room.usedIds });
+    if (!seeds.length) return undefined;
+    const subject = candidates[Math.floor(room.rng() * candidates.length)]!;
+    const seed = seeds[Math.floor(room.rng() * seeds.length)]!;
+    // The cover is re-drawn every spotlight — a decoy question from the pool,
+    // or an idle screen — so a repeat subject cannot pattern-match it.
+    const idle = room.rng() < 0.25;
+    const decoy = DECOYS[Math.floor(room.rng() * DECOYS.length)]!;
+    return { prompt: livePrompt(seed), phase, kind: "spotlight", text: seed.text, subjectId: subject.id,
+      ...(idle ? { idle: true } : { decoyText: decoy.text }), ...(seed.cluster ? { cluster: seed.cluster } : {}) };
+  }
+  private verdictDefinition(room: Room, phase: HeatPhase): Definition | undefined {
+    if (!liveKindInPhase("verdict", phase)) return undefined;
+    const seeds: LiveSeed[] = liveSeeds("verdict", phase, { excludeIds: room.usedIds });
+    if (!seeds.length) return undefined;
+    const seed = seeds[Math.floor(room.rng() * seeds.length)]!;
+    return { prompt: livePrompt(seed), phase, kind: "verdict", text: seed.text, couple: seed.couple === true };
   }
   private enterHeat(room: Room, phase: HeatPhase): void {
     this.clearTimers(room); room.phase = phase; room.currentHeat = phase; room.votes.clear(); room.pendingHeatDown = undefined;
@@ -385,21 +455,37 @@ export class RoomManager {
     }
     this.clearTimers(room); room.reveal = undefined; room.interlude = undefined; room.stage = "round";
     if (definition.kind === "pair_dare") { room.pair = this.pair(room); definition.onlyPlayers = [...room.pair]; }
+    // Mark the spotlight rotation only when the moment actually starts: a
+    // heat-down or host skip that drops the queue must not burn a player's turn.
+    if (definition.kind === "spotlight" && definition.subjectId) {
+      room.spotlighted.add(definition.subjectId); room.lastSubject = definition.subjectId;
+    }
     const startedAt = this.now();
-    const round: LiveRound = { ...definition, text: this.replacePlaceholders(room, definition.text, definition.onlyPlayers), id: `${room.id}-${++room.roundIndex}`, index: room.roundIndex, startedAt,
-      closesAt: startedAt + (this.options.roundTimers?.[definition.kind] ?? ROUND_TIMERS_MS[definition.kind]), responses: new Map() };
+    const lengthMs = this.options.roundTimers?.[definition.kind] ?? ROUND_TIMERS_MS[definition.kind];
+    // `{S}` is the subject's alias — substituted for display only, exactly like `{P1}`.
+    const text = definition.kind === "spotlight" && definition.subjectId
+      ? definition.text.replace(/\{S\}/g, room.players.find((p) => p.id === definition.subjectId)?.alias ?? "someone")
+      : this.replacePlaceholders(room, definition.text, definition.onlyPlayers);
+    const round: LiveRound = { ...definition, text, id: `${room.id}-${++room.roundIndex}`, index: room.roundIndex, startedAt,
+      closesAt: startedAt + lengthMs, responses: new Map(),
+      ...(definition.kind === "verdict" ? { voteOpensAt: startedAt + Math.min(this.options.verdictDiscussMs ?? VERDICT_DISCUSS_MS, lengthMs) } : {}) };
     room.round = round; room.usedIds.add(definition.prompt.id); this.changed(room);
     this.eachSocket(room, (socket, player) => socket.emit("round", this.roundView(round, player.id)));
     this.schedule(room, round.closesAt - startedAt + (this.options.graceMs ?? GRACE_MS), () => this.finishRound(room));
     for (const player of room.players) if (player.isBot && (!round.onlyPlayers || round.onlyPlayers.includes(player.id))) this.scheduleBot(room, player, round);
     this.maybeComplete(room);
   }
-  private scheduleBot(room: Room, player: Player, round: LiveRound): void {
+  private scheduleBot(room: Room, player: Player, round: LiveRound, delayMs?: number): void {
     const [min, max] = this.options.botDelayMs ?? [600, 3500];
-    const delay = min + Math.floor(room.rng() * (max - min + 1));
+    const delay = delayMs ?? min + Math.floor(room.rng() * (max - min + 1));
     const timer = setTimeout(() => {
       room.botTimers.delete(timer);
       if (room.round?.id !== round.id || room.stage !== "round") return;
+      // A verdict's pick window is closed during the debate: wait it out.
+      if (round.kind === "verdict" && round.voteOpensAt !== undefined && this.now() < round.voteOpensAt) {
+        this.scheduleBot(room, player, round, Math.max(0, round.voteOpensAt - this.now()) + 30 + Math.floor(room.rng() * 400));
+        return;
+      }
       const others = room.players.filter((p) => p.id !== player.id);
       const other = others[Math.floor(room.rng() * others.length)]!.id;
       const rand = (n: number): number => Math.floor(room.rng() * n);
@@ -415,6 +501,11 @@ export class RoomManager {
         case "ios": value = { kind: "ios", about: other, value: 1 + rand(7) }; break;
         case "minigame": value = { kind: "minigame", score: 10 + rand(51) }; break;
         case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
+        // Live moments. A bot cannot know whether it is the spotlight subject
+        // (the cover round looks identical), so it always sends a short text —
+        // exactly what the server expects from both sides of the moment.
+        case "spotlight": value = { kind: "text", text: ["Just vibing, honestly.", "Watching the room.", "Thinking about food.", "Nothing, I swear."][rand(4)]! }; break;
+        case "verdict": value = { kind: "pick", target: other }; break;
       }
       this.submit(room, player, { roundId: round.id, clientUuid: `bot:${round.id}:${player.id}`, value });
     }, Math.max(0, delay));
@@ -433,14 +524,26 @@ export class RoomManager {
     if (room.stage !== "round" || !round || r.roundId !== round.id || this.now() > round.closesAt + (this.options.graceMs ?? GRACE_MS)) return { ok: false, error: "This round is closed." };
     if (!player.connected || (round.onlyPlayers && !round.onlyPlayers.includes(player.id))) return { ok: false, error: "You are spectating this round." };
     if (round.responses.has(player.id)) return { ok: false, error: "You already answered this round." };
-    const expected = round.kind === "pair_dare" ? "dare" : round.kind === "debrief" ? "text" : round.kind;
+    // Verdict: the phones stay face-down until the debate window closes.
+    if (round.kind === "verdict" && round.voteOpensAt !== undefined && this.now() < round.voteOpensAt) {
+      return { ok: false, error: "Phones down. Argue it out first." };
+    }
+    const expected = round.kind === "pair_dare" ? "dare"
+      : round.kind === "debrief" || round.kind === "spotlight" ? "text"
+      : round.kind === "verdict" ? "pick" : round.kind;
     if (value.kind !== expected) return { ok: false, error: "Answer does not match the round." };
+    if (round.kind === "spotlight" && value.kind === "text" && value.text.length > SPOTLIGHT_ANSWER_MAX) {
+      return { ok: false, error: `Keep it to ${SPOTLIGHT_ANSWER_MAX} characters.` };
+    }
     if (value.kind === "shout" && /\s/u.test(value.word.trim())) return { ok: false, error: "Shout must be one word." };
     const target = value.kind === "pick" ? value.target : value.kind === "ios" ? value.about : value.kind === "rating" && value.about !== "self" ? value.about : undefined;
     if (target !== undefined && !room.players.some((p) => p.id === target)) return { ok: false, error: "Unknown target." };
     const at = this.now();
+    // The spotlight subject's answer answers the COVER round, not the moment.
+    // Flagging it here means no downstream consumer can score it by accident.
+    const decoy = round.kind === "spotlight" && round.subjectId === player.id;
     const record: LogRecord = { roomId: room.id, roundId: round.id, playerId: player.id, roundKind: round.kind, promptId: round.prompt.id, coding: round.prompt.coding,
-      value, at, latencyMs: Math.max(0, at - round.startedAt) };
+      value, at, latencyMs: Math.max(0, at - round.startedAt), ...(decoy ? { decoy: true } : {}) };
     try { appendFileSync(room.file, `${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 }); }
     catch { return { ok: false, error: "Unable to save the answer." }; }
     room.log.push(record); room.seen.set(key, { roundId: r.roundId, fingerprint }); round.responses.set(player.id, value); room.lastActivity = at;
@@ -472,11 +575,53 @@ export class RoomManager {
       for (const entry of leaderboard) items.push({ alias: room.players.find((p) => p.id === entry.id)?.alias ?? "Player", text: `${entry.score} taps` });
     } else if (round.kind !== "debrief") {
       for (const [id, value] of round.responses) {
+        if (value.kind === "text" && room.log.some((r) => r.decoy === true && r.roundId === round.id && r.playerId === id)) continue;
         const alias = room.players.find((p) => p.id === id)?.alias ?? "Player";
         if (value.kind === "text") items.push({ alias, text: value.text });
         if (value.kind === "dare") items.push({ alias, text: value.status === "done" ? "Done" : `Passed: ${value.reason}` });
         if (value.kind === "pick") items.push({ alias, text: `Chose ${room.players.find((p) => p.id === value.target)?.alias ?? "someone"}` });
       }
+    }
+    const alias = (id: string | undefined): string => room.players.find((p) => p.id === id)?.alias ?? "Player";
+    if (round.kind === "spotlight") {
+      // RAPID CAPTION WALL: the room's one-liners stack in submission order, and
+      // the subject's own decoy answer lands LAST, biggest. Captions only — the
+      // question never rides the reveal, so the subject cannot read it back.
+      const subjectAlias = alias(round.subjectId);
+      for (const [id, value] of round.responses) {
+        if (id === round.subjectId) continue;
+        if (value.kind === "text") items.push({ alias: alias(id), text: value.text });
+      }
+      const cover = round.subjectId ? round.responses.get(round.subjectId) : undefined;
+      const punchline = cover?.kind === "text" ? cover.text : undefined;
+      const holdMs = this.options.revealHoldMs ?? SPOTLIGHT_REVEAL_MS;
+      const reveal: RevealView = { roundId: round.id, kind: "spotlight", summary: `Live on ${subjectAlias}`,
+        ...(items.length ? { items } : {}), subject: subjectAlias, ...(punchline ? { punchline } : {}), holdMs };
+      room.reveal = { value: reveal, endsAt: this.now() + holdMs }; this.changed(room);
+      this.io.to(room.code).emit("reveal", reveal);
+      this.schedule(room, holdMs, () => this.afterReveal(room));
+      return;
+    }
+    if (round.kind === "verdict") {
+      // Anonymous tallies only — never a voter's name (spec §7). The winner is
+      // the room's answer: a Group Announcement mini-finale.
+      const counts = new Map<string, number>();
+      for (const value of round.responses.values()) if (value.kind === "pick") counts.set(value.target, (counts.get(value.target) ?? 0) + 1);
+      const total = [...counts.values()].reduce((a, b) => a + b, 0);
+      const ranked = [...counts].sort((a, b) => b[1] - a[1] || alias(a[0]).localeCompare(alias(b[0])));
+      const winner = ranked[0];
+      const slide: FinaleSlide | undefined = winner ? {
+        beat: "land", flavor: "group", title: alias(winner[0]),
+        body: `${winner[1]} of ${total} said it out loud.`, numbers: { votes: winner[1], of: total, share: winner[1] / total },
+      } : undefined;
+      const holdMs = this.options.revealHoldMs ?? VERDICT_REVEAL_MS;
+      const reveal: RevealView = { roundId: round.id, kind: "verdict",
+        summary: winner ? `The room decided: ${alias(winner[0])}` : "Nobody voted. The room argued for nothing.",
+        ...(slide ? { slide } : {}), celebrate: round.prompt.coding === "couple", holdMs };
+      room.reveal = { value: reveal, endsAt: this.now() + holdMs }; this.changed(room);
+      this.io.to(room.code).emit("reveal", reveal);
+      this.schedule(room, holdMs, () => this.afterReveal(room));
+      return;
     }
     const holdMs = this.options.revealHoldMs ?? REVEAL_HOLD_MS;
     const reveal: RevealView = { roundId: round.id, summary: round.kind === "debrief" ? "Their answers are private." : round.kind === "shout" ? "The room has spoken." : round.kind === "minigame" ? "Tap-war leaderboard" : "Round complete.", ...(items.length ? { items } : {}), holdMs };
@@ -526,10 +671,14 @@ export class RoomManager {
     if (room.stage === "deleted" || room.stage === "finale" || room.stage === "finale-building") return;
     this.clearTimers(room); room.stage = "finale-building"; room.phase = "finale"; room.round = null; room.currentHeat = undefined; this.changed(room);
     const meta = this.meta(room), log = this.redactedLog(room);
+    // Spotlight decoy answers answer nothing: they never reach signals, scores,
+    // claims or secrets. (The engine also defends itself — see computeSignals.)
+    const scoringLog = log.filter((r) => r.decoy !== true);
     let signals, results, digest: NightDigest, decks: Map<PlayerId, SecretCard[]>;
-    try { signals = this.services.computeSignals(log, meta); } catch { signals = fallbackServices.computeSignals(log, meta); }
-    try { results = this.services.computeResults(signals, log, meta); } catch { results = fallbackServices.computeResults(signals, log, meta); }
+    try { signals = this.services.computeSignals(scoringLog, meta); } catch { signals = fallbackServices.computeSignals(scoringLog, meta); }
+    try { results = this.services.computeResults(signals, scoringLog, meta); } catch { results = fallbackServices.computeResults(signals, scoringLog, meta); }
     // Debrief answers remain private even from the public digest and narrator.
+    // Decoys DO ride the digest: pairing them with the captions is the joke.
     const publicLog = log.filter((r) => r.roundKind !== "debrief");
     try { digest = this.services.buildNightDigest(publicLog, meta); } catch { digest = fallbackServices.buildNightDigest(publicLog, meta); }
     try { decks = this.services.buildSecrets(results, digest, meta); if (!(decks instanceof Map)) throw new Error("Invalid decks"); }
