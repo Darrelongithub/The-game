@@ -16,12 +16,13 @@ import { isAlias, isRoomCode, playerCountOk, validSubmit } from "../../../packag
 import { BankPromptProvider, fallbackServices, type GameServices, type HeatPhase, type PromptProvider } from "./services.ts";
 import { DECOYS, SPOTLIGHT_IDLE_LINE, liveKindInPhase, livePrompt, liveSeeds, type LiveSeed } from "../../../packages/prompts/src/bank/live/index.ts";
 import { checkBanned, checkHardBlocked } from "../../../packages/prompts/src/filter.ts";
+import type { AccountStore } from "./accounts.ts";
 
 type SocketData = { roomCode?: string; playerId?: string };
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 type GameIO = Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 type Stage = "lobby" | "round" | "reveal" | "interlude" | "finale-building" | "finale" | "deleted";
-interface Player { id: string; alias: string; consent: Consent; secret: string; isBot: boolean; connected: boolean; socketId?: string; }
+interface Player { id: string; alias: string; consent: Consent; secret: string; isBot: boolean; connected: boolean; socketId?: string; /** ROUND 4: bound account (never emitted). */ accountId?: string; }
 interface Definition {
   prompt: Prompt; phase: Phase; kind: RoundKind; text: string; onlyPlayers?: string[];
   /** spotlight: the player the room is watching. Their round view is a cover. */
@@ -57,6 +58,8 @@ interface Room {
 export interface GameOptions {
   dataDir: string;
   services?: GameServices;
+  /** ROUND 4 identity store. Absent = guest-only night, identical gameplay. */
+  accounts?: AccountStore;
   now?: () => number;
   /** Testing seams, not environment overrides; production uses the frozen tunables. */
   roundTimers?: Partial<Record<RoundKind, number>>;
@@ -177,6 +180,21 @@ export class RoomManager {
     if (room.timer) clearTimeout(room.timer);
     room.timer = setTimeout(() => { room.timer = undefined; if (room.stage !== "deleted") fn(); }, Math.max(0, ms));
     room.timer.unref();
+  }
+  /**
+   * ROUND 4 — bind a joined player to an account (REST, after `join`). The
+   * player's own session secret is the proof, so a room code alone cannot
+   * attach somebody else. The binding never leaves the server and never changes
+   * a payload: guests and account holders play exactly the same game.
+   */
+  bindAccount(input: { roomCode: string; playerId: string; playerSecret: string; accountId: string }): boolean {
+    const room = this.rooms.get(input.roomCode);
+    if (!room || room.stage === "deleted") return false;
+    const player = room.players.find((p) => p.id === input.playerId && !p.isBot);
+    if (!player || !player.secret || !safeEqual(player.secret, input.playerSecret)) return false;
+    player.accountId = input.accountId;
+    room.lastActivity = this.now();
+    return true;
   }
   private err(socket: GameSocket, code: string, message: string): void { socket.emit("error", { code, message }); }
   private identify(socket: GameSocket): { room: Room; player: Player } | undefined {
@@ -764,6 +782,12 @@ export class RoomManager {
     for (const c of safeClaims) if (c.type in summaryType) {
       const key = summaryType[c.type as keyof typeof summaryType];
       if (!summary[key]) summary[key] = c.subjects.map((id) => room.players.find((p) => p.id === id)?.alias).filter((v): v is string => !!v).join(" & ");
+    }
+    // ROUND 4 identity bookkeeping. A night counts once per room; carried-over
+    // hypotheses are written to the account AFTER they are mapped to account
+    // keys — nothing about a hypothesis is ever emitted to any socket.
+    if (this.options.accounts) {
+      for (const player of room.players) if (player.accountId && !player.isBot) this.options.accounts.recordNight(player.accountId, room.id);
     }
     room.finale = { slides, summary }; room.stage = "finale"; this.changed(room);
     this.io.to(room.code).emit("finale", room.finale); // public, identical on every socket
