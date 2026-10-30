@@ -1,3 +1,65 @@
+# Fix & feature report — ROUND 5: DEFECT FIXES (R21–R24, R26–R27)
+(ROUND 4 report continues below.)
+
+## ROUND 5 status: SHIPPED on `arena/b866c916-the-game`
+
+R25 was skipped by instruction. The only shared-contract item was the already
+approved R26 `RoundView.about?: PlayerId` / `RoundView.trait?: TraitId`; no new
+shared field was added. Each fix landed in order with a regression that failed
+before the production change and passed after it.
+
+| Item | Commit(s) | Before → after regression evidence | Outcome |
+|---|---|---|---|
+| R21 | `e8adc9b`, test follow-up `2f44a54` | scripted pick reveal had 4 unwanted pick lines → 0; protocol reconnect test updated for empty pick reveals | Picks still score/feed digest; Results unchanged. Server suite **75/75**. |
+| R22 | `a50ae8f` | alias regression **1/4 → 4/4** | Case-insensitive, escaped, bounded, longest-first, idempotent replacement; `ALIAS_REPLACE_MIN = 3`. Prompts **104/104**, narrator **81/81**. |
+| R23 | `4bf52e9` | LAN regression **0/2 → 2/2** | Every usable non-internal IPv4 URL printed, link-local/loopback excluded, preference `192.168.*` → `10.*` → `172.16–31.*` → other, numeric ties. |
+| R24 | `0384515` | real-server reload regression **0/2 → 3/3**, stable **5×** | localStorage credentials reclaim the same seat/profile/answers/deck/host flag after start/disconnect; no duplicate seats; purge clears stores and returns to JoinScreen; private deck text never persisted client-side. |
+| R26 | `5112635` | authoritative-answer regression **0/2 → 2/2** | Demo/mock answers echo server-assigned `trait`/`about` or return `null`; dead bank-guessing shim removed. Mock-flow **56/56**, components **131/131**. |
+| R27 | `5f8c225` | spark regression **2/5 → 5/5**; engine suite **45/45** | Spark claims/cards now require the existing high-confidence bar: ≥3 independent measured `componentsUsed` supports. No new score, weight or threshold. |
+
+### R27 spark incidence — measured before/after
+
+Command: `npm run measure:sparks` (`scripts/spark-incidence.ts`).
+Denominators: **per-round** = spark secret cards announced / completed rounds;
+**per-night** = nights with ≥1 spark secret card / nights. Spark claims are
+reported separately from announced cards. The seeded fixture cohort is the
+byte-reproducible primary comparison; the live Socket.IO bot cohort is an
+observational cross-check because the server still chooses its own room id/live
+seeds.
+
+| Cohort | Policy | Nights | Rounds | Spark claims before → after | Spark cards before → after | Spark nights before → after | Cards/round before → after | Nights with spark before → after |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| fixtures | noise | 200 | 4400 | 8 → 0 | 8 → 0 | 4 → 0 | 0.001818 → 0 | 2.00% → 0% |
+| fixtures | mutual | 10 | 140 | 10 → 10 | 20 → 20 | 10 → 10 | 0.142857 → 0.142857 | 100% → 100% |
+| live bots | noise | 30 | 720 | 5 → 0 | 4 → 0 | 2 → 0 | 0.005556 → 0 | 6.67% → 0% |
+| live bots | mutual | 10 | 240 | 10 → 10 | 20 → 20 | 10 → 10 | 0.083333 → 0.083333 | 100% → 100% |
+
+Raw outputs: `.test-results/r27-before.txt`, `.test-results/r27-after.txt`.
+The gate reuses `pairSupportCount`, `confidenceFromCount`,
+`CONFIDENCE_RULES.high.independentSignals` and the existing
+`ENGINE_TUNING.support` bars. `buildSecrets` also refuses any spark claim below
+high confidence, so a downgraded/legacy claim cannot become an announcement.
+Deterministic replay is unchanged.
+
+### Final validation on this branch
+
+- `npm run typecheck`: passed (server, web, engine, narrator, prompts, scripts).
+- `npm run selfcheck`: **36/36**.
+- Server: **75/75**. Engine: **45/45**. Prompts: **104/104**. Narrator: **81/81**.
+- Web: SSR **39**, UI/socket/mock/privacy regressions, transport **4/4**, authoritative **2/2**.
+- `npm run test:components`: **131/131**. `npm run test:mock --workspace apps/web`: **56/56**.
+- `npm run build`: static export passed. `npm run bundle:check`: player **145.4 KiB gzip / 150 KiB**, display **115.7 KiB / 120 KiB**.
+- `SMOKE_FAST=1 npm run smoke:verified`: passed (smoke room `4PW5`, 5 players, keys disabled).
+
+### Known gaps / release disposition
+
+- **NO-GO / REQUIRES HUMAN** for release: no real Android/iPhone device matrix was run here.
+- The live spark cohort is observational, not byte-reproducible; the fixture cohort is the reproducible before/after evidence.
+- Live server rating/IOS subjects are non-self, so `traitAgreement` is rarely a measured support in live bot nights. The gate is deliberately conservative: mutual picks alone no longer announce a spark.
+- The retained standalone server fallback services remain a test/last-resort seam; the production host uses the integrated production engine measured above.
+
+---
+
 # Fix & feature report — ROUND 4: THE DIRECTOR + ACCOUNTS
 (ROUND 3 report continues below.)
 
