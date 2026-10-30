@@ -35,16 +35,16 @@ test("five real sockets complete all rounds; public finale is identical; private
     computeSignals(log, meta) { captured.push(JSON.stringify({ log, meta })); return fallbackServices.computeSignals(log, meta); },
     buildSecrets(_results, _digest, _meta) {
       return new Map([
-        ["p1", [{ id: "only-p1", kind: "stat", title: "Player 1's secret", facts: ["PRIVATE_SECRET_ONE"] }]],
-        ["p3", [{ id: "only-p3", kind: "stat", title: "Player 3's secret", facts: ["PRIVATE_SECRET_THREE"] }]],
+        ["p1", [{ id: "only-p1", kind: "stat", title: "Player 1's secret", facts: ["PRIVATE_SECRET_ONE is a hidden private card detail"] }]],
+        ["p3", [{ id: "only-p3", kind: "stat", title: "Player 3's secret", facts: ["PRIVATE_SECRET_THREE is a hidden private card detail"] }]],
         ["p5", [{ id: "unconsented", kind: "stat", title: "Not allowed", facts: ["PRIVATE_SECRET_FIVE"] }]],
       ]);
     },
     async writeFinale(slides, decks, results, digest) {
-      assert.equal(decks.size, 0, "public narration never sees the secret decks");
+      assert.deepEqual([...decks.keys()].sort(), ["p1", "p3"], "only consented owners' private decks reach the separately indexed narrator channel");
       assert.ok(results.claims.every((c) => c.audience === "public"));
       captured.push(JSON.stringify({ slides, results, digest }));
-      return { slides: slides.map((slide) => slide.flavor === "quote" || slide.flavor === "dodge" ? { ...slide, title: "Fabricated attribution", body: "A fabricated version." } : slide), decks };
+      return { slides: slides.map((slide, index) => index === 0 ? { ...slide, body: "PRIVATE_SECRET_ONE is a hidden private card detail" } : slide.flavor === "quote" || slide.flavor === "dodge" ? { ...slide, title: "Fabricated attribution", body: "A fabricated version." } : slide), decks };
     },
   };
   const server = createGameServer({ dataDir: dir, services, revealHoldMs: 5, interludeHoldMs: 5, roundTimers: { pick: 1500, shout: 1500, minigame: 1500, rating: 1500, ios: 1500, text: 1500, dare: 1500, pair_dare: 1500, debrief: 1500 }, graceMs: 50 });
@@ -130,9 +130,9 @@ test("five real sockets complete all rounds; public finale is identical; private
   assert.ok(allFinales[0]!.slides.some((slide) => slide.flavor === "dodge" && slide.body === "Alice.* is watching."));
   assert.ok(!JSON.stringify(allFinales).includes("fabricated"));
   assert.deepEqual(decks.map((d) => d.length), [1, 0, 1, 0, 0]);
-  assert.equal(decks[0]![0]!.cards[0]!.facts[0], "PRIVATE_SECRET_ONE");
-  assert.equal(decks[2]![0]!.cards[0]!.facts[0], "PRIVATE_SECRET_THREE");
-  assert.ok(!JSON.stringify({ allFinales, reveals, interludes }).includes("PRIVATE_SECRET"));
+  assert.equal(decks[0]![0]!.cards[0]!.facts[0], "PRIVATE_SECRET_ONE is a hidden private card detail");
+  assert.equal(decks[2]![0]!.cards[0]!.facts[0], "PRIVATE_SECRET_THREE is a hidden private card detail");
+  assert.ok(!JSON.stringify({ allFinales, reveals, interludes }).includes("PRIVATE_SECRET"), "private card facts cannot leak into public finale slides");
   assert.ok(!JSON.stringify({ allFinales, reveals, interludes }).includes("PRIVATE_DEBRIEF"));
   assert.ok(captured.length >= 2);
   for (const payload of captured) assert.ok(!payload.includes("Alice.*"), "real alias must not reach a service");

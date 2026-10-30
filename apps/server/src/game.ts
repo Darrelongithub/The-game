@@ -71,6 +71,17 @@ const validProfile = (v: unknown): v is ProfileAnswers => {
 const validConsent = (v: unknown): v is Consent => !!v && typeof v === "object" &&
   (v as Consent).age === true && (v as Consent).terms === true && typeof (v as Consent).revealOptIn === "boolean";
 const validAlias = (v: unknown): v is string => typeof v === "string" && isAlias(v) && !/[\u0000-\u001f\u007f]/u.test(v);
+const privatePhraseLeak = (copy: string, privateFacts: readonly string[]): boolean => {
+  const normalize = (value: string): string => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const text = ` ${normalize(copy)} `;
+  return privateFacts.some((fact) => {
+    const words = normalize(fact).split(/\s+/u).filter(Boolean);
+    if (words.length < 4) return false;
+    if (text.includes(` ${words.join(" ")} `)) return true;
+    for (let i = 0; i + 6 <= words.length; i++) if (text.includes(` ${words.slice(i, i + 6).join(" ")} `)) return true;
+    return false;
+  });
+};
 const emptyDigest = (): NightDigest => ({ quotes: [], stats: {}, runningGags: [], pickTeasers: [], dodges: [], selfVsRoom: [] });
 const seedRng = (id: string): (() => number) => {
   let seed = createHash("sha256").update(id).digest().readUInt32LE(0);
@@ -567,17 +578,22 @@ export class RoomManager {
     // even while the optional public narrator is still running.
     room.decks.clear();
     const order: SecretCard["kind"][] = ["spark", "onesided", "blindspot", "roomnote", "stat"];
+    const narrationDecks = new Map<PlayerId, SecretCard[]>();
     for (const player of room.players) {
       if (!player.consent.revealOptIn) continue;
       const sourceCards = decks.get(player.id);
       if (!Array.isArray(sourceCards)) continue;
-      const cards: SecretCard[] = sourceCards.filter((c) => c && typeof c.id === "string" && order.includes(c.kind) && typeof c.title === "string" && Array.isArray(c.facts) && c.facts.every((f) => typeof f === "string"))
+      const safeSource: SecretCard[] = sourceCards.filter((c) => c && typeof c.id === "string" && order.includes(c.kind) && typeof c.title === "string" && Array.isArray(c.facts) && c.facts.every((f) => typeof f === "string"))
         .sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind)).slice(0, SECRET_DECK_MAX)
-        .map((c) => ({ id: c.id, kind: c.kind, title: displayText(c.title, room.players), facts: c.facts.filter((f) => f.length > 0).slice(0, 4).map((f) => displayText(f.slice(0, 120), room.players)) }))
+        .map((c) => ({ id: c.id, kind: c.kind, title: c.title.slice(0, 80), facts: c.facts.filter((f) => f.length > 0).slice(0, 4).map((f) => f.slice(0, 120)) }))
         .filter((c) => c.facts.length > 0);
-      if (cards.length) room.decks.set(player.id, { cards });
+      if (safeSource.length) {
+        narrationDecks.set(player.id, structuredClone(safeSource));
+        room.decks.set(player.id, { cards: safeSource.map((c) => ({ ...c, title: displayText(c.title, room.players), facts: c.facts.map((f) => displayText(f, room.players)) })) });
+      }
     }
     this.options.audit?.decks(room.code, room.id, room.players.map((p) => p.id), room.decks, results);
+    const privateFacts = [...narrationDecks.values()].flatMap(cards => cards.flatMap(card => [card.title, ...card.facts]));
     decks.clear();
     const privateDebriefs = log.flatMap((r) => r.roundKind === "debrief" && r.value.kind === "text" ? [r.value.text.toLocaleLowerCase()] : []);
     const safeClaims = results.claims.filter((c) => c.audience === "public" && c.type !== "spark" && c.type !== "onesided" && !(c.confidence === "low" && (c.type === "toxic" || c.type === "rival"))).map((c) => ({ ...c, evidence: c.evidence.filter((e) => !privateDebriefs.some((d) => d.length >= 10 && e.toLocaleLowerCase().includes(d))) }));
@@ -604,16 +620,17 @@ export class RoomManager {
     let skeleton: FinaleSlide[];
     try { skeleton = this.services.buildSkeleton(publicResults, publicDigest, meta); if (!Array.isArray(skeleton)) throw new Error("Invalid skeleton"); }
     catch { skeleton = fallbackServices.buildSkeleton(publicResults, publicDigest); }
-    // A provider polishing public slides receives public material only. In particular,
-    // the private map never leaves this process or becomes input to public copy.
-    // Engine-written secret copy remains the safe, useful no-key fallback.
+    // Grok receives public slide sources and private cards in a single guarded
+    // reveal request. It returns separately indexed sections; narrator validators
+    // reject unsupported copy and private-fact leakage into public slides. The
+    // engine-authored public and private copy remains the deterministic fallback.
     let written: { slides: FinaleSlide[]; decks: Map<PlayerId, SecretCard[]> } | undefined;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const deadline = new Promise<undefined>((resolve) => { timeout = setTimeout(() => resolve(undefined), this.options.writerTimeoutMs ?? 10_000); timeout.unref(); });
-      written = await Promise.race([Promise.resolve().then(() => this.services.writeFinale(structuredClone(skeleton), new Map(), structuredClone(publicResults), structuredClone(publicDigest), meta)), deadline]);
-    } catch { /* deterministic template */ } finally { if (timeout) clearTimeout(timeout); }
-    if (room.stage !== "finale-building" || this.rooms.get(room.code) !== room) return;
+      written = await Promise.race([Promise.resolve().then(() => this.services.writeFinale(structuredClone(skeleton), structuredClone(narrationDecks), structuredClone(publicResults), structuredClone(publicDigest), meta)), deadline]);
+    } catch { /* deterministic template */ } finally { if (timeout) clearTimeout(timeout); narrationDecks.clear(); }
+    if (room.stage !== "finale-building" || this.rooms.get(room.code) !== room) { privateFacts.length = 0; return; }
     const publicIds = new Set(safeClaims.map((c) => c.id));
     const source = written && Array.isArray(written.slides) && written.slides.length === skeleton.length ? written.slides : skeleton;
     const slides: FinaleSlide[] = [];
@@ -630,6 +647,7 @@ export class RoomManager {
         const playersInOriginal = new Set(original?.match(/\bPlayer (?:1[01]|[1-9])\b/g) ?? []);
         if ((candidate.match(/\bPlayer \d+\b/g) ?? []).some((name) => !playersInOriginal.has(name))) return original;
         if (/toxic person|red flag|soulmate|science says|love language|diagnos|narcissis|therapy/i.test(candidate)) return original;
+        if (privatePhraseLeak(candidate, privateFacts)) return original;
         return candidate;
       };
       // Quotations and pass reasons must remain verbatim and attributed.
@@ -639,12 +657,24 @@ export class RoomManager {
       slides.push({ beat: base.beat, ...(base.flavor ? { flavor: base.flavor } : {}), ...(base.claimId ? { claimId: base.claimId } : {}), title: displayText(title, room.players),
         ...(body ? { body: displayText(body, room.players) } : {}), ...(base.numbers ? { numbers: { ...base.numbers } } : {}) });
     }
+    if (written?.decks instanceof Map) {
+      const allowedKinds: SecretCard["kind"][] = ["spark", "onesided", "blindspot", "roomnote", "stat"];
+      for (const [playerId, cards] of written.decks) {
+        if (!room.decks.has(playerId) || !Array.isArray(cards)) continue;
+        const safeCards = cards.filter(c => c && allowedKinds.includes(c.kind) && typeof c.id === "string" && typeof c.title === "string" && Array.isArray(c.facts))
+          .sort((a, b) => allowedKinds.indexOf(a.kind) - allowedKinds.indexOf(b.kind)).slice(0, SECRET_DECK_MAX)
+          .map(c => ({ id: c.id, kind: c.kind, title: displayText(c.title.slice(0, 80), room.players), facts: c.facts.filter((f): f is string => typeof f === "string" && f.trim().length > 0).slice(0, 4).map(f => displayText(f.slice(0, 120), room.players)) }))
+          .filter(c => c.facts.length > 0);
+        if (safeCards.length) room.decks.set(playerId, { cards: safeCards });
+      }
+    }
     const summary: FinaleView["summary"] = {};
     const summaryType = { ship: "ship", besties: "besties", toxic: "toxic", rival: "rivals" } as const;
     for (const c of safeClaims) if (c.type in summaryType) {
       const key = summaryType[c.type as keyof typeof summaryType];
       if (!summary[key]) summary[key] = c.subjects.map((id) => room.players.find((p) => p.id === id)?.alias).filter((v): v is string => !!v).join(" & ");
     }
+    privateFacts.length = 0;
     room.finale = { slides, summary }; room.stage = "finale"; this.changed(room);
     this.io.to(room.code).emit("finale", room.finale); // public, identical on every socket
     this.eachSocket(room, (socket, player) => { const deck = room.decks.get(player.id); if (deck) socket.emit("secrets", deck); });

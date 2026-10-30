@@ -4,8 +4,10 @@ import { PromptProvider as FullPromptProvider, Provider, selectFromBank, tagText
 import { buildSkeleton, SYSTEM_PROMPT, writeFinale } from "../../../packages/narrator/src/index.ts";
 import type { GameServices, PromptProvider } from "./services.ts";
 
-/** Production adapter. The room manager supplies pseudonymized inputs and keeps
- * private decks out of the public narrator. No calls are needed in no-key mode. */
+/** Production adapter. The room manager supplies pseudonymized public sources
+ * and consent-gated private cards in separate structured sections to the single
+ * Grok reveal request; narrator validation keeps the sections disjoint. No calls
+ * are needed in no-key mode. */
 export function createIntegratedServices(
   provider = Provider.fromEnv(),
   onJokerWeights?: (roomId: string, weights: ReadonlyMap<string, number>) => void,

@@ -314,12 +314,28 @@ const keepsVerbatim = (body: string, verbatim: string | undefined): boolean => {
   return normalizeForQuote(body).includes(needle);
 };
 
+const privatePhraseLeak = (copy: string, privateFacts: readonly string[]): boolean => {
+  const normalized = (value: string): string => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const target = ` ${normalized(copy)} `;
+  return privateFacts.some((fact) => {
+    const words = normalized(fact).split(/\s+/u).filter(Boolean);
+    if (words.length < 4) return false;
+    const exact = ` ${words.join(" ")} `;
+    if (target.includes(exact)) return true;
+    for (let i = 0; i + 6 <= words.length; i++) {
+      if (target.includes(` ${words.slice(i, i + 6).join(" ")} `)) return true;
+    }
+    return false;
+  });
+};
+
 export function mergeSlides(
   slides: FinaleSlide[],
   raw: unknown,
   ps: Pseudonyms,
   roster: readonly RosterEntry[] | undefined,
   results: Results,
+  privateFacts: readonly string[] = [],
 ): FinaleSlide[] {
   const aliases = roster?.map((entry) => entry.alias);
   const maxPlayer = ps.order.length;
@@ -344,12 +360,12 @@ export function mergeSlides(
     };
 
     const title = validateTitle(record["title"], limits);
-    if (title.ok) target.title = title.text;
+    if (title.ok && !privatePhraseLeak(title.text, privateFacts)) target.title = title.text;
 
     const body = validateBody(record["body"], limits);
     // QUOTE OF THE NIGHT and the Dodge Report are quoted material: a
     // paraphrase is an invented quote, so it falls back to the engine line.
-    if (body.ok && keepsVerbatim(body.text, source.verbatim)) target.body = body.text;
+    if (body.ok && keepsVerbatim(body.text, source.verbatim) && !privatePhraseLeak(body.text, privateFacts)) target.body = body.text;
   }
   return slides;
 }
@@ -458,8 +474,10 @@ export async function writeFinale(
       const raw = await options.grok(payload);
       const record = asRecord(raw);
       if (record) {
-        mergeSlides(baseSlides, record["slides"], ps, roster, results);
-        mergeCards(baseDecks, flattenCards(baseDecks), record["secretCards"], ps, roster);
+        const flat = flattenCards(baseDecks);
+        const privateFacts = flat.flatMap(({ card }) => [card.title, ...card.facts]);
+        mergeSlides(baseSlides, record["slides"], ps, roster, results, privateFacts);
+        mergeCards(baseDecks, flat, record["secretCards"], ps, roster);
       }
     } catch { /* deterministic engine copy remains valid */ }
   }
