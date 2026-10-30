@@ -154,7 +154,6 @@ async function playNight(t: TestContext, options: NightOptions): Promise<NightRe
     const socket: Client = io(base, { forceNew: true, transports: ["polling", "websocket"], reconnection: false, autoConnect: false });
     sockets.push(socket);
     socket.on("error", () => {});
-    // Simulated phones press ready the moment a reveal is pending (ROUND 4).
     socket.on("state", (view) => { if (view.ready) socket.emit("ready"); });
     socket.onAny((name: string, payload: unknown) => { events.push({ name, payload }); });
     const ready = event<void>(socket, "connect");
@@ -220,13 +219,11 @@ test("INVISIBILITY: no emit, snapshot or room-log line ever carries a hypothesis
     for (const key of keys) assert.ok(!/hypothes|coverage|prior|director|strength/iu.test(key), `payload key "${key}" is internal`);
   }
 
-  // A state snapshot is exactly the public contract, nothing more. `ready` is
-  // the ONE ROUND 4 addition (who has pressed ready for a pending reveal) —
-  // public player ids only, never any director material.
+  // A state snapshot is exactly the public contract, nothing more.
   for (const { payload } of night.events.filter((e) => e.name === "state")) {
     const keys = Object.keys(payload as object).sort();
     assert.deepEqual(keys.filter((key) => key !== "ready"), ["code", "hostId", "phase", "players", "round", "seq"]);
-    if (keys.includes("ready")) assert.ok(Array.isArray((payload as { ready: unknown }).ready));
+    if (keys.includes("ready")) assert.ok(Array.isArray((payload as { ready?: unknown }).ready));
   }
 
   // The room log is the only thing that outlives the night — and it is records only.

@@ -53,7 +53,6 @@ async function setup(t: TestContext, options: ServerOptions = {}) {
   const connect = async (): Promise<Client> => {
     const client: Client = io(base, { forceNew: true, transports: ["polling", "websocket"], reconnection: false, autoConnect: false });
     clients.push(client); client.on("error", () => {});
-    // Simulated phones press ready the moment a reveal is pending (ROUND 4).
     client.on("state", (view) => { if (view.ready) client.emit("ready"); });
     const ready = once<void>(client, "connect"); client.connect(); await limit(ready); return client;
   };
@@ -107,7 +106,7 @@ test("spotlight: rotation holds, the subject never sees the question, decoys nev
         case "text": case "debrief": case "spotlight": value = { kind: "text", text: i === 0 ? "Brian keeps this table honest." : "Watching the room from the corner." }; break;
         case "shout": value = { kind: "shout", word: "chaos" }; break;
         case "rating": value = { kind: "rating", trait: round.trait!, about: round.about!, value: 7 }; break;
-        case "ios": value = { kind: "ios", about: ids.find((id) => id !== myId)!, value: 5 }; break;
+        case "ios": value = { kind: "ios", about: round.about!, value: 5 }; break;
         case "minigame": value = { kind: "minigame", score: 20 + i }; break;
         case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
         case "verdict": value = { kind: "pick", target: ids[(i + 1) % ids.length]! }; break;
@@ -234,7 +233,7 @@ test("verdict: phones down during the debate, votes stay secret until the reveal
         case "text": case "debrief": case "spotlight": value = { kind: "text", text: "Someone here is quietly running this room." }; break;
         case "shout": value = { kind: "shout", word: "verdict" }; break;
         case "rating": value = { kind: "rating", trait: round.trait!, about: round.about!, value: 6 }; break;
-        case "ios": value = { kind: "ios", about: ids.find((id) => id !== myId)!, value: 4 }; break;
+        case "ios": value = { kind: "ios", about: round.about!, value: 4 }; break;
         case "minigame": value = { kind: "minigame", score: 17 }; break;
         default: value = { kind: "dare", status: "done" }; break;
       }
@@ -384,7 +383,7 @@ test("round data round-trips through the JSONL log with the decoy flag intact", 
       : round.kind === "text" || round.kind === "debrief" || round.kind === "spotlight" ? { kind: "text", text: "Answer from seat " + i }
       : round.kind === "shout" ? { kind: "shout", word: "live" }
       : round.kind === "rating" ? { kind: "rating", trait: round.trait!, about: round.about!, value: 4 }
-      : round.kind === "ios" ? { kind: "ios", about: ids[(i + 1) % ids.length]!, value: 2 }
+      : round.kind === "ios" ? { kind: "ios", about: round.about!, value: 2 }
       : round.kind === "minigame" ? { kind: "minigame", score: 9 }
       : { kind: "dare", status: "done" };
     void submitValue(client, round.roundId, value, `log-${round.roundId}-${i}`);

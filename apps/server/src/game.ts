@@ -36,9 +36,7 @@ interface Player {
   resumeRetry?: { secret: string; socketId: string; nonce?: string };
   /** ROUND 4: bound account (never emitted). */
   accountId?: string;
-  /** ROUND 4 demo room: a seat the host puppets from their own laptop. It has
-   *  no socket, never appears in `secrets`, and answers through `demo_answer_as`
-   *  (manual) or the ordinary scheduler (auto). */
+  /** Demo seat controlled by the host. */
   puppet?: { mode: "auto" | "manual" };
 }
 interface Definition {
@@ -269,8 +267,7 @@ export class RoomManager {
         const provider = this.services.createPromptProvider({ roomId: state.id });
         const room: Room = { id: state.id, code: state.code, createdAt, lastActivity, file, hostId: state.hostId, players,
           phase: "lobby", stage: "lobby", seq: records.length + 1, nextPlayer: Math.max(Number(state.nextPlayer) || 2, players.length + 1), roundIndex: records.reduce((max, r) => Math.max(max, Number(r.roundId.match(/(\d+)$/u)?.[1] ?? 0)), 0), dareCount: records.filter(r => r.roundKind === "dare").length,
-          provider, prepared: false, usedIds: new Set(records.map(r => r.promptId)), custom: [], log: records, queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(state.id), botTimers: new Set(), hypotheses: [], priors: [], director: emptyDirectorState(),
-          ready: new Set(), demo: false, demoSpeed: 1 };
+          provider, prepared: false, usedIds: new Set(records.map(r => r.promptId)), custom: [], log: records, queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(state.id), botTimers: new Set(), hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), demo: false, demoSpeed: 1 };
         this.rooms.set(room.code, room);
         if (records.length > 0) void this.finale(room);
       } catch { /* Invalid metadata or partial logs are ignored. */ }
@@ -434,24 +431,24 @@ export class RoomManager {
     socket.on("create", (input, reply) => {
       const ack = typeof reply === "function" ? reply : () => {};
       if (socket.data.playerId) return ack({ ok: false, error: "Already joined a room." });
-      if (!input || !validAlias(input.alias) || !validConsent(input.consent) || !validProfile(input.profile)) return ack({ ok: false, error: "Enter a valid alias, complete the 18+ profile, and accept the required consent." });
+      if (!input || !validAlias(input.alias) || !validConsent(input.consent) || (!validProfile(input.profile) && input.demo !== true)) return ack({ ok: false, error: "Enter a valid alias, complete the 18+ profile, and accept the required consent." });
       const code = this.code(), now = this.now(), id = randomBytes(16).toString("hex");
       const file = join(this.options.dataDir, `${now}-${id}.jsonl`);
       try { writeFileSync(file, "", { flag: "wx", mode: 0o600 }); } catch { return ack({ ok: false, error: "Unable to create room storage." }); }
-      const player: Player = { id: "p1", alias: input.alias.trim(), consent: { ...input.consent }, profile: input.profile, secret: secret(), isBot: false, connected: true, socketId: socket.id };
+      const player: Player = { id: "p1", alias: input.alias.trim(), consent: { ...input.consent }, profile: validProfile(input.profile) ? input.profile : neutralProfile, secret: secret(), isBot: false, connected: true, socketId: socket.id };
       let provider: PromptProvider;
       try { provider = this.services.createPromptProvider({ roomId: id }); } catch { provider = new BankPromptProvider(); }
+      const demo = (input as { demo?: unknown }).demo === true;
       const room: Room = { id, code, createdAt: now, lastActivity: now, file, hostId: player.id, players: [player], phase: "lobby", stage: "lobby", seq: 1, nextPlayer: 2, roundIndex: 0, dareCount: 0,
         provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set(),
-        hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(),
-        demo: (input as { demo?: unknown }).demo === true, demoSpeed: 1 };
+        hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), demo, demoSpeed: 1 };
       this.rooms.set(code, room); this.persistRoom(room); socket.data = { roomCode: code, playerId: player.id }; void socket.join(code);
       ack({ ok: true, code, you: player.id, secret: player.secret, state: this.view(room, player.id) });
       this.states(room);
     });
     socket.on("join", (input, reply) => {
       const ack: (r: JoinReply) => void = typeof reply === "function" ? reply : () => {};
-      if (!input || !isRoomCode(input.roomCode) || !validAlias(input.alias) || !validConsent(input.consent) || (!input.resume && !validProfile(input.profile))) return ack({ ok: false, error: "Invalid room code, alias, profile, or consent." });
+      if (!input || !isRoomCode(input.roomCode) || !validAlias(input.alias) || !validConsent(input.consent) || (!input.resume && (input as { demo?: unknown }).demo !== true && !validProfile(input.profile))) return ack({ ok: false, error: "Invalid room code, alias, profile, or consent." });
       const room = this.liveRoom(input.roomCode);
       if (!room || room.stage === "deleted") return ack({ ok: false, error: "Room not found." });
       if (socket.data.playerId && (socket.data.roomCode !== room.code || socket.data.playerId !== input.resume?.playerId)) return ack({ ok: false, error: "Already joined a room." });
@@ -594,7 +591,7 @@ export class RoomManager {
       if (room.players.some((p) => p.alias.toLocaleLowerCase() === alias.toLocaleLowerCase())) {
         this.err(socket, "INVALID_ALIAS", "That name is already in the room."); return ack({ ok: false });
       }
-      const player: Player = { id: `p${room.nextPlayer++}`, alias, consent: { age: true, terms: true, revealOptIn: true }, profile: { ...neutralProfile },
+      const player: Player = { id: `p${room.nextPlayer++}`, alias, consent: { age: true, terms: true, revealOptIn: true }, profile: neutralProfile,
         secret: "", isBot: false, connected: true, puppet: { mode: "auto" } };
       room.players.push(player);
       this.changed(room); this.prepare(room);
@@ -743,14 +740,14 @@ export class RoomManager {
       room.director = recordSelection(room.director, { subjects: [], dimension: host.coding, promptId: host.id });
       return { prompt: host, phase, kind: host.kind, text: host.text };
     }
-    // Evidence variety is a HARD requirement the director must not eat: with
-    // only three pick slots a night, a pick slot stays on the phase's claim
-    // coding (warmup friction · spicy couple · deep friendship) so negative,
-    // romantic and friendship claims all get material even with no provider at
-    // all. The director still chooses the PAIR (test/explore) inside that
-    // coding, and every other slot is free.
+    // Evidence variety is a HARD requirement the director must not eat: each
+    // heat's pick slots stay on phase-appropriate claim codings. Warmup gets
+    // friendship, spicy gets couple plus rivalry, and deep gets friendship.
+    // The director still chooses the PAIR (test/explore) inside that coding.
     if (kind === "pick" && phase !== "dare") {
-      const pickCoding: PromptCoding = phase === "warmup" ? "friction" : phase === "spicy" ? "couple" : "friendship";
+      const remainingPicks = room.plan?.phase === phase ? room.plan.slots.filter((slot) => slot === "pick").length : 0;
+      const pickCoding: PromptCoding = phase === "warmup" ? "friendship"
+        : phase === "spicy" ? (remainingPicks === 1 ? "couple" : "rivalry") : "friendship";
       const preferred = pool.filter((p) => p.kind === "pick" && p.coding === pickCoding && !room.usedIds.has(p.id));
       // Generated prompts come first in the pool, so a validated provider
       // candidate is preferred to a repeat of the bank.

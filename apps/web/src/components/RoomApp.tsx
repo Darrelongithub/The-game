@@ -24,9 +24,7 @@ export function RoomApp() {
     setJoining(true);
     try {
       return await room.createRoom(alias, consent, profile, options);
-    } finally {
-      setJoining(false);
-    }
+    } finally { setJoining(false); }
   };
 
   const handleJoin = async (code: Parameters<typeof room.joinRoom>[0], alias: string, consent: Consent, profile: ProfileAnswers) => {

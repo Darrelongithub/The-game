@@ -160,6 +160,7 @@ export function JoinScreen({
                   <span className="text-[10px] uppercase tracking-[0.18em]">{demoRoom ? "on" : "off"}</span>
                 </button>
               )}
+
               <div className="mb-4 flex flex-wrap items-center gap-x-4">
                 <button type="button" onClick={() => setShowPrivacyOptions((value) => !value)} aria-expanded={showPrivacyOptions}
                   className="min-h-[40px] text-left text-xs text-white/55 underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent">

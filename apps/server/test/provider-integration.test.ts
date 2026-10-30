@@ -37,7 +37,6 @@ async function setup(t: TestContext, fakeFetch: typeof fetch, services?: GameSer
   const connect = async () => {
     const socket: Client = io(`http://127.0.0.1:${port}`, { forceNew: true, reconnection: false, autoConnect: false });
     clients.push(socket); socket.on("error", () => {});
-    // Simulated phones press ready the moment a reveal is pending (ROUND 4).
     socket.on("state", (view) => { if (view.ready) socket.emit("ready"); });
     const ready = once<void>(socket, "connect"); socket.connect(); await limit(ready); return socket;
   };
@@ -53,30 +52,28 @@ test("real integration filters generated prompts and sends only pseudonymous pub
   let generated!: () => void;
   const allGenerated = new Promise<void>((resolve) => { generated = resolve; });
   const candidate = "Who here would laugh first during a serious group photo? Point at them.";
+  const grokPayloads: string[] = [];
   const fakeFetch: typeof fetch = async (input, init) => {
     const url = String(input), body = String(init?.body ?? ""); calls.push({ url, body });
     if (url.includes("x.ai")) {
       const xaiCalls = calls.filter((call) => call.url.includes("x.ai")).length;
       if (xaiCalls === 4) generated();
-      if (xaiCalls > 4) return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ slides: [], secretCards: [] }) } }] }), { status: 200 });
+      if (xaiCalls > 4) {
+        const request = JSON.parse(body) as { messages?: { role: string; content: string }[] };
+        grokPayloads.push(request.messages?.find((message) => message.role === "user")?.content ?? "");
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ slides: [], secretCards: [] }) } }] }), { status: 200 });
+      }
       const choices = [
-        { text: "Who here would shoplift something for the group? Point at them.", kind: "pick", coding: "friction", measures: ["social risk"], asksTarget: true },
-        { text: candidate, kind: "pick", coding: "friction", measures: ["social risk"], asksTarget: true },
+        { text: "Who here would shoplift something for the group? Point at them.", kind: "pick", coding: "friendship", measures: ["friendship"], asksTarget: true },
+        { text: candidate, kind: "pick", coding: "friendship", measures: ["friendship"], asksTarget: true },
       ];
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(choices) } }] }), { status: 200 });
     }
     const request = JSON.parse(body) as { contents: { parts: { text: string }[] }[] };
-    const payload = JSON.parse(request.contents[0]!.parts[0]!.text) as { slides?: unknown[]; secretCards?: unknown[]; lines?: { i: number; text: string }[]; night?: { publicToneHint?: string } };
-    if (payload.lines) {
-      const tags = payload.lines.map(({ i }) => ({ i, tags: ["contempt", "admiration"] }));
-      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(tags) }] } }] }), { status: 200 });
-    }
-    assert.deepEqual(payload.secretCards, [], "public narrator must never receive private decks");
-    assert.equal(payload.night?.publicToneHint, "warm", "completed public tags can suggest a bounded narration style");
-    const bad = { slides: payload.slides!.map((_, i) => i === 0
-      ? { i, title: "Alice.*", body: "A quiet opening." }
-      : { i, title: "INVENTED 999999", body: "Alice.* invented 999999 facts." }), cards: [] };
-    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(bad) }] } }] }), { status: 200 });
+    const payload = JSON.parse(request.contents[0]!.parts[0]!.text) as { lines?: { i: number; text: string }[] };
+    assert.ok(payload.lines, "Gemini is used only for batched analysis, never reveal narration");
+    const tags = payload.lines.map(({ i }) => ({ i, tags: ["contempt", "admiration"] }));
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(tags) }] } }] }), { status: 200 });
   };
   let observedTags: { public: (string[] | undefined)[]; private: (string[] | undefined)[] } | undefined;
   const services: GameServices = {
@@ -131,14 +128,15 @@ test("real integration filters generated prompts and sends only pseudonymous pub
   clients[0]!.emit("start");
   const views = await limit(Promise.all(finales), 10000);
   assert.deepEqual(errors, []);
-  assert.equal(rounds[0]!.promptText, candidate, "validated generated prompts augment the bank");
+  assert.ok(rounds.some((round) => round.promptText === candidate), "a validated generated prompt is selected into an eligible slot");
   assert.ok(rounds.every((round) => !round.promptText.includes("shoplift")), "hard-blocked model output never reaches a phone");
-  assert.equal(calls.filter((call) => call.url.includes("x.ai")).length, 5, "four prompt-generation requests plus one Grok reveal request");
-  assert.equal(calls.filter((call) => call.url.includes("generativelanguage")).length, 1, "Gemini is used only for the public tag batch, never finale narration");
+  assert.equal(calls.filter((call) => call.url.includes("x.ai")).length, 5, "four phase batches plus one Grok reveal request");
+  assert.equal(calls.filter((call) => call.url.includes("generativelanguage")).length, 1, "Gemini is analysis-only; no reveal request is sent");
+  assert.equal(grokPayloads.length, 1, "Grok receives the single validated narration request");
   assert.ok(observedTags && observedTags.public.length > 0 && observedTags.public.every((tags) => tags?.includes("contempt")), "completed public classification is available without affecting scores");
   assert.ok(observedTags.private.length > 0 && observedTags.private.every((tags) => tags === undefined), "private debriefs are never sent for classification");
   for (const { body } of calls) {
-    for (const alias of aliases) assert.ok(!body.normalize("NFC").toLowerCase().includes(alias.normalize("NFC").toLowerCase()), `alias ${alias} leaked to provider payload ${body.slice(0, 1200)}`);
+    for (const alias of aliases) assert.ok(!body.normalize("NFC").toLowerCase().includes(alias.normalize("NFC").toLowerCase()), `alias ${alias} leaked to a provider`);
     assert.ok(!body.includes("PRIVATE_DEBRIEF_"), "private debrief must not reach the public narrator");
   }
   assert.ok(!JSON.stringify(views).includes("PRIVATE_DEBRIEF_"));

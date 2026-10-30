@@ -83,8 +83,8 @@ async function main(): Promise<void> {
     if (round.youSubmitted || round.expectsAnswer === false) return;
     const value = round.kind === "pick" || round.kind === "verdict" ? { kind: "pick" as const, target: seats[0]! }
       : round.kind === "shout" ? { kind: "shout" as const, word: "solo" }
-      : round.kind === "rating" ? { kind: "rating" as const, trait: "warmth" as const, about: "self" as const, value: 7 }
-      : round.kind === "ios" ? { kind: "ios" as const, about: seats[0]!, value: 5 }
+      : round.kind === "rating" ? { kind: "rating" as const, trait: round.trait!, about: round.about!, value: 7 }
+      : round.kind === "ios" ? { kind: "ios" as const, about: round.about!, value: 5 }
       : round.kind === "minigame" ? { kind: "minigame" as const, score: 22 }
       : round.kind === "dare" || round.kind === "pair_dare" ? { kind: "dare" as const, status: "done" as const }
       : { kind: "text" as const, text: "One laptop, whole night." };

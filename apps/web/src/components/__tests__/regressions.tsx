@@ -178,8 +178,7 @@ async function main() {
     assert.match(host.textContent ?? '', /Person 3/); assert.equal(host.querySelectorAll('select').length, 0)
     const selfIos = { ...round, roundId: 'r4', kind: 'ios' as const, about: undefined, promptText: 'How close are you and Person 1, really? Circles.' }
     await render(root, <PromptScreen round={selfIos} room={view} you="p1" onSubmit={async () => true} />)
-    assert.match(host.querySelector('h1')?.textContent ?? '', /someone here/)
-    assert.equal(host.querySelectorAll('select').length, 1, 'an unassigned closeness target must be chosen, never defaulted')
+    assert.equal(host.querySelectorAll('button[aria-label^="Closeness "]').length, 0, 'server never assigns closeness to oneself')
     const specialRoom = { ...view, players: players.map((p) => ({ ...p, alias: p.id === 'p1' ? 'A.*' : p.id === 'p2' ? '[B]' : p.alias })) }
     const specialSelf = { ...selfIos, roundId: 'r-special', promptText: 'How close are you and A.*, really? Circles.' }
     await render(root, <PromptScreen round={specialSelf} room={specialRoom} you="p1" onSubmit={async () => true} />)
@@ -189,7 +188,7 @@ async function main() {
     assert.equal(host.querySelectorAll('select').length, 0); assert.ok(host.textContent?.includes('[B]'), 'assigned target alias remains visible without being re-selected')
     const bankRating = { ...rating, roundId: 'r-bank-rating', promptText: 'Rate how good Person 2 is at keeping a secret, 1–10.\n\nEarlier, someone said: “chaos chaos chaos and Person 3”' }
     await render(root, <PromptScreen round={bankRating} room={view} you="p1" onSubmit={async () => true} />)
-    assert.equal(host.querySelectorAll('select').length, 0, 'clear bank wording prefills the trait and the named target')
+    assert.equal(host.querySelectorAll('select').length, 0, 'the server-assigned measure and target are not user-overridden')
     assert.ok(host.textContent?.includes('warmth') && host.textContent?.includes('Person 2'))
     assert.match(host.querySelector('[data-testid="callback-note"]')?.textContent ?? '', /chaos chaos/)
     const bankIos = { ...ios, roundId: 'r-bank-ios', about: 'p2', promptText: 'Where do you actually want to be with Person 2 a year from now? Circles.' }
@@ -198,14 +197,14 @@ async function main() {
     const selfTrajectory = { ...bankIos, roundId: 'r-bank-ios-self', about: undefined, promptText: 'Where do you actually want to be with Person 1 a year from now? Circles.' }
     await render(root, <PromptScreen round={selfTrajectory} room={view} you="p1" onSubmit={async () => true} />)
     assert.match(host.querySelector('h1')?.textContent ?? '', /with someone here/)
-    assert.equal(host.querySelectorAll('select').length, 1, 'an unassigned closeness target is chosen, not inferred as yourself')
+    assert.equal(host.querySelectorAll('button[aria-label^="Closeness "]').length, 0)
     const friendTowardYou = { ...rating, roundId: 'r-friend', promptText: 'How honest is your friend with you?' }
     await render(root, <PromptScreen round={friendTowardYou} room={view} you="p1" onSubmit={async () => true} />)
-    assert.equal(host.querySelectorAll('select').length, 0, 'the server assignment still wins over vague wording')
+    assert.ok(host.textContent?.includes('Person 2') && host.textContent?.includes('warmth'), 'server assignment, not vague wording, controls rating intent')
     const ambiguous = { ...round, roundId: 'r5', kind: 'rating' as const, promptText: 'Give a number from one to ten.' }
     await render(root, <PromptScreen round={ambiguous} room={view} you="p1" onSubmit={async () => true} />)
-    assert.equal(host.querySelectorAll('select').length, 2, 'missing server assignment requires an explicit choice')
-    assert.equal(button(host, 'Submit rating')?.disabled, true)
+    assert.equal(host.querySelectorAll('select').length, 0, 'missing server assignment never exposes a guessed control')
+    assert.equal(button(host, 'Submit rating'), undefined)
   })
 
   await check('a pair dare offers the required pass-with-reason escape', async (root, host) => {

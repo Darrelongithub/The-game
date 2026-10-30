@@ -70,11 +70,7 @@ export interface LogRecord {
     value: ResponseValue;
     at: number;                  // epoch ms
     latencyMs: number;           // round open → submit. Night-Digest fuel.
-    /** DEMO ROOMS ONLY — the host who puppeted this seat (see the `demo_*`
-     *  events). METADATA ONLY: the engine ignores it completely, so a
-     *  demo night scores exactly like a real one (parity is the point). It
-     *  never rides any client payload and never reaches signals, claims or
-     *  the digest. */
+    /** DEMO ROOMS ONLY: host identity for puppeted seats; ignored by the engine. */
     impersonatedBy?: PlayerId;
     /** Spotlight decoy answer: the subject's throwaway reply to the cover
      *  round. EXCLUDED from every signal, score and claim (data-or-dead does
@@ -427,7 +423,6 @@ export const ROUND_MIX = { test: 0.5, explore: 0.3, classic: 0.2 } as const;
  * do. A hidden rule that makes the hidden engine believable.
  */
 export const ANTI_TELEGRAPH_MAX = 2;
-
 
 export const ROUND_TIMERS_MS: Record<RoundKind, number> = {
     pick: 45_000, text: 90_000, shout: 15_000, rating: 40_000, ios: 40_000,

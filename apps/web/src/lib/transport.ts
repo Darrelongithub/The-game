@@ -43,9 +43,7 @@ export interface TransportHandlers {
 export interface Transport {
   readonly mode: "socket" | "mock";
   setHandlers(handlers: TransportHandlers): void;
-  /** `options.demo` creates a host-only demo room (every seat puppeted from
-   *  this laptop). Omitted = an ordinary room. */
-  create(alias: string, consent: Consent, profile?: ProfileAnswers, options?: { demo?: boolean }): Promise<JoinReply & { code?: RoomCode }>;
+  create(alias: string, consent: Consent, profile: ProfileAnswers, options?: { demo?: boolean }): Promise<JoinReply & { code?: RoomCode }>;
   join(req: JoinRequest): Promise<JoinReply>;
   submit(req: SubmitRequest): Promise<{ ok: boolean; error?: string }>;
   darePass(req: DarePassRequest): Promise<{ ok: boolean; error?: string }> | void;

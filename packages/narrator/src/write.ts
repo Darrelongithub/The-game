@@ -371,7 +371,7 @@ export function mergeSlides(
     const body = validateBody(record["body"], limits);
     // QUOTE OF THE NIGHT and the Dodge Report are quoted material: a
     // paraphrase is an invented quote, so it falls back to the engine line.
-    if (body.ok && keepsVerbatim(body.text, source.verbatim ? scrubAliases(source.verbatim, ps, roster) : undefined) && !privatePhraseLeak(body.text, privateFacts)) target.body = body.text;
+    if (body.ok && keepsVerbatim(body.text, source.verbatim) && !privatePhraseLeak(body.text, privateFacts) && keepsVerbatim(body.text, source.verbatim ? scrubAliases(source.verbatim, ps, roster) : undefined)) target.body = body.text;
   }
   return slides;
 }
@@ -488,7 +488,6 @@ export async function writeFinale(
     } catch { /* deterministic engine copy remains valid */ }
   }
   return { slides: baseSlides, decks: baseDecks };
-
 }
 
 /**

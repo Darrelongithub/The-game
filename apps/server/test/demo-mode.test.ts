@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { io, type Socket } from "socket.io-client";
 import type {
-  ClientToServerEvents, FinaleView, JoinReply, LogRecord, RevealView, RoomView, ServerToClientEvents,
+  ClientToServerEvents, FinaleView, JoinReply, LogRecord, RevealView, RoomView, RoundView, ServerToClientEvents,
 } from "../../../packages/shared/src/contracts.ts";
 import { computeSignals, computeResults, buildNightDigest, buildSecrets } from "../../../packages/engine/src/index.ts";
 import { createGameServer, type GameServer } from "../src/server.ts";
@@ -72,11 +72,11 @@ async function harness(t: { after: (fn: () => Promise<void> | void) => void }, o
 const SEATS = ["Maya", "Kofi", "Zuri"];
 
 /** A legal answer for any round kind, so a scripted seat can be answered. */
-function valueFor(kind: string, other: string): any {
-  switch (kind) {
+function valueFor(round: RoundView, other: string): any {
+  switch (round.kind) {
     case "pick": case "verdict": return { kind: "pick", target: other };
     case "shout": return { kind: "shout", word: "static" };
-    case "rating": return { kind: "rating", trait: "honesty", about: "self", value: 6 };
+    case "rating": return { kind: "rating", trait: round.trait!, about: round.about!, value: 6 };
     case "ios": return { kind: "ios", about: other, value: 4 };
     case "minigame": return { kind: "minigame", score: 18 };
     case "dare": case "pair_dare": return { kind: "dare", status: "done" };
@@ -86,7 +86,7 @@ function valueFor(kind: string, other: string): any {
 
 test("a demo room plays a whole night to a finale from one laptop", { timeout: 60_000 }, async (t) => {
   const { host, dir } = await harness(t, { readyGraceMs: 5_000 });
-  const made = await new Promise<JoinReply & { code?: string }>((resolve) => host.emit("create", { alias: "Host", consent, profile, demo: true }, resolve));
+  const made = await new Promise<JoinReply & { code?: string }>((resolve) => host.emit("create", { alias: "Host", consent, demo: true }, resolve));
   assert.equal(made.ok, true);
   assert.equal(made.state?.demo, true, "the room says it is a demo room");
 
@@ -118,7 +118,7 @@ test("a demo room plays a whole night to a finale from one laptop", { timeout: 6
     if (round.youSubmitted || round.expectsAnswer === false) return;
     const value = round.kind === "shout" ? { kind: "shout" as const, word: "mood" }
       : round.kind === "text" || round.kind === "spotlight" || round.kind === "debrief" ? { kind: "text" as const, text: "Testing the whole game alone." }
-      : round.kind === "rating" ? { kind: "rating" as const, trait: "warmth" as const, about: "self" as const, value: 7 }
+      : round.kind === "rating" ? { kind: "rating" as const, trait: round.trait!, about: round.about!, value: 7 }
       : round.kind === "ios" ? { kind: "ios" as const, about: ids[0]!, value: 5 }
       : round.kind === "minigame" ? { kind: "minigame" as const, score: 24 }
       : round.kind === "dare" || round.kind === "pair_dare" ? { kind: "dare" as const, status: "done" as const }
@@ -146,7 +146,7 @@ test("a demo room plays a whole night to a finale from one laptop", { timeout: 6
 
 test("demo_answer_as writes an ordinary record and the engine ignores the metadata (parity)", { timeout: 40_000 }, async (t) => {
   const { host, dir } = await harness(t, { readyGraceMs: 5_000, roundTimers: 1_500 });
-  const made = await new Promise<JoinReply & { code?: string }>((resolve) => host.emit("create", { alias: "Host", consent, profile, demo: true }, resolve));
+  const made = await new Promise<JoinReply & { code?: string }>((resolve) => host.emit("create", { alias: "Host", consent, demo: true }, resolve));
   assert.equal(made.ok, true);
   const ids: string[] = [];
   for (const alias of SEATS) {
@@ -164,12 +164,12 @@ test("demo_answer_as writes an ordinary record and the engine ignores the metada
     if (round.expectsAnswer === false) return;
     const allowed = (seat: string): boolean => !round.onlyPlayers || round.onlyPlayers.includes(seat);
     if (!round.youSubmitted && allowed(made.you!)) {
-      host.emit("submit", { roundId: round.roundId, clientUuid: `host:${round.roundId}`, value: valueFor(round.kind, ids[0]!) }, () => {});
+      host.emit("submit", { roundId: round.roundId, clientUuid: `host:${round.roundId}`, value: valueFor(round, ids[0]!) }, () => {});
     }
     for (const id of ids) {
       if (!allowed(id) || answered.has(`${round.roundId}:${id}`)) continue;
       answered.add(`${round.roundId}:${id}`);
-      host.emit("demo_answer_as", { playerId: id, roundId: round.roundId, clientUuid: `demo:${round.roundId}:${id}`, value: valueFor(round.kind, ids[1]!) });
+      host.emit("demo_answer_as", { playerId: id, roundId: round.roundId, clientUuid: `demo:${round.roundId}:${id}`, value: valueFor(round, ids[1]!) });
     }
   });
   // Two rounds are plenty: the metadata question is per-record, not per-night.
@@ -210,7 +210,7 @@ test("demo_answer_as writes an ordinary record and the engine ignores the metada
 
 test("manual seats wait for the host; auto seats answer themselves", { timeout: 30_000 }, async (t) => {
   const { host, dir } = await harness(t, { readyGraceMs: 5_000, roundTimers: 3_000 });
-  const made = await new Promise<JoinReply & { code?: string }>((resolve) => host.emit("create", { alias: "Host", consent, profile, demo: true }, resolve));
+  const made = await new Promise<JoinReply & { code?: string }>((resolve) => host.emit("create", { alias: "Host", consent, demo: true }, resolve));
   assert.equal(made.ok, true);
   const manual = (await ack<{ ok: boolean; playerId?: string }>(host, "demo_add_player", { alias: "Manual" })).playerId!;
   const auto = (await ack<{ ok: boolean; playerId?: string }>(host, "demo_add_player", { alias: "Auto" })).playerId!;
@@ -232,7 +232,7 @@ test("manual seats wait for the host; auto seats answer themselves", { timeout: 
   assert.equal(forRound.filter((record) => record.playerId === manual).length, 0, "a manual seat waits for the host");
   // ...and the host can answer it by hand, which is the whole point.
   host.emit("demo_answer_as", { playerId: manual, roundId, clientUuid: `manual:${roundId}`,
-    value: valueFor(opening.round!.kind, auto) });
+    value: valueFor(opening.round!, auto) });
   await wait(200);
   const after = readFileSync(join(dir, files[0]!), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) as LogRecord[];
   const manualRecord = after.find((record) => record.playerId === manual && record.roundId === roundId);
@@ -261,7 +261,7 @@ test("demo controls are demo-only and host-only", { timeout: 20_000 }, async (t)
 
   // A demo room refuses a non-host. (A fresh socket: one socket holds one seat.)
   const second = await connect();
-  const demo = await new Promise<JoinReply & { code?: string }>((resolve) => second.emit("create", { alias: "DemoHost", consent, profile, demo: true }, resolve));
+  const demo = await new Promise<JoinReply & { code?: string }>((resolve) => second.emit("create", { alias: "DemoHost", consent, demo: true }, resolve));
   assert.equal(demo.ok, true);
   const guest = await connect();
   const joined = await new Promise<JoinReply>((resolve) => guest.emit("join", { roomCode: demo.code!, alias: "Guest", consent, profile }, resolve));
@@ -275,7 +275,7 @@ test("demo controls are demo-only and host-only", { timeout: 20_000 }, async (t)
 
 test("demo_speed shortens timers; demo_all_ready releases a pending reveal", { timeout: 30_000 }, async (t) => {
   const { host } = await harness(t, { readyGraceMs: 6_000, roundTimers: 4_000 });
-  const made = await new Promise<JoinReply & { code?: string }>((resolve) => host.emit("create", { alias: "Host", consent, profile, demo: true }, resolve));
+  const made = await new Promise<JoinReply & { code?: string }>((resolve) => host.emit("create", { alias: "Host", consent, demo: true }, resolve));
   assert.equal(made.ok, true);
   const seat = (await ack<{ ok: boolean; playerId?: string }>(host, "demo_add_player", { alias: "Auto" })).playerId!;
   host.emit("demo_set_bot_mode", { playerId: seat, mode: "auto" });

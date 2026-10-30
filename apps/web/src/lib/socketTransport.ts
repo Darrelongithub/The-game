@@ -194,10 +194,10 @@ export class SocketTransport implements Transport {
   }
 
   // ----------------------------------------------------------------- API
-  async create(alias: string, consent: Consent, profile?: ProfileAnswers, options?: { demo?: boolean }): Promise<JoinReply & { code?: RoomCode }> {
+  async create(alias: string, consent: Consent, profile: ProfileAnswers, options?: { demo?: boolean }): Promise<JoinReply & { code?: RoomCode }> {
     const socket = await this.socketReady();
     const reply = await new Promise<JoinReply & { code?: RoomCode }>((resolve) => {
-      socket.timeout(this.ackTimeoutMs).emit("create", { alias, consent, ...(profile ? { profile } : {}), ...(options?.demo ? { demo: true } : {}) }, (error, r) => {
+      socket.timeout(this.ackTimeoutMs).emit("create", { alias, consent, profile, demo: options?.demo }, (error, r) => {
         if (error) {
           this.abandonUnacknowledgedJoin(socket);
           resolve({ ok: false, error: "The server did not answer. Please try again." });
