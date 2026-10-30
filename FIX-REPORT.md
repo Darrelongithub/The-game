@@ -334,3 +334,4 @@ Automated coverage is green, but no real Android or iPhone device results have b
 |---|---|---|---|---|
 | Android | _pending_ | _pending_ | **REQUIRES HUMAN** | _pending_ |
 | iPhone | _pending_ | _pending_ | **REQUIRES HUMAN** | _pending_ |
+- H2 FINALE THEATRE: display-only NEXT/arrow sequence reuses public reveals, has instant/no-confetti transitions and preserves finale slides; the adapter collects H1’s ordered finale-phase `reveal` stream through `finale` (or accepts a single ordered array); H1 server delivery is not yet merged; selfcheck 36/36, web/display/SSR, 131 component checks, typecheck, build/bundle and verified phone-finale equality passed on the original base; server suite 67/68 due to an unrelated flaky `integration-audit` pair-dare assertion (3/5 isolated reruns passed).
