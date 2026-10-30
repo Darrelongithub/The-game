@@ -287,3 +287,18 @@ test("a twin is served 1–3 rounds after its group seed and the mismatch line n
   assert.ok(!/\bsaid no\b|\bno one\b|\bnope\b/iu.test(body), "the payoff never exposes a no");
   assert.ok(!/\bno\b/iu.test(body.replace(/nobody/giu, "")), "the payoff never exposes a no");
 });
+
+test("determinism: the same scripted night selects the same voices and reveals twice", { timeout: 60_000 }, async (t) => {
+  const script = (phase: string, seat: number): ConfessScript => (phase === "warmup"
+    ? (seat === 0 ? { yes: true, note: "I have." } : seat === 1 ? { yes: false, note: "No." } : { yes: true })
+    : { yes: seat !== 2, ...(seat === 0 ? { note: "Still yes." } : {}) });
+  const first = await playConfessNight(t, { aliases: ["Alice", "Brian", "Chao", "Diana"], script });
+  const second = await playConfessNight(t, { aliases: ["Alice", "Brian", "Chao", "Diana"], script });
+  const plan = (night: ConfessNight) => night.styled.map((entry) => `${entry.roundIndex}:${entry.style}:${entry.kind}:${entry.promptId}`);
+  assert.deepEqual(plan(first), plan(second), "same log → the same selection, voice for voice");
+  assert.deepEqual(
+    confessReveals(first.reveals).map((entry) => entry.confess),
+    confessReveals(second.reveals).map((entry) => entry.confess),
+    "same log → the same reveals",
+  );
+});
