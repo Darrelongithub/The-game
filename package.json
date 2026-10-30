@@ -10,6 +10,7 @@
     "host": "npm run build && node host.mjs",
     "start": "node host.mjs",
     "build": "node scripts/build.mjs",
+    "bundle:check": "node scripts/check-bundle.mjs",
     "selfcheck": "npx -y tsx scripts/selfcheck.ts",
     "smoke": "npx tsx scripts/bots.ts",
     "smoke:verified": "tsx scripts/verified-smoke.ts",
