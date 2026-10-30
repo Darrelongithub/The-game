@@ -106,6 +106,30 @@ The room shows who is still looking up; after `REVEAL_READY_GRACE_MS` (20s) the
 reveal fires anyway so one AFK phone cannot stall the night. The host's **Skip
 round** releases a pending reveal immediately.
 
+## Reveal mode: every round, or the whole night at the end
+
+`REVEAL_MODE` (optional, default **off**) chooses how the night's reveals land.
+
+- `round` (default, and what an unset or misspelt value means): today's game —
+  every round closes into its own reveal behind the ready gate. Nothing changes.
+- `finale`: per-round reveals are **suppressed and queued**. Nothing is shown on
+  the phones or the display between rounds; the night advances on the ready
+  gate's grace timer exactly as if the reveal had played (the gate is bypassed
+  mid-game only). At the finale the server hands the whole night's reel, in
+  round order, to the **public display** as one `reveal` event per round,
+  immediately before the `finale` event. Phones never receive the queue, and the
+  phone finale is identical to a `round` night.
+
+```sh
+REVEAL_MODE=finale npm run host
+```
+
+The queue is persisted beside the room log as append-only `*.reveals.log` JSON
+lines (0600). It is deterministic — the same log always yields the same queue —
+so a mid-night restart, or a display that reconnects during the finale, replays
+the reel intact. The queue is deleted with its room and reaped on the same 48h /
+24h clock as everything else in the data directory.
+
 ## Remote friends
 
 On Render, Railway or Fly use Node 20+, and configure:
