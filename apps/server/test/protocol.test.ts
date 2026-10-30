@@ -216,7 +216,12 @@ test("timer honors grace, skip advances, and reconnect restores the personalized
   }
   const reclaimedAnswer: ResponseValue = second.kind === "pick" ? { kind: "pick", target: replies[3]!.you! } : { kind: "shout", word: "vibes" };
   assert.equal((await submit(reclaimed, second.roundId, reclaimedAnswer, "reclaimed")).ok, true);
-  assert.ok((await limit(secondReveal)).items?.length, "the second round emitted a reveal after every eligible player answered");
+  const closedSecond = await limit(secondReveal);
+  assert.equal(closedSecond.roundId, second.roundId, "the second round emitted a reveal after every eligible player answered");
+  // R21: pick rounds still close and reveal, but their targets are never
+  // rendered as generic reveal lines. Non-pick rounds keep their visible items.
+  if (second.kind === "pick") assert.deepEqual(closedSecond.items ?? [], [], "pick reveals carry no pick lines");
+  else assert.ok(closedSecond.items?.length, "non-pick reveals keep their visible items");
 });
 
 test("a lost rotation acknowledgement is recoverable only on its authenticated socket", async (t) => {
