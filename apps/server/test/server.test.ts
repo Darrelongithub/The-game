@@ -173,7 +173,7 @@ test("one host and three in-server bots can finish the entire game without API k
     }),
     writeFinale() { writerStarted = true; return new Promise(() => {}); },
   };
-  const server = createGameServer({ dataDir: dir, services, writerTimeoutMs: 20, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, verdictDiscussMs: 0, roundTimers: { spotlight: 300, verdict: 300 } });
+  const server = createGameServer({ dataDir: dir, services, writerTimeoutMs: 20, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, verdictDiscussMs: 0, roundTimers: { spotlight: 300, verdict: 300, confess: 300 } });
   const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
   t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" } }, resolve));
@@ -192,6 +192,7 @@ test("one host and three in-server bots can finish the entire game without API k
       case "minigame": value = { kind: "minigame", score: 23 }; break;
       case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
       case "spotlight": value = { kind: "text", text: "Watching the room right now." }; break;
+      case "confess": value = { kind: "confess", yes: true }; break;
       case "verdict": value = { kind: "pick", target: "p2" }; break;
     }
     host.emit("submit", { roundId: round.roundId, clientUuid: `host-${round.roundId}`, value }, () => {});

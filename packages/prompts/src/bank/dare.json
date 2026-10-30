@@ -70,7 +70,7 @@
     "id": "dd7",
     "phase": "dare",
     "kind": "dare",
-    "text": "Show the last photo you took of yourself — {P6} captions it out loud.",
+    "text": "Show the last photo you took of yourself \u2014 {P6} captions it out loud.",
     "measures": [
       "directed roast-lite"
     ],
@@ -81,7 +81,7 @@
     "id": "dd8",
     "phase": "dare",
     "kind": "dare",
-    "text": "Say the nicest and the meanest TRUE thing about {P7} — to their face.",
+    "text": "Say the nicest and the meanest TRUE thing about {P7} \u2014 to their face.",
     "measures": [
       "honesty to face",
       "tags both ways"

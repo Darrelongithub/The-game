@@ -9,7 +9,7 @@ import {
   SPOTLIGHT_REVEAL_MS, TRAITS, VERDICT_DISCUSS_MS, VERDICT_REVEAL_MS, pseudonym,
   type ClientToServerEvents, type Consent, type FinaleSlide, type FinaleView, type InterludeView,
   type Claim, type Hypothesis, type JoinReply, type LogRecord, type NightDigest, type Phase, type PlayerId, type Prompt, type PromptCoding, type ProfileAnswers,
-  type ResponseValue, type RevealView, type RoomMeta, type RoomView, type RoundKind,
+  type PromptStyle, type ResponseValue, type RevealView, type RoomMeta, type RoomView, type RoundKind,
   type RoundView, type SecretCard, type SecretDeckView, type ServerToClientEvents,
 } from "../../../packages/shared/src/contracts.ts";
 import { isAlias, isRoomCode, playerCountOk, validSubmit } from "../../../packages/shared/src/validate.ts";
@@ -24,6 +24,11 @@ import {
   assertNoHypothesisLeak, carryOver, emptyDirectorState, planRound, recordSelection, updateHypotheses,
   type DirectorState,
 } from "../../../packages/engine/src/director.ts";
+import {
+  chooseStyle, confessMismatches, emptyStyleServed, isStyleQuestionKind, planTwin, recordStyle, styleDrift, twinDue,
+  type StyleServed, type TwinLink, type TwinPlan,
+} from "../../../packages/engine/src/confess.ts";
+import { buildConfessReveal, confessSummary, confessTierFor } from "./confessReveal.ts";
 
 type SocketData = { roomCode?: string; playerId?: string; display?: boolean };
 const displayChannel = (code: string): string => `display:${code}`;
@@ -57,6 +62,8 @@ interface Definition {
    * round view still shows ordinary text — nothing points at a suspicion.
    */
   subjects?: string[];
+  /** true when this round's slot was style-eligible (the 50/50 counted it) */
+  styleEligible?: boolean;
 }
 /** Heat-phase dealing state: round slots first, then the live moments. */
 interface PhasePlan { phase: HeatPhase; slots: RoundKind[]; live: RoundKind[] }
@@ -99,6 +106,17 @@ interface Room {
    * contains player ids — nothing private.
    */
   pendingReveal?: RevealView; ready: Set<string>; readyClosesAt?: number;
+  /**
+   * CONFESS ROUNDS — THE 50/50. Question rounds served per voice, so the
+   * selector can balance the night to STYLE_MIX (±1, deterministic).
+   */
+  styleServed: StyleServed;
+  /** CONFESS ROUNDS — scheduled confess twins (perception → reality), same phase only. */
+  twins: { plan: TwinPlan; phase: HeatPhase }[];
+  /** the phase that already consumed its one twin slot */
+  twinPhase?: HeatPhase;
+  /** group seed ↔ confess seed pairs actually served tonight (the payoff input) */
+  twinLinks: TwinLink[];
   /** ROUND 4 demo room: the host plays every seat from one laptop. */
   demo: boolean; demoSpeed: number;
   timer?: ReturnType<typeof setTimeout>; botTimers: Set<ReturnType<typeof setTimeout>>;
@@ -131,6 +149,11 @@ export interface GameOptions {
      * without exposing any of it on the wire.
      */
     directed?(roomCode: string, round: { mode: string; dimension: string; subjects: string[]; promptId: string; hypothesisId?: string }): void;
+    /**
+     * INTERNAL test observer: which VOICE a question round was dealt in, and
+     * whether it was a scheduled twin. Never emitted to any client.
+     */
+    styled?(roomCode: string, round: { roundIndex: number; style: PromptStyle; kind: RoundKind; promptId: string; twin?: { groupPromptId: string; groupRoundIndex: number; dueAt: number } }): void;
     decks(roomCode: string, roomId: string, players: string[], decks: ReadonlyMap<string, SecretDeckView>, results: import("../../../packages/shared/src/contracts.ts").Results): void;
   };
 }
@@ -184,6 +207,11 @@ function canonicalValue(value: ResponseValue): ResponseValue {
     case "rating": return { kind: "rating", trait: value.trait, about: value.about, value: value.value };
     case "ios": return { kind: "ios", about: value.about, value: value.value };
     case "minigame": return { kind: "minigame", score: value.score };
+    case "confess": return {
+      kind: "confess", yes: value.yes,
+      ...(value.target !== undefined ? { target: value.target } : {}),
+      ...(value.note !== undefined ? { note: value.note } : {}),
+    };
     case "dare": return value.status === "passed" ? { kind: "dare", status: "passed", reason: value.reason } : { kind: "dare", status: "done" };
   }
 }
@@ -194,6 +222,9 @@ function redactValue(value: ResponseValue, players: Player[]): ResponseValue {
   if (value.kind === "text") return { ...value, text: pseudonymizeText(value.text, players) };
   if (value.kind === "shout") return { ...value, word: pseudonymizeText(value.word, players) };
   if (value.kind === "dare" && value.reason) return { ...value, reason: pseudonymizeText(value.reason, players) };
+  // A confess NOTE is free text too: an alias typed into it must be scrubbed
+  // before anything downstream (digest, reveal copy, providers) sees it.
+  if (value.kind === "confess" && value.note) return { ...value, note: pseudonymizeText(value.note, players) };
   return { ...value };
 }
 function asSafePrompt(x: unknown, phase: HeatPhase): x is Prompt {
@@ -201,10 +232,12 @@ function asSafePrompt(x: unknown, phase: HeatPhase): x is Prompt {
   const p = x as Prompt;
   return typeof p.id === "string" && p.id.length > 0 && p.phase === phase &&
     ["bank", "host", "grok"].includes(p.source) &&
-    ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare"].includes(p.kind) &&
+    ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare", "confess"].includes(p.kind) &&
     typeof p.text === "string" && p.text.trim().length > 0 && p.text.length <= 160 && validPlaceholders(p.text) &&
     Array.isArray(p.measures) && p.measures.length > 0 && p.measures.every((m) => typeof m === "string" && m.length > 0) &&
-    ["couple", "friendship", "trust", "friction", "tease", "rivalry", "status", "neutral"].includes(p.coding) && typeof p.asksTarget === "boolean";
+    ["couple", "friendship", "trust", "friction", "tease", "rivalry", "status", "neutral"].includes(p.coding) && typeof p.asksTarget === "boolean" &&
+    (p.style === undefined || p.style === "group" || p.style === "confess") &&
+    (p.twinId === undefined || typeof p.twinId === "string");
 }
 
 export class RoomManager {
@@ -237,6 +270,7 @@ export class RoomManager {
     room.currentHeat = undefined; room.pendingHeatDown = undefined; room.spotlighted.clear(); room.lastSubject = undefined;
     room.ready.clear(); room.pendingReveal = undefined; room.readyClosesAt = undefined;
     room.hypotheses.length = 0; room.priors.length = 0; room.director = emptyDirectorState(); room.plan = undefined; room.testedHypothesisId = undefined;
+    room.styleServed = emptyStyleServed(); room.twins = []; room.twinPhase = undefined; room.twinLinks = [];
     room.provider = new BankPromptProvider();
   }
   private persistRoom(room: Room): void {
@@ -267,7 +301,7 @@ export class RoomManager {
         const provider = this.services.createPromptProvider({ roomId: state.id });
         const room: Room = { id: state.id, code: state.code, createdAt, lastActivity, file, hostId: state.hostId, players,
           phase: "lobby", stage: "lobby", seq: records.length + 1, nextPlayer: Math.max(Number(state.nextPlayer) || 2, players.length + 1), roundIndex: records.reduce((max, r) => Math.max(max, Number(r.roundId.match(/(\d+)$/u)?.[1] ?? 0)), 0), dareCount: records.filter(r => r.roundKind === "dare").length,
-          provider, prepared: false, usedIds: new Set(records.map(r => r.promptId)), custom: [], log: records, queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(state.id), botTimers: new Set(), hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), demo: false, demoSpeed: 1 };
+          provider, prepared: false, usedIds: new Set(records.map(r => r.promptId)), custom: [], log: records, queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(state.id), botTimers: new Set(), hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), styleServed: emptyStyleServed(), twins: [], twinLinks: [], demo: false, demoSpeed: 1 };
         this.rooms.set(room.code, room);
         if (records.length > 0) void this.finale(room);
       } catch { /* Invalid metadata or partial logs are ignored. */ }
@@ -441,7 +475,7 @@ export class RoomManager {
       const demo = (input as { demo?: unknown }).demo === true;
       const room: Room = { id, code, createdAt: now, lastActivity: now, file, hostId: player.id, players: [player], phase: "lobby", stage: "lobby", seq: 1, nextPlayer: 2, roundIndex: 0, dareCount: 0,
         provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set(),
-        hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), demo, demoSpeed: 1 };
+        hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), styleServed: emptyStyleServed(), twins: [], twinLinks: [], demo, demoSpeed: 1 };
       this.rooms.set(code, room); this.persistRoom(room); socket.data = { roomCode: code, playerId: player.id }; void socket.join(code);
       ack({ ok: true, code, you: player.id, secret: player.secret, state: this.view(room, player.id) });
       this.states(room);
@@ -728,8 +762,17 @@ export class RoomManager {
    * WHICH ordinary prompt comes next and which people its `{P1}`/`{P2}` slots
    * bind to. Nothing about the choice reaches a client.
    */
-  private directedDefinition(room: Room, phase: HeatPhase, kind: RoundKind): Definition | undefined {
-    let pool = this.candidatePool(room, phase).filter(this.permittedIn(phase, kind));
+  private directedDefinition(room: Room, phase: HeatPhase, kind: RoundKind, style: PromptStyle = "group"): Definition | undefined {
+    // THE SECOND VOICE: a confess slot is dealt as its own round kind. If the
+    // bank/generator has no confession left, the slot falls back to the group
+    // voice rather than starving the phase.
+    if (style === "confess" && (isStyleQuestionKind(kind) || kind === "confess")) {
+      const confessDefinition = this.confessDefinition(room, phase);
+      if (confessDefinition) return confessDefinition;
+    }
+    let pool = this.candidatePool(room, phase).filter(this.permittedIn(phase, kind))
+      // Group slots never serve a confession wearing a pick/text costume.
+      .filter((p) => (p.style ?? (p.kind === "confess" ? "confess" : "group")) !== "confess");
     // Generated Grok material fills flexible slots ahead of bank copy; the
     // explicit pick slots below retain their evidence-density coding floor.
     if (kind !== "pick") pool = [...pool].sort((a, b) => (a.source === "grok" ? -1 : 0) - (b.source === "grok" ? -1 : 0));
@@ -769,19 +812,142 @@ export class RoomManager {
       mode: planned.mode, dimension: planned.dimension, subjects: [...planned.subjects], promptId: planned.prompt.id,
       ...(planned.hypothesisId ? { hypothesisId: planned.hypothesisId } : {}),
     });
+    this.scheduleTwinFor(room, phase, planned.prompt);
     return {
       prompt: planned.prompt, phase, kind: planned.prompt.kind, text: planned.prompt.text,
       ...(planned.subjects.length > 0 ? { subjects: [...planned.subjects] } : {}),
     };
   }
+  /**
+   * PAYOFF — perception, then reality. A group seed that carries a twinId may
+   * have its confess twin scheduled 1–3 rounds later, at most once per phase,
+   * and only sometimes (planTwin is deterministic and seeded by the round).
+   */
+  private scheduleTwinFor(room: Room, phase: HeatPhase, prompt: Prompt): void {
+    if (!prompt.twinId) return;
+    if ((prompt.style ?? "group") !== "group") return;
+    const twinAvailable = this.candidatePool(room, phase).some((p) => p.id === prompt.twinId && !room.usedIds.has(p.id));
+    if (!twinAvailable) return;
+    const plan = planTwin({
+      groupRoundIndex: room.roundIndex + 1,
+      groupPromptId: prompt.id,
+      confessPromptId: prompt.twinId,
+      seed: room.roundIndex + 1,
+      scheduledThisPhase: room.twinPhase === phase,
+    });
+    if (!plan) return;
+    room.twins.push({ plan, phase });
+    room.twinPhase = phase;
+  }
+  /**
+   * Deal a confess round: a due TWIN first (the same topic the room was just
+   * asked about), otherwise the deterministic pick from the confess pool.
+   */
+  private confessDefinition(room: Room, phase: HeatPhase): Definition | undefined {
+    const pool = this.candidatePool(room, phase)
+      .filter((p) => (p.style ?? (p.kind === "confess" ? "confess" : "group")) === "confess" && p.kind === "confess");
+    if (pool.length === 0) return undefined;
+    const due = room.twins.find((entry) => entry.phase === phase && twinDue(entry.plan, room.roundIndex + 1));
+    if (due) {
+      const twin = pool.find((p) => p.id === due.plan.confessPromptId);
+      if (twin) {
+        room.twins = room.twins.filter((entry) => entry !== due);
+        room.twinLinks.push({ groupPromptId: due.plan.groupPromptId, confessPromptId: twin.id });
+        room.director = recordSelection(room.director, { subjects: [], dimension: twin.coding, promptId: twin.id });
+        this.options.audit?.styled?.(room.code, {
+          roundIndex: room.roundIndex + 1, style: "confess", kind: "confess", promptId: twin.id,
+          twin: { groupPromptId: due.plan.groupPromptId, groupRoundIndex: due.plan.groupRoundIndex, dueAt: due.plan.dueAt },
+        });
+        return { prompt: twin, phase, kind: "confess", text: twin.text };
+      }
+    }
+    const planned = planRound({
+      hypotheses: room.hypotheses,
+      state: room.director,
+      candidates: pool,
+      seed: room.roundIndex + 1,
+      kind: "confess",
+      meta: this.meta(room),
+    });
+    if (!planned) return undefined;
+    room.director = planned.state;
+    this.options.audit?.styled?.(room.code, { roundIndex: room.roundIndex + 1, style: "confess", kind: "confess", promptId: planned.prompt.id });
+    return { prompt: planned.prompt, phase, kind: "confess", text: planned.prompt.text };
+  }
+  /**
+   * THE 50/50. Which voice does the next QUESTION round speak in?
+   * Deterministic: chooseStyle is seeded by the round index and diffuses the
+   * error against STYLE_MIX, so the night stays within ±1 of the target. A due
+   * twin may pull forward a confess round — but never past that ±1 band.
+   */
+  /**
+   * Which question slots the 50/50 may rewrite. pick / text / shout are the
+   * conversational question kinds; rating, ios and minigame are instruments
+   * that keep their own mechanics (spec: the mix applies only to questions).
+   *
+   * Two floors are preserved because they are existing HARD requirements of
+   * this game, not preferences:
+   *   • each phase keeps its last public TEXT round — later phases quote those
+   *     answers verbatim (callbacks) and the digest needs them;
+   *   • each phase keeps its last PICK round — the claim engine's coded
+   *     evidence (friendship / couple / rivalry) may not starve.
+   * Everything else is fair game for the second voice.
+   */
+  private styleEligible(plan: PhasePlan, kind: RoundKind): boolean {
+    if (kind === "text" && !plan.slots.includes("text")) return false;
+    if (kind === "pick") {
+      // A phase's coded picks are the claim engine's evidence: warmup and deep
+      // need one, spicy needs both (couple + rivalry). Only a SPARE pick is
+      // fair game for the second voice.
+      const picksLeft = 1 + plan.slots.filter((slot) => slot === "pick").length;
+      const required = plan.phase === "spicy" ? 2 : plan.phase === "dare" ? 0 : 1;
+      return picksLeft > required;
+    }
+    // The shout round (one word, majority wins) is an instrument like rating /
+    // ios: it appears once a night and the digest milks it. Not swappable.
+    if (kind === "shout") return false;
+    return true;
+  }
+  private nextStyle(room: Room, phase: HeatPhase): PromptStyle {
+    const desired = chooseStyle(room.styleServed, room.roundIndex + 1);
+    if (desired === "confess") return "confess";
+    const twinWaiting = room.twins.some((entry) => entry.phase === phase && twinDue(entry.plan, room.roundIndex + 1));
+    if (twinWaiting && styleDrift(recordStyle(room.styleServed, "confess")) <= 1) return "confess";
+    return desired;
+  }
   /** Deal the next round of the phase; undefined means the phase is over. */
   private planNext(room: Room): Definition | undefined {
     const plan = room.plan;
     if (!plan) return undefined;
+    // PERCEPTION → REALITY: a twin that is due NOW is dealt as its own round,
+    // between whatever the phase had planned. Waiting for the phase's tail
+    // confession would put the two questions four or five rounds apart and the
+    // room would lose the thread — so the confessed twin is inserted exactly
+    // one to three rounds after the group seed that scheduled it.
+    const dueTwin = room.twins.find((entry) => entry.phase === plan.phase && entry.plan.dueAt === room.roundIndex + 1);
+    if (dueTwin && plan.phase !== "dare") {
+      const twinDefinition = this.confessDefinition(room, plan.phase);
+      if (twinDefinition) {
+        twinDefinition.styleEligible = true;
+        return twinDefinition;
+      }
+      room.twins = room.twins.filter((entry) => entry !== dueTwin);
+    }
     while (plan.slots.length > 0) {
       const kind = plan.slots.shift()!;
-      const definition = this.directedDefinition(room, plan.phase, kind);
-      if (definition) return definition;
+      // Only the flexible question slots are style-swappable; rating, ios and
+      // minigame keep their own mechanics and every non-question round is
+      // dealt exactly as before.
+      const confessSlot = kind === "confess";
+      const styleEligible = confessSlot || (isStyleQuestionKind(kind) && plan.phase !== "dare" && this.styleEligible(plan, kind));
+      const style: PromptStyle = confessSlot ? "confess" : styleEligible ? this.nextStyle(room, plan.phase) : "group";
+      const definition = this.directedDefinition(room, plan.phase, kind, style);
+      if (definition) {
+        // Bookkeeping follows what was ACTUALLY served: a confess slot that
+        // fell back to a group prompt counts as a group question round.
+        definition.styleEligible = styleEligible;
+        return definition;
+      }
     }
     while (plan.live.length > 0) {
       const moment = plan.live.shift()!;
@@ -820,11 +986,17 @@ export class RoomManager {
   private enterHeat(room: Room, phase: HeatPhase): void {
     this.clearTimers(room); room.phase = phase; room.currentHeat = phase; room.votes.clear(); room.pendingHeatDown = undefined;
     room.queue = []; room.pair = undefined; room.interlude = undefined;
+    // A twin only makes sense in the phase it was scheduled in: perception and
+    // reality must sit close together, or the room cannot feel the gap.
+    room.twins = []; room.twinPhase = undefined;
     // LIVE MOMENTS (spec §3): ~1 spotlight per phase from warmup on, ~1 verdict
     // per phase from spicy on. Both close the phase.
     room.plan = {
       phase,
-      slots: this.phaseSlots(phase),
+      // THE SECOND VOICE has guaranteed seats: every heat phase ends on two
+      // private questions, so the room always hears confessions even when the
+      // evidence floors leave no spare group slot to convert.
+      slots: [...this.phaseSlots(phase), ...(phase === "dare" ? [] : (["confess", "confess"] as RoundKind[]))],
       live: [
         ...(liveKindInPhase("spotlight", phase) ? (["spotlight"] as RoundKind[]) : []),
         ...(liveKindInPhase("verdict", phase) ? (["verdict"] as RoundKind[]) : []),
@@ -914,6 +1086,12 @@ export class RoomManager {
       round.targets = new Map(eligible.map(id => { const others = eligible.filter(x => x !== id); return [id, others[Math.max(0, room.roundIndex - 1) % others.length]!] as const; }));
       if (round.kind === "rating") round.trait = TRAITS[(room.roundIndex - 1) % TRAITS.length]!;
     }
+    // THE 50/50 bookkeeping: only question rounds move the balance. rating,
+    // ios and minigame are instruments; dares and live moments are not
+    // questions at all.
+    if (definition.styleEligible) {
+      room.styleServed = recordStyle(room.styleServed, round.kind === "confess" ? "confess" : "group");
+    }
     room.round = round; room.usedIds.add(definition.prompt.id); this.changed(room);
     this.eachSocket(room, (socket, player) => socket.emit("round", this.guard(this.roundView(round, player.id))));
     this.io.to(displayChannel(room.code)).emit("round", this.guard(this.displayView(room).round!));
@@ -947,6 +1125,7 @@ export class RoomManager {
         // Live moments. A bot cannot know whether it is the spotlight subject
         // (the cover round looks identical), so it always sends a short text —
         // exactly what the server expects from both sides of the moment.
+        case "confess": value = { kind: "confess", yes: room.rng() < 0.5 }; break;
         case "spotlight": value = { kind: "text", text: ["Just vibing, honestly.", "Watching the room.", "Thinking about food.", "Nothing, I swear."][rand(4)]! }; break;
         case "verdict": value = { kind: "pick", target: other }; break;
       }
@@ -1046,6 +1225,25 @@ export class RoomManager {
       }
     }
     const alias = (id: string | undefined): string => room.players.find((p) => p.id === id)?.alias ?? "Player";
+    if (round.kind === "confess") {
+      // THE SECOND VOICE. Secrecy rules are HARD:
+      //   warm  → counts only (no names, no hints);
+      //   spicy → YES answers attributed by alias; a NO is never named, ever.
+      // The payload is built from aliases only — a PlayerId never enters it.
+      const tier = confessTierFor(round.phase);
+      const answers = [...round.responses].flatMap(([id, value]) => value.kind === "confess"
+        ? [{ alias: alias(id), yes: value.yes, ...(value.note !== undefined ? { note: value.note } : {}) }]
+        : []);
+      const view = buildConfessReveal({ tier, of: room.players.length, answers });
+      const confessItems: NonNullable<RevealView["items"]> = [];
+      for (const entry of view.attributed ?? []) confessItems.push({ alias: entry.alias, text: entry.note ?? "Said yes." });
+      for (const note of view.notes ?? []) confessItems.push({ alias: note.alias ?? "Someone", text: note.text });
+      const holdMs = this.scale(room, this.options.revealHoldMs ?? REVEAL_HOLD_MS);
+      return {
+        roundId: round.id, kind: "confess", summary: confessSummary(view),
+        ...(confessItems.length > 0 ? { items: confessItems } : {}), confess: view, holdMs,
+      };
+    }
     if (round.kind === "spotlight") {
       // RAPID CAPTION WALL: the room's one-liners stack in submission order, and
       // the subject's own decoy answer lands LAST, biggest. Captions only — the
@@ -1271,6 +1469,14 @@ export class RoomManager {
     // Decoys DO ride the digest: pairing them with the captions is the joke.
     const publicLog = log.filter((r) => r.roundKind !== "debrief");
     try { digest = this.services.buildNightDigest(publicLog, meta); } catch { digest = fallbackServices.buildNightDigest(publicLog, meta); }
+    // THE PAYOFF — perception vs confession. The room's certainty about a
+    // person, next to how many people quietly said yes about themselves. The
+    // engine writes the line; it never exposes a no, in any wording.
+    let mismatches: ReturnType<typeof confessMismatches> = [];
+    try {
+      mismatches = confessMismatches(scoringLog, meta, room.twinLinks);
+      for (const mismatch of mismatches) if (!digest.pickTeasers.includes(mismatch.line)) digest.pickTeasers.push(mismatch.line);
+    } catch { mismatches = []; }
     try { decks = this.services.buildSecrets(results, digest, meta); if (!(decks instanceof Map)) throw new Error("Invalid decks"); }
     catch { decks = fallbackServices.buildSecrets(results, digest, meta); }
     // Store decks only on the room, so a deletion can synchronously purge them
@@ -1314,6 +1520,14 @@ export class RoomManager {
     let skeleton: FinaleSlide[];
     try { skeleton = this.services.buildSkeleton(publicResults, publicDigest, meta); if (!Array.isArray(skeleton)) throw new Error("Invalid skeleton"); }
     catch { skeleton = fallbackServices.buildSkeleton(publicResults, publicDigest, meta); }
+    // The mismatch is the best content in the game: the room was SURE, and the
+    // room also told the truth. It lands as a Group Announcement beat before
+    // the closing slide — counts and the room's own certainty, nothing else.
+    for (const mismatch of mismatches.slice(0, 1)) {
+      skeleton.splice(Math.max(0, skeleton.length - 1), 0, {
+        beat: "land", flavor: "group", title: "Perception and reality", body: mismatch.line,
+      });
+    }
     // A provider polishing public slides receives public material only. In particular,
     // the private map never leaves this process or becomes input to public copy.
     // Engine-written secret copy remains the safe, useful no-key fallback.
