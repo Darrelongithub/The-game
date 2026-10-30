@@ -1,0 +1,31 @@
+{
+  "name": "reveal-game",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "host": "npm run build && node host.mjs",
+    "start": "node host.mjs",
+    "build": "node scripts/build.mjs",
+    "selfcheck": "npx -y tsx scripts/selfcheck.ts",
+    "smoke": "npx tsx scripts/bots.ts",
+    "smoke:verified": "tsx scripts/verified-smoke.ts",
+    "test:components": "tsx --tsconfig apps/web/scripts/tsconfig.test.json scripts/test-components.mjs",
+    "typecheck": "node scripts/typecheck.mjs"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "8.5.32"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "jsdom": "^26.1.0",
+    "socket.io-client": "^4.8.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

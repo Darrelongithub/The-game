@@ -1,0 +1,25 @@
+{
+  "name": "@reveal/prompts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reveal Game — fallback prompt bank (code-first) + the two optional LLM lanes (Grok generation, Gemini analysis) + the deterministic filter/analysis layer.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./bank": "./src/bank/index.ts",
+    "./analyze": "./src/analyze.ts",
+    "./generate": "./src/generate.ts",
+    "./filter": "./src/filter.ts",
+    "./provider": "./src/provider.ts"
+  },
+  "scripts": {
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}
