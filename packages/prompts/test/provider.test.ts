@@ -233,7 +233,7 @@ test("pseudonyms only: aliases are scrubbed out of every outgoing payload", asyn
   const raw = mock.calls[0]!.raw;
   assert.equal(containsAlias(raw, ALIASES), false, "a real alias left the server");
   assert.match(raw, /someone in the room/);
-  assert.equal(redactAliases("Mo and mo again", ALIASES), "someone in the room and someone in the room again");
+  assert.equal(redactAliases("Mo and mo again", ALIASES), "Mo and mo again", "R22 deliberately skips aliases shorter than three characters");
   assert.equal(redactAliases("Zoe\u0308 is here", ["Zoë"]), "someone in the room is here", "NFD aliases are redacted after canonical Unicode normalization");
   assert.equal(containsAlias("Zoe\u0308 is here", ["Zoë"]), true);
 });

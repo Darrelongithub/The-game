@@ -92,8 +92,8 @@ test("tagBatch is capped at ONE tag call per room per night", async () => {
 test("tagBatch never sends aliases", async () => {
   const mock = mockFetch(() => geminiReply("[]"));
   const provider = makeProvider({ geminiApiKey: "k", fetchImpl: mock.fetchImpl });
-  await tagBatch(["Nadia said Mo was lying"], { room: "r", provider, aliases: ALIASES });
-  assert.doesNotMatch(mock.calls[0]!.raw, /Nadia|Mo was/);
+  await tagBatch(["Nadia said Tolu was lying"], { room: "r", provider, aliases: ALIASES });
+  assert.doesNotMatch(mock.calls[0]!.raw, /Nadia|Tolu was/);
   assert.match(mock.calls[0]!.raw, /someone in the room/);
 });
 
