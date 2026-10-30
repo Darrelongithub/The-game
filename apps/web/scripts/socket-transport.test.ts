@@ -34,10 +34,10 @@ test('socket transport coalesces resume, detaches visibility listener, and repor
     delete (globalThis as any).window; delete (globalThis as any).document;
     if (oldUrl === undefined) delete process.env.NEXT_PUBLIC_SERVER_URL; else process.env.NEXT_PUBLIC_SERVER_URL = oldUrl;
   });
-  const created = await transport.create('Host', { age: true, terms: true, revealOptIn: true });
+  const created = await transport.create('Host', { age: true, terms: true, revealOptIn: true }, { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" });
   assert.ok(created.ok && created.secret);
   transport.resume(); transport.resume(); fakeDocument.dispatchEvent(new Event('visibilitychange'));
-  await waitFor(() => joins === 1 && JSON.parse(storage.get('reveal.session') ?? '{}').secret !== created.secret, 'resume rotation');
+  await waitFor(() => joins === 1 && JSON.parse(storage.get('reveal.session') ?? '{}').secret === created.secret, 'stable resume credential');
   await new Promise(resolve => setTimeout(resolve, 40));
   assert.equal(joins, 1); assert.deepEqual(errors, []);
   const rejected = await transport.darePass({ roundId: 'not-a-live-round', reason: 'Not right now.' });

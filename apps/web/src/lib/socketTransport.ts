@@ -16,6 +16,7 @@ import type {
   DarePassRequest,
   JoinReply,
   JoinRequest,
+  ProfileAnswers,
   PlayerId,
   RoomCode,
   ServerToClientEvents,
@@ -156,10 +157,10 @@ export class SocketTransport implements Transport {
   }
 
   // ----------------------------------------------------------------- API
-  async create(alias: string, consent: Consent): Promise<JoinReply & { code?: RoomCode }> {
+  async create(alias: string, consent: Consent, profile: ProfileAnswers): Promise<JoinReply & { code?: RoomCode }> {
     const socket = await this.ready();
     const reply = await new Promise<JoinReply & { code?: RoomCode }>((resolve) => {
-      socket.emit("create", { alias, consent }, (r) => resolve(r));
+      socket.emit("create", { alias, consent, profile }, (r) => resolve(r));
     });
     this.remember(reply, alias);
     return reply;

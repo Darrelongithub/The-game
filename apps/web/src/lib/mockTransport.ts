@@ -21,6 +21,7 @@ import type {
   InterludeView,
   JoinReply,
   JoinRequest,
+  ProfileAnswers,
   PlayerId,
   PlayerView,
   Phase,
@@ -196,7 +197,7 @@ export class MockTransport implements Transport {
   }
 
   // ---------------------------------------------------------------- join
-  async create(alias: string, consent: Consent): Promise<JoinReply & { code?: RoomCode }> {
+  async create(alias: string, consent: Consent, _profile: ProfileAnswers): Promise<JoinReply & { code?: RoomCode }> {
     if (!isAlias(alias)) return { ok: false, error: "Alias must be 2–14 characters." };
     if (!consent.age) return { ok: false, error: "18+ only. This room is adults." };
     if (!consent.terms) return { ok: false, error: "You have to accept the rules." };
@@ -225,6 +226,7 @@ export class MockTransport implements Transport {
   }
 
   async join(req: JoinRequest): Promise<JoinReply> {
+    if (!req.resume && !req.profile) return { ok: false, error: "Complete your adult profile." };
     if (req.resume) return this.resumeReply(req.resume.playerId, req.resume.secret);
     if (!isAlias(req.alias)) return { ok: false, error: "Alias must be 2–14 characters." };
     if (!req.consent.age) return { ok: false, error: "18+ only. This room is adults." };

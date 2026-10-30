@@ -36,6 +36,7 @@ g.window = { sessionStorage: store, location: { origin: "http://localhost" } };
 // ---------------------------------------------------------------- assertions
 let pass = 0;
 const failures: string[] = [];
+const profile = { age: 28, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" as const };
 const ok = (name: string, cond: boolean, extra = "") => {
   if (cond) { pass++; return; }
   failures.push(`${name}${extra ? " — " + extra : ""}`);
@@ -141,17 +142,17 @@ transport.setHandlers({
 });
 
 async function main() {
-  const created = await transport.create("Ada", { age: true, terms: true, revealOptIn: true });
+  const created = await transport.create("Ada", { age: true, terms: true, revealOptIn: true }, profile);
   ok("create returns ok + code", created.ok === true && created.code === "MOCK", JSON.stringify(created).slice(0, 120));
   ok("create returns a session secret", Boolean(created.secret));
   ok("create returns a lobby snapshot", created.state?.phase === "lobby");
 
-  const badAlias = await transport.create("A", { age: true, terms: true, revealOptIn: true });
+  const badAlias = await transport.create("A", { age: true, terms: true, revealOptIn: true }, profile);
   ok("short alias refused", badAlias.ok === false);
-  const noAge = await transport.create("Ada", { age: false, terms: true, revealOptIn: true });
+  const noAge = await transport.create("Ada", { age: false, terms: true, revealOptIn: true }, profile);
   ok("18+ gate enforced server-side too", noAge.ok === false);
 
-  const early = await transport.create("Ada", { age: true, terms: true, revealOptIn: true });
+  const early = await transport.create("Ada", { age: true, terms: true, revealOptIn: true }, profile);
   ok("re-create ok", early.ok === true);
   transport.start();
   ok("start refused below MIN_PLAYERS", lastState?.phase === "lobby");

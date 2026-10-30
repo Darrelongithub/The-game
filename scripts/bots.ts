@@ -29,6 +29,7 @@ const count = Number(process.env.SMOKE_BOTS ?? '5');
 const timeoutMs = Number(process.env.SMOKE_TIMEOUT_MS ?? '480000');
 const oraclePath = process.env.SMOKE_ORACLE;
 const consent = { age: true, terms: true, revealOptIn: true };
+const profile = { age: 28, relationship: 'single' as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: 'vibes' as const };
 const bots: Bot[] = [];
 const phases = new Set<Phase>(['lobby']);
 const pending = new Set<Promise<void>>();
@@ -83,11 +84,11 @@ function install(bot: Bot, socket: GameSocket): void {
   socket.on('error', error => { errors.push(`${bot.alias}: ${error.code}: ${error.message}`); });
 }
 async function create(bot: Bot): Promise<JoinReply & { code?: string }> {
-  return await bot.socket.timeout(10000).emitWithAck('create', { alias: bot.alias, consent });
+  return await bot.socket.timeout(10000).emitWithAck('create', { alias: bot.alias, consent, profile });
 }
 async function join(bot: Bot, resume: boolean): Promise<JoinReply> {
   return await bot.socket.timeout(10000).emitWithAck('join', {
-    roomCode: code, alias: bot.alias, consent,
+    roomCode: code, alias: bot.alias, consent, profile,
     ...(resume ? { resume: { playerId: bot.id, secret: bot.secret } } : {}),
   });
 }
@@ -118,8 +119,8 @@ function valueFor(bot: Bot, round: RoundView): ResponseValue {
     case 'pick': return { kind: 'pick', target: target.id };
     case 'text': case 'debrief': return { kind: 'text', text: 'We laughed and agreed to keep the group chat alive.' };
     case 'shout': return { kind: 'shout', word: 'chaos' };
-    case 'rating': return { kind: 'rating', trait: 'loyalty', about: index % 2 ? target.id : 'self', value: 7 };
-    case 'ios': return { kind: 'ios', about: target.id, value: 5 };
+    case 'rating': return { kind: 'rating', trait: round.trait!, about: round.about!, value: 7 };
+    case 'ios': return { kind: 'ios', about: round.about!, value: 5 };
     case 'minigame': return { kind: 'minigame', score: 30 + index };
     case 'dare': case 'pair_dare': return { kind: 'dare', status: 'done' };
   }

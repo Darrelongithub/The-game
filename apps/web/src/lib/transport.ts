@@ -8,6 +8,7 @@
 // The UI only ever sees this interface, the frozen contracts, and nothing else.
 import type {
   Consent,
+  ProfileAnswers,
   DarePassRequest,
   FinaleView,
   InterludeView,
@@ -41,7 +42,7 @@ export interface TransportHandlers {
 export interface Transport {
   readonly mode: "socket" | "mock";
   setHandlers(handlers: TransportHandlers): void;
-  create(alias: string, consent: Consent): Promise<JoinReply & { code?: RoomCode }>;
+  create(alias: string, consent: Consent, profile: ProfileAnswers): Promise<JoinReply & { code?: RoomCode }>;
   join(req: JoinRequest): Promise<JoinReply>;
   submit(req: SubmitRequest): Promise<{ ok: boolean; error?: string }>;
   darePass(req: DarePassRequest): Promise<{ ok: boolean; error?: string }> | void;

@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Consent,
+  ProfileAnswers,
   FinaleView,
   InterludeView,
   JoinReply,
@@ -38,8 +39,8 @@ export interface UseRoom {
   secrets: SecretDeckView | null;
   mustAnswer: boolean;
   /** lobby actions */
-  createRoom: (alias: string, consent: Consent) => Promise<JoinReply & { code?: RoomCode }>;
-  joinRoom: (code: RoomCode, alias: string, consent: Consent) => Promise<JoinReply>;
+  createRoom: (alias: string, consent: Consent, profile: ProfileAnswers) => Promise<JoinReply & { code?: RoomCode }>;
+  joinRoom: (code: RoomCode, alias: string, consent: Consent, profile: ProfileAnswers) => Promise<JoinReply>;
   start: () => void;
   addBot: () => void;
   skipRound: () => void;
@@ -173,11 +174,11 @@ export function useRoom(): UseRoom {
     setHasSession(false);
   }, []);
 
-  const createRoom = useCallback(async (alias: string, consent: Consent) => {
+  const createRoom = useCallback(async (alias: string, consent: Consent, profile: ProfileAnswers) => {
     const t = transportRef.current;
     if (!t) return { ok: false, error: "Not connected yet." } satisfies JoinReply;
     setError(null);
-    const reply = await t.create(alias, consent);
+    const reply = await t.create(alias, consent, profile);
     if (reply.ok && reply.you) {
       setYou(reply.you);
       if (reply.state) setView(reply.state);
@@ -193,11 +194,11 @@ export function useRoom(): UseRoom {
     return reply;
   }, []);
 
-  const joinRoom = useCallback(async (roomCode: RoomCode, alias: string, consent: Consent) => {
+  const joinRoom = useCallback(async (roomCode: RoomCode, alias: string, consent: Consent, profile: ProfileAnswers) => {
     const t = transportRef.current;
     if (!t) return { ok: false, error: "Not connected yet." } satisfies JoinReply;
     setError(null);
-    const reply = await t.join({ roomCode, alias, consent });
+    const reply = await t.join({ roomCode, alias, consent, profile });
     if (reply.ok && reply.you) {
       setYou(reply.you);
       if (reply.state) setView(reply.state);
