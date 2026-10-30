@@ -15,14 +15,14 @@ const base = {
   room: "room-1",
 };
 
-test("no key → lane stays silent, returns [] and makes zero calls", async () => {
-  const mock = mockFetch(() => grokReply("[]"));
+test("local service unavailable → empty batch for bank fallback", async () => {
+  const mock = mockFetch(() => { throw new Error("Ollama offline"); });
   const provider = makeProvider({ fetchImpl: mock.fetchImpl });
   const report = await generateBatchReport({ ...base, provider });
   assert.deepEqual(report.prompts, []);
-  assert.equal(report.reason, "no-key");
-  assert.equal(report.called, false);
-  assert.equal(mock.calls.length, 0);
+  assert.equal(report.reason, "network");
+  assert.equal(report.called, true);
+  assert.equal(mock.calls.length, 1);
 });
 
 test("ONE batched call produces filtered, contract-shaped prompts", async () => {

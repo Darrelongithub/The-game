@@ -281,7 +281,9 @@ now 420s.
 
 ## R1–R20 remediation carry-forward — adapted to current `main`
 
-This section records the R1–R20 status after reconciling with the latest `main` (the ROUND 4 report above is historical). The merge adapts the remediation alongside main's reveal-ready gate and demo-room flow, preserving both sets of behavior rather than choosing one side wholesale. The merged contract, server, UI, and tests were revalidated together.
+This section records the R1–R20 branch status (the ROUND 4 report above is historical). **The branch is now reconciled with `main`.** The ROUND 4 ready-gate and demo-room features were adapted together with the R1–R20 remediation instead of taking either side wholesale: the shared contract is the additive union (`profile`/`role`/structured rating intent **plus** `ready`/`demo`/`impersonatedBy`), the server keeps the ready gate and demo seats while still requiring the 18+ profile for an ordinary room, the web entry collects the profile and consents and also offers the demo-room toggle, rating/IOS keeps the server-assigned trait/target (no silent client defaults), and narrator reveals stay Grok-only (Gemini is analysis-only).
+
+Re-validated after the merge (Node 22.22.3): `selfcheck` 36/36; engine 40/40; prompts 104/104; narrator 81/81; server 68/68; web typecheck + 39 SSR checks + 56 mock-flow checks + UI/socket/transport/mock/privacy regressions all passing; jsdom component suite 151/151 (including the ROUND 4 ready-screen and demo-console checks); production build, `bundle:check` (player 145.2 KiB / 150 KiB; display 115.7 KiB / 120 KiB) and `npm audit --omit=dev` (0 vulnerabilities) pass; `smoke:verified`, `smoke:demo` (42 round events, 12 finale slides) and the jsdom export smoke pass against the built server. The real-browser `test:browser` still needs a Chromium executable, and the physical-device/LAN/live-provider matrix remains outstanding (see below).
 
 ### Remediation and regression status
 
