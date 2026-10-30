@@ -83,12 +83,13 @@ gameplay loop.
 
 | lane | key | job | model |
 |---|---|---|---|
-| Grok | `XAI_API_KEY` | prompt generation + one validated reveal polish call | `PROVIDERS.grok.generate` (override: `XAI_MODEL`) |
+| Local OpenAI-compatible (Ollama) | none | prompt generation only | `GEN_MODEL` (default `dolphin-mistral`; legacy fallback `XAI_MODEL`) |
+| Grok | `XAI_API_KEY` | existing validated reveal polish call only (unchanged) | `PROVIDERS.grok.generate` (override: `XAI_MODEL`) |
 | Gemini | `GEMINI_API_KEY` | tagging and debrief analysis only; no reveal path | `PROVIDERS.gemini.tag/analyze` |
 
-Both spend from one `CallGuard` per room: total ≤ `MAX_PROVIDER_CALLS_PER_NIGHT`
-(8) with batching slots `generate 4 / tag 1 / analyze 1 / reveal 1`. Missing key →
-that lane returns `no-key` and the network is never touched. 8 s
+All spend from one `CallGuard` per room: total ≤ `MAX_PROVIDER_CALLS_PER_NIGHT`
+(8) with batching slots `generate 4 / tag 1 / analyze 1 / reveal 1`. Missing cloud key →
+that cloud lane returns `no-key` and the network is never touched. 8 s
 `AbortController` timeout. Refusal / 429 / timeout / garbage → the caller falls
 back to the bank or to code, silently.
 
@@ -102,3 +103,15 @@ npm run typecheck                         # tsc --noEmit, strict
 
 Every provider call in the suite goes through a mock fetch; the no-key night
 test asserts that `globalThis.fetch` is never called at all.
+
+### Local prompt generation
+
+On the same laptop as the Node game server, start Ollama and run
+`ollama pull dolphin-mistral`. `GEN_BASE` defaults to
+`http://localhost:11434/v1`; `GEN_MODEL` defaults to `dolphin-mistral`.
+An explicit `GEN_MODEL` wins over the legacy `XAI_MODEL` override. Blank values
+use defaults. Generation sends no Authorization header, even if an xAI key is
+configured. Phones only talk to the LAN game server, never directly to Ollama.
+No cloud/key/internet is needed for generation after the model is downloaded.
+If Ollama is stopped, the model is missing, or output is invalid, the existing
+bank-first fallback continues the night. Analysis and reveal routing are unchanged.

@@ -17,24 +17,23 @@ import { ALIASES, geminiReply, grokReply, hangingFetch, makeProvider, mockFetch 
 
 const messages = [{ role: "user" as const, content: "Give me 3 prompts." }];
 
-test("no keys: both lanes are silent and never touch the network", async () => {
+test("no keys: local generation works while cloud lanes stay silent", async () => {
   const mock = mockFetch(() => grokReply("[]"));
   const provider = makeProvider({ fetchImpl: mock.fetchImpl });
-  assert.equal(provider.canGenerate(), false);
+  assert.equal(provider.canGenerate(), true);
   assert.equal(provider.canAnalyze(), false);
-  assert.deepEqual(provider.lanes(), { grok: false, gemini: false });
+  assert.deepEqual(provider.lanes(), { grok: true, gemini: false });
 
   const grok = await provider.grok({ room: "r1", messages });
-  assert.equal(grok.ok, false);
-  assert.equal(grok.reason, "no-key");
+  assert.equal(grok.ok, true);
   const gem = await provider.gemini({ room: "r1", purpose: "tag", model: "x", user: "hi" });
   assert.equal(gem.ok, false);
   assert.equal(gem.reason, "no-key");
-  assert.equal(mock.calls.length, 0);
-  assert.equal(provider.guard.remaining("r1"), MAX_PROVIDER_CALLS_PER_NIGHT);
+  assert.equal(mock.calls.length, 1);
+  assert.equal(provider.guard.remaining("r1"), MAX_PROVIDER_CALLS_PER_NIGHT - 1);
 });
 
-test("grok lane: OpenAI-compatible request with Bearer key, JSON mode, temp 0.9", async () => {
+test("local generation: OpenAI-compatible request without Bearer key, JSON mode, temp 0.9", async () => {
   const mock = mockFetch(() => grokReply('{"prompts":[]}'));
   const provider = makeProvider({ xaiApiKey: "xai-test", fetchImpl: mock.fetchImpl });
   const result = await provider.grok({ room: "r1", messages });
@@ -43,9 +42,9 @@ test("grok lane: OpenAI-compatible request with Bearer key, JSON mode, temp 0.9"
   assert.equal(result.text, '{"prompts":[]}');
   assert.equal(mock.calls.length, 1);
   const call = mock.calls[0]!;
-  assert.match(call.url, /^https:\/\/api\.x\.ai\/v1\/chat\/completions$/);
-  assert.equal(call.headers.authorization, "Bearer xai-test");
-  assert.equal(call.body.model, "grok-4-1-fast");
+  assert.equal(call.url, "http://localhost:11434/v1/chat/completions");
+  assert.equal(call.headers.authorization, undefined);
+  assert.equal(call.body.model, "dolphin-mistral");
   assert.equal(call.body.temperature, 0.9);
   assert.deepEqual(call.body.response_format, { type: "json_object" });
   assert.equal(provider.guard.count("r1"), 1);
@@ -157,8 +156,8 @@ test("gemini safety retry: a rejected threshold falls back to the literal contra
   assert.equal(provider.guard.count("r"), 1);
 });
 
-test("LANE INDEPENDENCE: Grok key only → zero Gemini calls, and vice versa", async () => {
-  const mock = mockFetch((call) => (call.url.includes("x.ai") ? grokReply("[]") : geminiReply("[]")));
+test("LANE INDEPENDENCE: local generation does not require or enable Google analysis", async () => {
+  const mock = mockFetch((call) => (!call.url.includes("generativelanguage") ? grokReply("[]") : geminiReply("[]")));
   const grokOnly = makeProvider({ xaiApiKey: "k", fetchImpl: mock.fetchImpl });
   assert.equal(grokOnly.canGenerate(), true);
   assert.equal(grokOnly.canAnalyze(), false);
@@ -170,10 +169,10 @@ test("LANE INDEPENDENCE: Grok key only → zero Gemini calls, and vice versa", a
   mock.calls.length = 0;
   const gemOnly = makeProvider({ geminiApiKey: "k", fetchImpl: mock.fetchImpl });
   assert.equal(gemOnly.canAnalyze(), true);
-  assert.equal(gemOnly.canGenerate(), false);
+  assert.equal(gemOnly.canGenerate(), true);
   await gemOnly.gemini({ room: "r", purpose: "tag", model: "m", user: "x" });
   const grok = await gemOnly.grok({ room: "r", messages });
-  assert.equal(grok.reason, "no-key");
+  assert.equal(grok.ok, true);
   assert.equal(mock.calls.filter((c) => c.url.includes("x.ai")).length, 0);
 });
 
@@ -269,5 +268,30 @@ test("Gemini reveal purpose is rejected without making a network request", async
   const result = await provider.gemini({ room: "finale-room", purpose: "reveal", model: "gemini-test", user: "narrate" });
   assert.equal(result.ok, false);
   assert.equal(result.reason, "disabled");
+  assert.equal(mock.calls.length, 0);
+});
+
+test("GEN config takes precedence, trims blanks/slashes, and never changes reveal config", async () => {
+  const mock = mockFetch(() => grokReply("[]"));
+  const provider = makeProvider({
+    env: { GEN_BASE: " http://localhost:11434/v1/// ", GEN_MODEL: " local-model ", XAI_MODEL: "legacy-model" },
+    xaiApiKey: "cloud-reveal-key", fetchImpl: mock.fetchImpl,
+  });
+  await provider.grok({ room: "config", messages });
+  await provider.grok({ room: "config", purpose: "reveal", messages });
+  assert.equal(mock.calls[0]!.url, "http://localhost:11434/v1/chat/completions");
+  assert.equal(mock.calls[0]!.body.model, "local-model");
+  assert.equal(mock.calls[0]!.headers.authorization, undefined);
+  assert.equal(mock.calls[1]!.url, "https://api.x.ai/v1/chat/completions");
+  assert.equal(mock.calls[1]!.body.model, "legacy-model");
+  assert.equal(mock.calls[1]!.headers.authorization, "Bearer cloud-reveal-key");
+  const defaults = new Provider({ env: { GEN_BASE: " ", GEN_MODEL: " " } });
+  assert.equal(defaults.modelFor("grok"), "dolphin-mistral");
+});
+
+test("no keys: reveal remains disabled even with local generation enabled", async () => {
+  const mock = mockFetch(() => grokReply("[]"));
+  const provider = makeProvider({ fetchImpl: mock.fetchImpl });
+  assert.equal((await provider.grok({ room: "reveal", purpose: "reveal", messages })).reason, "no-key");
   assert.equal(mock.calls.length, 0);
 });
