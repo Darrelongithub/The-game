@@ -56,3 +56,6 @@ Completion regression results:
 
 No additional contract requests or dependencies. Real host-laptop inference
 remains the only environment-specific verification not performed here.
+
+- Generation register and phase-preferred runtime bank examples added; prompt regression tests and prompts suite pass.
+- Gemini analyze default changed to gemini-3.5-flash-lite; resolver and request regressions pass, selfcheck 36/36.

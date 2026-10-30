@@ -4,6 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { generateBatch, generateBatchReport } from "../src/index.ts";
+import { BANK, BANK_PHASES, RAW_BANK } from "../src/bank/index.ts";
 import { Provider, containsAlias } from "../src/provider.ts";
 import { ALIASES, grokReply, hangingFetch, makeDigest, makeProvider, mockFetch, candidate } from "./helpers.ts";
 
@@ -235,6 +236,36 @@ test("the system prompt carries the §6 rules and the roster size", async () => 
   assert.match(system, /20-160 characters/);
   assert.match(system, /most likely to/);
   assert.match(system, /minors/);
+});
+
+test("system register and runtime bank examples match each phase", async () => {
+  for (const phase of BANK_PHASES) {
+    const mock = mockFetch(() => grokReply("[]"));
+    const provider = makeProvider({ xaiApiKey: "k", fetchImpl: mock.fetchImpl });
+    await generateBatchReport({ ...base, phase, provider });
+    const messages = mock.calls[0]!.body.messages as Array<{ role: string; content: string }>;
+    const system = messages.find((m) => m.role === "system")!.content;
+    for (const phrase of ["18+", "CLOSE FRIENDS", "one room", "phones", "GROUP about the GROUP", "flirty", "teasing", "roast-your-friends", "inside-joke", "one sentence", "No disclaimers", "no moralizing", "{P1}..{Pn}"]) {
+      assert.ok(system.includes(phrase), `missing register: ${phrase}`);
+    }
+    const examples = system.split("Bank examples for inspiration (do not copy):\n")[1]!.split("\nReturn ONE JSON array")[0]!.split("\n").map((line) => line.slice(4));
+    assert.ok(examples.length >= 4 && examples.length <= 6);
+    assert.ok(examples.every((text) => RAW_BANK.phases[phase].some((row) => row.text === text)), `wrong-phase or non-bank seed in ${phase}`);
+  }
+});
+
+test("examples are loaded from the bank at generation time", async () => {
+  const seed = BANK.find((p) => p.phase === "warmup")!;
+  const original = seed.text;
+  seed.text = "A temporary distinctive bank seed about the friends in this room?";
+  try {
+    const mock = mockFetch(() => grokReply("[]"));
+    await generateBatchReport({ ...base, phase: "warmup", provider: makeProvider({ xaiApiKey: "k", fetchImpl: mock.fetchImpl }) });
+    const messages = mock.calls[0]!.body.messages as Array<{ role: string; content: string }>;
+    assert.ok(messages.find((m) => m.role === "system")!.content.includes(seed.text));
+  } finally {
+    seed.text = original;
+  }
 });
 
 test("a `{prompts:[…]}` wrapper is accepted as well as a bare array", async () => {

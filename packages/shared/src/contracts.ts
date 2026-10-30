@@ -473,7 +473,7 @@ export const PROVIDERS = {
         // Analysis-only lane. Batched tags and debrief similarity are local
         // analysis aids; finale copy is deterministic/Grok and never Gemini.
         tag: "gemini-3.5-flash-lite",       // cheap classification, one batch call
-        analyze: "gemini-3.1-pro-preview",  // pair-dare debrief judgment
+        analyze: "gemini-3.5-flash-lite",    // pair-dare debrief judgment
     },
 } as const;
 

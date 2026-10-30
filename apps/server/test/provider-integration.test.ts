@@ -89,7 +89,8 @@ test("real integration filters generated prompts and sends only pseudonymous pub
   };
   const { connect, dir } = await setup(t, fakeFetch, services);
   const clients = await Promise.all([connect(), connect(), connect(), connect()]);
-  const aliases = ["Alice.*", "Brian", "Chao", "Zoë"];
+  // Keep aliases distinct from ordinary bank words such as "chaos".
+  const aliases = ["Alice.*", "Brian", "ChaoZed", "Zoë"];
   const first = await create(clients[0]!, aliases[0]!);
   const replies = [first];
   for (let i = 1; i < clients.length; i++) replies.push(await joinRoom(clients[i]!, first.code, aliases[i]!));
