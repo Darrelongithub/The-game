@@ -37,7 +37,7 @@ export interface Pseudonyms {
   byAlias: ReadonlyMap<string, string>;
 }
 
-export const normAlias = (alias: string): string => alias.trim().toLowerCase();
+export const normAlias = (alias: string): string => alias.trim().normalize("NFC").toLowerCase();
 
 /** Deterministic, ICU-independent natural compare (p2 < p10). */
 export function naturalCompare(a: string, b: string): number {
@@ -135,6 +135,47 @@ const escapeRegExp = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
+ * Replace canonical-equivalent spellings too (e.g. composed and decomposed
+ * accents). Match on an NFC copy, but map matches back to original grapheme
+ * ranges so unrelated verbatim text is never silently normalized.
+ */
+export function replaceCanonicalAliases(
+  text: string,
+  replacements: readonly { alias: string; pseudo: string }[],
+): string {
+  const names = replacements
+    .map(({ alias, pseudo }) => ({ alias: normAlias(alias).normalize("NFC"), pseudo }))
+    .filter(({ alias }) => alias.length > 0)
+    .sort((a, b) => b.alias.length - a.alias.length);
+  if (!names.length || !text) return text;
+  // Capture which alternative matched instead of looking it up by lowercased
+  // text: Unicode case-insensitive matches (e.g. Greek final sigma) do not
+  // always have identical lowercase strings.
+  const pattern = new RegExp(names.map(({ alias }) => `(${escapeRegExp(alias)})`).join("|"), "giu");
+  let normalized = "";
+  const starts: number[] = [], ends: number[] = [];
+  const segments = new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text);
+  for (const { segment, index } of segments) {
+    const canonical = segment.normalize("NFC").toLowerCase().normalize("NFC");
+    normalized += canonical;
+    for (let i = 0; i < canonical.length; i++) {
+      starts.push(index);
+      ends.push(index + segment.length);
+    }
+  }
+  let cursor = 0, output = "";
+  for (const match of normalized.matchAll(pattern)) {
+    const start = starts[match.index], end = ends[match.index + match[0].length - 1];
+    if (start === undefined || end === undefined || start < cursor) continue;
+    const alternative = match.slice(1).findIndex((value) => value !== undefined);
+    if (alternative < 0) continue;
+    output += text.slice(cursor, start) + names[alternative]!.pseudo;
+    cursor = end;
+  }
+  return output + text.slice(cursor);
+}
+
+/**
  * Replace real aliases inside free text (player-typed quotes) with their
  * pseudonym before anything is sent to a provider. Unknown aliases cannot be
  * detected without a roster — the server should always pass one.
@@ -148,14 +189,10 @@ export function scrubAliases(
   const pairs = [...ps.byAlias.entries()]
     .filter(([alias]) => alias.length >= 2)
     .sort((a, b) => b[0].length - a[0].length);
-  let out = text;
-  for (const [alias, token] of pairs) {
-    out = out.replace(
-      new RegExp(`(?<![\\w])${escapeRegExp(alias)}(?![\\w])`, "gi"),
-      token,
-    );
-  }
-  return out;
+  if (pairs.length === 0) return text;
+  // One longest-first pass prevents a newly substituted pseudonym from being
+  // mistaken for another alias. Include substrings and Unicode equivalents.
+  return replaceCanonicalAliases(text, pairs.map(([alias, pseudo]) => ({ alias, pseudo })));
 }
 
 /**

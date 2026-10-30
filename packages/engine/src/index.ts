@@ -13,4 +13,4 @@ export { buildSecrets } from "./secrets.ts";
 // Exposed for tuning, tests and Agent Z's hand-verification:
 export { maximumWeightMatching, constrainedMatching, type Matching } from "./matching.ts";
 export { mulberry32 } from "./rng.ts";
-export { ENGINE_TUNING, logRecordId, tokenJaccard } from "./internal.ts";
+export { ENGINE_TUNING, jokerNominationWeights, logRecordId, tokenJaccard } from "./internal.ts";

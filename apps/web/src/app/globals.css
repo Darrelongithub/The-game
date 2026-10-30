@@ -3,21 +3,21 @@
 @tailwind utilities;
 
 :root {
-  --bg-base: #0d0617;
-  --purple-primary: #8b2fe0;
-  --purple-deep: #4c1d95;
-  --blue-secondary: #2f5fe0;
-  --blue-glow: #3b82f6;
-  --lime-accent: #b6ff3c;
+  --bg-base: #100019;
+  --purple-primary: #9f2cd4;
+  --purple-deep: #4b1266;
+  --blue-secondary: #cf2ba9;
+  --blue-glow: #d988ff;
+  --lime-accent: #efb4ff;
   --white-text: #f5f3ff;
   --muted-text: rgba(245, 243, 255, 0.65);
 
   /* game layer (spec §12): dare phase + "most toxic" moments */
   --red-alert: #ff4d6d;
   /* heat mapping — value lives in a var so the whole shell can re-skin per phase */
-  --heat-warmup: #3b82f6;
-  --heat-spicy: #b6ff3c;
-  --heat-deep: #8b2fe0;
+  --heat-warmup: #d9a6ff;
+  --heat-spicy: #f0a8e6;
+  --heat-deep: #a14ce3;
   --heat-dare: #ff4d6d;
   --heat-current: var(--heat-warmup);
 
@@ -78,8 +78,8 @@ h1, h2, h3, .font-display {
 /* Glass card base — reused everywhere */
 .glass-card {
   background: linear-gradient(145deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%); /* iOS Safari requires prefix */
+  backdrop-filter: blur(12px) saturate(125%);
+  -webkit-backdrop-filter: blur(12px) saturate(125%); /* iOS Safari requires prefix */
   border: 1px solid rgba(255,255,255,0.12);
   border-top: 1px solid rgba(255,255,255,0.25);
   box-shadow:
@@ -91,8 +91,9 @@ h1, h2, h3, .font-display {
 /* Perf: lower-end Android chokes on heavy blur. Reduce it there. */
 @media (max-width: 768px) {
   .glass-card {
-    backdrop-filter: blur(14px) saturate(130%);
-    -webkit-backdrop-filter: blur(14px) saturate(130%);
+    background: linear-gradient(145deg, rgba(47,18,58,.88), rgba(23,8,31,.92));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
   .blob {
     filter: blur(50px); /* cheaper blur radius on mobile GPUs */
@@ -152,6 +153,37 @@ h1, h2, h3, .font-display {
 }
 .field:focus {
   outline: none;
-  border-color: rgba(182, 255, 60, 0.6);
-  box-shadow: 0 0 0 3px rgba(182, 255, 60, 0.12);
+  border-color: rgba(239, 180, 255, 0.8);
+  box-shadow: 0 0 0 3px rgba(239, 180, 255, 0.15);
 }
+
+
+/* Purple folds stay in a single composited layer instead of three moving blur filters. */
+.ambient-background {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(16,0,25,.28), rgba(16,0,25,.12)),
+    url('/purple-flow.webp') center bottom / cover no-repeat, var(--bg-base);
+}
+
+.flame-mark { position: relative; display: grid; place-items: center; flex: none; }
+.flame-glow {
+  position: absolute; inset: 12%; border-radius: 50%;
+  background: radial-gradient(circle, rgba(219,50,214,.28), rgba(143,34,184,.09) 52%, transparent 74%);
+  transform: scale(1.7);
+}
+.flame-shape { position: relative; transform-origin: 50% 88%; animation: flame-flicker 2.8s ease-in-out infinite; }
+@keyframes flame-flicker {
+  0%, 100% { transform: rotate(-2deg) scale(1); }
+  45% { transform: rotate(2deg) scale(.97, 1.04); }
+  70% { transform: rotate(-1deg) scale(1.02, .98); }
+}
+
+/* The question stays readable immediately; the subtle entrance never blocks taps. */
+.question-arrival, .answer-arrival { animation: content-arrival .35s ease-out both; }
+.question-arrival { display: inline-block; }
+.answer-button { transition: transform .13s ease, opacity .13s ease, box-shadow .13s ease; }
+.answer-button:not(:disabled):active { transform: scale(.97); }
+@keyframes content-arrival { from { opacity: .6; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }

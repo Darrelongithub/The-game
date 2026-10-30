@@ -3,6 +3,7 @@
 // network, no Date.now(), no unseeded randomness anywhere in this package.
 import {
   CONFIDENCE_RULES,
+  JOKER_GUARD,
   MIN_PLAYERS,
   pseudonym,
   type Confidence,
@@ -139,6 +140,25 @@ export const getPicks = (log: readonly LogRecord[]): PickRec[] => {
   return out;
 };
 
+/** Exact per-picker weights used by toxic scoring, also observable in tests. */
+export function jokerNominationWeights(log: readonly LogRecord[], ids: readonly PlayerId[]): Map<PlayerId, number> {
+  const pickerTargets = new Map<PlayerId, Map<PlayerId, number>>();
+  for (const p of getPicks(log)) {
+    let targets = pickerTargets.get(p.picker);
+    if (!targets) { targets = new Map(); pickerTargets.set(p.picker, targets); }
+    targets.set(p.target, (targets.get(p.target) ?? 0) + 1);
+  }
+  const weights = new Map<PlayerId, number>();
+  for (const id of ids) {
+    const targets = pickerTargets.get(id);
+    const counts = targets ? [...targets.values()] : [];
+    const total = counts.reduce((sum, count) => sum + count, 0);
+    const maxShare = total ? Math.max(...counts) / total : 0;
+    weights.set(id, maxShare > JOKER_GUARD.sameTargetShare ? JOKER_GUARD.downweight : 1);
+  }
+  return weights;
+}
+
 /**
  * Pooled directed-pick rate between a pair for a coding filter:
  * (a→b hits + b→a hits) / (a's filtered picks + b's filtered picks).
@@ -248,7 +268,7 @@ export function buildIosIndex(log: readonly LogRecord[]): Map<PlayerId, Map<Play
 // ---------- debrief similarity (token-Jaccard is PRIMARY, spec §5) ----------
 
 export const tokenize = (text: string): Set<string> =>
-  new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 0));
+  new Set(text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length > 0));
 
 /** Jaccard over lowercase alphanumeric token sets. Both empty → 0.5 (unknown). */
 export function tokenJaccard(a: string, b: string): number {

@@ -68,15 +68,20 @@ substitute for deleting room logs.
 
 ## External smoke bots
 
-Start the integrated game first in a separate terminal with `npm run host` or
-`npm start`, then:
+For a self-contained, synthetic local smoke test with no provider keys, run:
 
 ```sh
-npm run smoke
+npm run smoke:oracle
 ```
 
-The default is five external Socket.IO players at `http://localhost:3001`.
-For a different server/count/timeout:
+This starts an isolated server on a loopback port with a private temporary data
+folder, runs the unchanged five-player smoke test with an independent server-side
+oracle, and removes the files afterward. Do not use this fixture with real players.
+
+To target a separately started server, first run `npm run host` or `npm start`
+and then supply a suitable private oracle as described below. The default is
+five external Socket.IO players at `http://localhost:3001`; for a different
+server/count/timeout:
 
 ```sh
 SMOKE_URL=http://localhost:3001 SMOKE_BOTS=5 SMOKE_TIMEOUT_MS=480000 npm run smoke
@@ -92,11 +97,13 @@ SMOKE_ORACLE=/absolute/path/to/private-oracle.json npm run smoke
 
 The frozen public socket contract cannot establish which player's private deck
 was intended for a frame, whether a duplicate actually persisted twice, or the
-joker's scoring weight. The oracle is not implemented in this kit; Agent Z
-must supply it. Do not serve it over HTTP, expose it to game clients, or commit
-it. It must reflect independently captured server-side facts for the *current*
-smoke room, not facts reconstructed from the bots' received messages. Write it
-atomically once the finale is ready, and update it after a finale reconnect.
+joker's scoring weight. The `smoke:oracle` fixture captures these facts from
+server room state, persisted log entries, recipient emissions and the engine's
+scoring helper. A separately started server needs its own equivalent oracle.
+Do not serve it over HTTP, expose it to game clients, or commit it. It must
+reflect independently captured server-side facts for the *current* smoke room,
+not facts reconstructed from the bots' received messages. Write it atomically
+once the finale is ready, and update it after a finale reconnect.
 The smoke test expects this JSON shape:
 
 ```json

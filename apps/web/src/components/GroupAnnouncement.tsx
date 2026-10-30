@@ -194,7 +194,7 @@ export function GroupAnnouncement({
                     <span
                       className="tabular-nums font-display font-bold text-display-lg text-lime-accent"
                       data-testid={`ga-num-${key.toLowerCase()}`}
-                      style={{ textShadow: '0 0 22px rgba(182,255,60,0.45)' }}
+                      style={{ textShadow: '0 0 22px rgba(239,180,255,0.45)' }}
                     >
                       {shown(value)}
                       {isPercentKey(key) ? '%' : ''}
@@ -231,7 +231,7 @@ export function GroupAnnouncement({
               style={{
                 fontSize: 'clamp(3rem, 14vw, 7rem)',
                 color: 'var(--white-text)',
-                textShadow: '0 0 60px rgba(255,77,109,0.5), 0 0 24px rgba(182,255,60,0.25)',
+                textShadow: '0 0 60px rgba(255,77,109,0.5), 0 0 24px rgba(239,180,255,0.25)',
               }}
             >
               {slide.title}

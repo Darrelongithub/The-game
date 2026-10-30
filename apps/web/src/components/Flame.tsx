@@ -1,84 +1,28 @@
 'use client'
-// components/Flame.tsx — reference/ui-system.md §5 verbatim
-// + ui-system-FIXES #3: ember configs (Math.random) are computed ONCE in
-// useMemo. Randomising inside render re-rolled every ember on every state
-// change, so the embers teleported. FIXED.
-import { useMemo } from 'react'
-import { motion } from 'framer-motion'
+// A recognizable layered flame, with CSS-only flicker and stable SVG IDs.
+import { useId } from 'react'
 
 export function Flame({ size = 140 }: { size?: number }) {
-  // Deterministic-per-mount ember configs (stable across re-renders).
-  const embers = useMemo(
-    () =>
-      Array.from({ length: 7 }).map((_, i) => ({
-        leftPct: 45 + Math.random() * 10,
-        driftX: (Math.random() - 0.5) * 40,
-        duration: 1.8 + Math.random(),
-        delay: i * 0.25,
-      })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [size]
-  )
-
+  const id = useId().replace(/:/g, '')
+  const outer = `flame-outer-${id}`
+  const inner = `flame-inner-${id}`
   return (
-    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
-      {/* Glow bloom behind flame */}
-      <motion.div
-        className="absolute rounded-full"
-        style={{
-          width: size * 1.8, height: size * 1.8,
-          background: 'radial-gradient(circle, rgba(182,255,60,0.35), rgba(139,47,224,0.2) 50%, transparent 75%)',
-          filter: 'blur(20px)',
-        }}
-        animate={{ opacity: [0.6, 1, 0.6], scale: [0.9, 1.05, 0.9] }}
-        transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-      />
-
-      {/* Embers — stable configs, see FIX #3 */}
-      {embers.map((e, i) => (
-        <motion.div
-          key={i}
-          className="absolute rounded-full bg-lime-accent"
-          style={{ width: 3, height: 3, bottom: size * 0.3, left: `${e.leftPct}%` }}
-          animate={{
-            y: [0, -size * 1.2],
-            x: [0, e.driftX],
-            opacity: [0, 1, 0],
-          }}
-          transition={{
-            duration: e.duration,
-            repeat: Infinity,
-            delay: e.delay,
-            ease: 'easeOut',
-          }}
-        />
-      ))}
-
-      {/* Flame body — layered SVG paths animating independently for organic flicker */}
-      <svg width={size} height={size} viewBox="0 0 100 140" className="relative z-10">
+    <div className="flame-mark" style={{ width: size, height: size }} role="img" aria-label="Flame">
+      <div className="flame-glow" aria-hidden="true" />
+      <svg className="flame-shape" width={size} height={size} viewBox="0 0 100 112" aria-hidden="true">
         <defs>
-          <linearGradient id="flameGrad" x1="0%" y1="100%" x2="0%" y2="0%">
-            <stop offset="0%" stopColor="#8b2fe0" />
-            <stop offset="55%" stopColor="#b6ff3c" />
-            <stop offset="100%" stopColor="#f5f3ff" />
+          <linearGradient id={outer} x1="15%" y1="100%" x2="75%" y2="0%">
+            <stop offset="0%" stopColor="#7928ca" />
+            <stop offset="48%" stopColor="#e83dc4" />
+            <stop offset="100%" stopColor="#ffe1f9" />
+          </linearGradient>
+          <linearGradient id={inner} x1="50%" y1="100%" x2="50%" y2="0%">
+            <stop offset="0%" stopColor="#f7a7f3" />
+            <stop offset="100%" stopColor="#fff4fb" />
           </linearGradient>
         </defs>
-
-        <motion.path
-          d="M50 140 C20 110 15 75 35 45 C40 65 50 65 48 45 C65 65 85 95 65 125 C75 110 72 95 65 90 C68 115 58 130 50 140 Z"
-          fill="url(#flameGrad)"
-          style={{ transformOrigin: '50% 100%' }}
-          animate={{ scaleY: [1, 1.08, 0.96, 1.05, 1], scaleX: [1, 0.95, 1.04, 0.97, 1] }}
-          transition={{ duration: 0.6, repeat: Infinity, ease: 'easeInOut' }}
-        />
-        <motion.path
-          d="M50 140 C30 115 28 85 42 55 C45 72 50 72 48 55 C60 75 72 100 58 125 Z"
-          fill="#f5f3ff"
-          opacity={0.5}
-          style={{ transformOrigin: '50% 100%' }}
-          animate={{ scaleY: [1, 0.92, 1.06, 0.98, 1], scaleX: [1, 1.05, 0.95, 1.02, 1] }}
-          transition={{ duration: 0.45, repeat: Infinity, ease: 'easeInOut', delay: 0.1 }}
-        />
+        <path fill={`url(#${outer})`} d="M51 4c2 20 17 27 25 43 13 25 3 53-26 57-26 3-40-14-36-36 2-13 10-24 20-33-1 11 3 18 8 21 6-13 12-28 9-52Z" />
+        <path fill={`url(#${inner})`} d="M50 99c-14 0-22-9-19-21 2-9 9-15 12-24 1 10 5 14 9 16 3-5 4-10 4-15 11 10 17 19 15 28-2 10-10 16-21 16Z" />
       </svg>
     </div>
   )

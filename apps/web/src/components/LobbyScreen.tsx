@@ -1,7 +1,7 @@
 "use client";
 // components/LobbyScreen.tsx — Agent A. Big room code, live player list with
 // connection dots, and the four host-only controls from spec §1.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { PlayerId, RoomCode, RoomView } from "@shared/contracts.ts";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@shared/contracts.ts";
@@ -38,6 +38,27 @@ export function LobbyScreen({
   const [showPrompts, setShowPrompts] = useState(false);
   const [promptText, setPromptText] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [inviteUrl, setInviteUrl] = useState("");
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "fallback">("idle");
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.hash = "";
+    url.searchParams.set("room", code ?? view.code);
+    setInviteUrl(url.toString());
+  }, [code, view.code]);
+
+  const copyInvite = async () => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopyState("copied");
+    } catch {
+      // Clipboard access often requires HTTPS; expose selectable text on LAN.
+      setCopyState("fallback");
+    }
+  };
 
   const total = view.players.length;
   const connected = view.players.filter((p) => p.connected).length;
@@ -63,9 +84,17 @@ export function LobbyScreen({
                style={{ textShadow: "0 0 60px rgba(139,47,224,0.65)" }}>
             {code ?? view.code}
           </div>
-          <p className="mt-3 text-sm text-white/50">
-            Everyone opens this same site and types the code. No install.
+          <p className="mt-3 text-sm text-white/65">
+            Send your friends an invite or ask them to enter this code.
           </p>
+          <button type="button" onClick={() => void copyInvite()} disabled={!inviteUrl}
+            className="mt-3 min-h-[44px] rounded-full border border-white/25 bg-white/5 px-5 text-xs font-medium text-white transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent">
+            {copyState === "copied" ? "Invite link copied" : "Copy invite link"}
+          </button>
+          {copyState === "fallback" && <label className="mt-2 block text-xs text-white/65">
+            Copy this invite link
+            <input aria-label="Invite link" className="field mt-2 text-xs" readOnly value={inviteUrl} onFocus={(event) => event.currentTarget.select()} />
+          </label>}
         </motion.div>
 
         {/* players */}
@@ -92,7 +121,7 @@ export function LobbyScreen({
                       "h-2.5 w-2.5 rounded-full shrink-0",
                       p.connected ? "bg-lime-accent" : "bg-white/25"
                     )}
-                    style={p.connected ? { boxShadow: "0 0 12px rgba(182,255,60,0.8)" } : undefined}
+                    style={p.connected ? { boxShadow: "0 0 12px rgba(233,154,255,0.8)" } : undefined}
                     aria-label={p.connected ? "connected" : "disconnected"}
                   />
                   <span className="text-white truncate">{p.alias}</span>

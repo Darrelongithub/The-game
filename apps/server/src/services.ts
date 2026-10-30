@@ -1,4 +1,4 @@
-/** Contract-only integration seam. Other agents' packages can be injected by Agent Z. */
+/** Injectable service seam and deliberately retained standalone fallbacks. */
 import {
   DEFAULT_WEIGHTS, SECRET_DECK_MAX, type Claim, type FinaleSlide, type LogRecord,
   type NightDigest, type PairSignal, type PlayerId, type Prompt, type PromptCoding,
@@ -8,18 +8,23 @@ import {
 export type HeatPhase = Prompt["phase"];
 export interface PromptProvider {
   /** Must return an already-available bank immediately, never await a provider call. */
-  forPhase(phase: HeatPhase, n: number, usedIds: ReadonlySet<string>): Prompt[];
+  forPhase(phase: HeatPhase, n: number, usedIds: ReadonlySet<string>, playerCount?: number): Prompt[];
   /** Optional provider work is kicked off in the lobby and is never awaited by play. */
   prepare?(input: { playerCount: number; usedIds: string[]; digest: NightDigest }): Promise<void>;
+  /** Classify public, pseudonymized answers in the background; private debriefs stay local. */
+  prepareAnalysis?(log: LogRecord[]): Promise<void>;
+  tagsFor?(recordId: string): string[] | undefined;
+  /** Cancel room-scoped provider work when the room is deleted or expires. */
+  dispose?(): void;
 }
 export interface GameServices {
-  createPromptProvider(): PromptProvider;
+  createPromptProvider(context: { roomId: string }): PromptProvider;
   computeSignals(log: LogRecord[], meta: RoomMeta): PairSignal[];
-  computeResults(signals: PairSignal[], log: LogRecord[], meta: RoomMeta): Results;
+  computeResults(signals: PairSignal[], log: LogRecord[], meta: RoomMeta, provider?: PromptProvider): Results;
   buildNightDigest(log: LogRecord[], meta: RoomMeta): NightDigest;
   buildSecrets(results: Results, digest: NightDigest, meta: RoomMeta): Map<PlayerId, SecretCard[]>;
-  buildSkeleton(results: Results, digest: NightDigest): FinaleSlide[];
-  writeFinale(skeleton: FinaleSlide[], decks: Map<PlayerId, SecretCard[]>, results: Results, digest: NightDigest): Promise<{ slides: FinaleSlide[]; decks: Map<PlayerId, SecretCard[]> }>;
+  buildSkeleton(results: Results, digest: NightDigest, meta: RoomMeta): FinaleSlide[];
+  writeFinale(skeleton: FinaleSlide[], decks: Map<PlayerId, SecretCard[]>, results: Results, digest: NightDigest, meta: RoomMeta, provider: PromptProvider): Promise<{ slides: FinaleSlide[]; decks: Map<PlayerId, SecretCard[]> }>;
 }
 
 // Small standalone bank. Agent D's full bank/provider is injected at merge; these

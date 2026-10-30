@@ -81,10 +81,6 @@ export function useRoom(): UseRoom {
   const [secrets, setSecrets] = useState<SecretDeckView | null>(null);
   const [hasSession, setHasSession] = useState(false);
 
-  // Latest values for handlers that outlive a render.
-  const youRef = useRef<PlayerId | null>(null);
-  youRef.current = you;
-
   useEffect(() => {
     const stored = loadSession();
     setHasSession(Boolean(stored));
@@ -96,6 +92,7 @@ export function useRoom(): UseRoom {
     const handlers: TransportHandlers = {
       onState: (next) => {
         setView(next);
+        setRound(next.round ?? null);
         setCode(next.code);
         // Server-authoritative: a snapshot always wins over local guesses.
         setHasSession(true);
@@ -128,10 +125,13 @@ export function useRoom(): UseRoom {
         resetLocal();
         setError("The room was deleted.");
       },
-      onError: (e) => setError(e.message),
+      onError: (e) => {
+        if (e.code === "resume_failed") resetLocal();
+        setError(e.message);
+      },
       onConnection: (ok, info) => {
         setConnected(ok);
-        if (info?.resuming !== undefined) setResuming(Boolean(ok && info.resuming));
+        setResuming(Boolean(ok && info?.resuming));
       },
     };
 
@@ -142,14 +142,15 @@ export function useRoom(): UseRoom {
     // Boot: if this tab has a session, ask for a full snapshot right away.
     if (stored) transport.resume();
 
-    // Belt and braces for mobile Safari: it does not always fire `online`.
+    // The real transport owns its visibility listener. Keep the mock's
+    // snapshot refresh without issuing a second real rejoin on the same token.
     const onVisible = () => {
       if (document.visibilityState === "visible") transport.resume();
     };
-    document.addEventListener("visibilitychange", onVisible);
+    if (transport.mode === "mock") document.addEventListener("visibilitychange", onVisible);
 
     return () => {
-      document.removeEventListener("visibilitychange", onVisible);
+      if (transport.mode === "mock") document.removeEventListener("visibilitychange", onVisible);
       transport.disconnect();
       transportRef.current = null;
     };
@@ -157,6 +158,7 @@ export function useRoom(): UseRoom {
   }, []);
 
   const resetLocal = useCallback(() => {
+    transportRef.current?.forgetSession();
     clearSession();
     setYou(null);
     setCode(null);
@@ -254,7 +256,7 @@ export function useRoom(): UseRoom {
     connected,
     resuming,
     error,
-    round: view?.round ?? round,
+    round,
     interlude,
     reveal,
     finale,

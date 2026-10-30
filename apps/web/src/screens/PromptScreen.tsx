@@ -2,6 +2,8 @@
 import React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PlayerId, ResponseValue, RoomView, RoundView, TraitId } from '../../../../packages/shared/src/contracts';
+import { inferTrait } from '../../../../packages/prompts/src/trait.ts';
+import { bankQuestionHint } from '@/lib/promptHints';
 import { AnimatedWords, GlassCard, GlowButton } from './primitives';
 
 export interface PromptScreenProps {
@@ -12,39 +14,93 @@ export interface PromptScreenProps {
   onSubmit: (value: ResponseValue) => void | boolean | Promise<void | boolean>;
   onVoteHeatDown?: () => void;
 }
-const heat: Record<string, string> = { warmup: '#3b82f6', spicy: '#b6ff3c', deep: '#8b2fe0', dare: '#ff4d6d', debrief: '#ff4d6d' };
+const heat: Record<string, string> = { warmup: '#dfa7ff', spicy: '#f4a8e8', deep: '#ce9bff', dare: '#ff8aaa', debrief: '#ff8aaa' };
 const traits: TraitId[] = ['loyalty', 'chaos', 'reliability', 'warmth', 'honesty', 'spice'];
 const field = 'w-full rounded-2xl border border-white/20 bg-white/5 p-4 text-base text-white placeholder:text-white/50 focus:outline focus:outline-2 focus:outline-lime-accent';
 
-function useRemaining(deadline: number) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => { setNow(Date.now()); const id = window.setInterval(() => setNow(Date.now()), 200); return () => window.clearInterval(id); }, [deadline]);
-  return Math.max(0, Math.ceil((deadline - now) / 1000));
+// The frozen RoundView has no structured target or trait. Infer only clear
+// bank wording; ambiguous prompts require a choice instead of silently rating
+// the wrong person/trait. The structured contract request remains necessary.
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const callbackMarker = '\n\nEarlier, someone said: “';
+function splitCallback(text: string): { question: string; callback?: string } {
+  const index = text.indexOf(callbackMarker);
+  if (index < 0) return { question: text };
+  return { question: text.slice(0, index), callback: `“${text.slice(index + callbackMarker.length)}` };
 }
-function Clock({ seconds, total }: { seconds: number; total: number }) {
+
+function displayPrompt(round: RoundView, room: RoomView, you: PlayerId): string {
+  if (round.kind !== 'ios') return round.promptText;
+  const ownAlias = room.players.find((player) => player.id === you)?.alias;
+  if (!ownAlias) return round.promptText;
+  const selfReference = new RegExp(`(\\b(?:you\\s+and|with)\\s+)${escapeRegExp(ownAlias)}(?=$|[^\\p{L}\\p{N}])`, 'iu');
+  // A shared named prompt may name the person reading it. IOS cannot target
+  // yourself, so ask that person to choose someone else instead.
+  return round.promptText.replace(selfReference, '$1someone here');
+}
+
+function mentionedTarget(round: RoundView, room: RoomView, you: PlayerId): string {
+  if (round.kind !== 'rating' && round.kind !== 'ios') return '';
+  const matches = room.players.filter((player) => {
+    const name = escapeRegExp(player.alias);
+    const prefix = round.kind === 'rating' ? '\\brate\\s+(?:how\\s+(?:well|good)\\s+)?' : '\\b(?:you\\s+and|with)\\s+';
+    return new RegExp(`${prefix}${name}(?:['’]s)?(?=$|[^\\p{L}\\p{N}])`, 'iu').test(round.promptText);
+  });
+  if (matches.length === 1) return matches[0]!.id === you ? (round.kind === 'rating' ? 'self' : '') : matches[0]!.id;
+  // A bare "you" may describe a friend *toward* you. Default to self only
+  // for clearly self-directed wording; otherwise ask the player to choose.
+  if (round.kind === 'rating' && /^(?:\s*rate\s+(?:yourself\b|your\s+own\b|your\s+(?:loyalty|chaos|reliability|warmth|honesty|spice)\b)|\s*how\s+\w+\s+(?:are|have)\s+you\b)/i.test(round.promptText)) return 'self';
+  return '';
+}
+
+// Only the small timer component updates on the clock; the question and input
+// controls no longer rerender five times a second on every player's phone.
+function useRemaining(deadline: number) {
+  const [seconds, setSeconds] = useState(() => Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
+  useEffect(() => {
+    const update = () => setSeconds(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
+    update();
+    const id = window.setInterval(update, 250);
+    return () => window.clearInterval(id);
+  }, [deadline]);
+  return seconds;
+}
+function Clock({ deadline, total }: { deadline: number; total: number }) {
+  const seconds = useRemaining(deadline);
   const progress = Math.max(0, Math.min(1, seconds / total));
   return <div className="relative grid h-20 w-20 shrink-0 place-items-center" role="timer" aria-label={`${seconds} seconds remaining`}>
-    <svg viewBox="0 0 80 80" className="absolute inset-0 h-full w-full" aria-hidden="true"><circle cx="40" cy="40" r="35" fill="none" stroke="rgba(255,255,255,.16)" strokeWidth="4"/><circle cx="40" cy="40" r="35" fill="none" stroke="currentColor" strokeWidth="4" strokeDasharray={`${progress * 220} 220`} transform="rotate(-90 40 40)"/></svg><span className="font-bold">{seconds}s</span>
+    <svg viewBox="0 0 80 80" className="absolute inset-0 h-full w-full" aria-hidden="true">
+      <circle cx="40" cy="40" r="35" fill="none" stroke="rgba(255,255,255,.16)" strokeWidth="4"/>
+      <circle cx="40" cy="40" r="35" fill="none" stroke="currentColor" strokeWidth="4" strokeDasharray={`${progress * 220} 220`} transform="rotate(-90 40 40)"/>
+    </svg><span className="font-bold tabular-nums">{seconds}s</span>
   </div>;
+}
+function RemainingLabel({ deadline }: { deadline: number }) {
+  const seconds = useRemaining(deadline);
+  return <span role="timer" className="text-xs tabular-nums text-white/65">{seconds ? `${seconds}s left` : 'Finishing the round…'}</span>;
 }
 
 export function PromptScreen(props: PromptScreenProps) {
   return <PromptRound key={props.round.roundId} {...props} />;
 }
 function PromptRound({ round, room, you, onSubmit, onVoteHeatDown }: PromptScreenProps) {
+  const { question, callback } = splitCallback(round.promptText);
+  const questionRound = { ...round, promptText: question };
+  const bankHint = bankQuestionHint(question, round.kind, room.players, you);
   const [submitted, setSubmitted] = useState(round.youSubmitted);
   const [error, setError] = useState('');
   const [text, setText] = useState('');
   const [reason, setReason] = useState('');
   const [reasonOpen, setReasonOpen] = useState(false);
+  const [selected, setSelected] = useState('');
   const [rating, setRating] = useState(5);
-  const [ios, setIos] = useState(1);
-  const [trait, setTrait] = useState<TraitId>('loyalty');
-  const [about, setAbout] = useState('self');
+  const [ios, setIos] = useState(0);
+  const [trait, setTrait] = useState<TraitId | ''>(() => bankHint?.trait ?? inferTrait(question) ?? '');
+  const [about, setAbout] = useState(() => bankHint?.about ?? mentionedTarget(questionRound, room, you));
   const [taps, setTaps] = useState(0);
   const [voted, setVoted] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
   const [tapDeadline] = useState(() => Math.min(Date.now() + 5000, round.closesAt));
-  const seconds = useRemaining(round.kind === 'minigame' ? tapDeadline : round.kind === 'pair_dare' ? round.closesAt - 30000 : round.closesAt);
   const latest = useRef({ text, taps }); latest.current = { text, taps };
   const locked = useRef(round.youSubmitted);
   useEffect(() => { if (round.youSubmitted) { locked.current = true; setSubmitted(true); } }, [round.youSubmitted]);
@@ -56,27 +112,47 @@ function PromptRound({ round, room, you, onSubmit, onVoteHeatDown }: PromptScree
   }, [onSubmit]);
   const autoAttempted = useRef(false);
   useEffect(() => {
-    if (seconds !== 0 || autoAttempted.current || round.youSubmitted) return;
-    if (round.kind === 'shout') { autoAttempted.current = true; void submit({ kind: 'shout', word: latest.current.text.trim() || 'Pass' }); }
-    if (round.kind === 'minigame') { autoAttempted.current = true; void submit({ kind: 'minigame', score: Math.min(999, latest.current.taps) }); }
-  }, [seconds, round.kind, round.youSubmitted, submit]);
+    if (round.kind !== 'shout' && round.kind !== 'minigame') return;
+    const deadline = round.kind === 'minigame' ? tapDeadline : round.closesAt;
+    const id = window.setTimeout(() => {
+      setTimedOut(true);
+      if (autoAttempted.current || locked.current) return;
+      autoAttempted.current = true;
+      if (round.kind === 'shout') void submit({ kind: 'shout', word: latest.current.text.trim() || 'Pass' });
+      else void submit({ kind: 'minigame', score: Math.min(999, latest.current.taps) });
+    }, Math.max(0, deadline - Date.now()));
+    return () => window.clearTimeout(id);
+  }, [round.kind, round.closesAt, tapDeadline, submit]);
+
   const others = room.players.filter(p => p.id !== you);
   const participant = !round.onlyPlayers || round.onlyPlayers.includes(you);
   const color = heat[round.phase] || heat.warmup;
   const showVote = ['spicy', 'deep', 'dare', 'debrief'].includes(round.phase) && onVoteHeatDown;
-  return <main className="mx-auto flex min-h-[100dvh] w-full max-w-2xl flex-col gap-6 px-4 py-8 text-white" style={{ color: '#f5f3ff' }}>
-    <header className="flex items-center justify-between gap-3"><span className="text-xs font-bold uppercase tracking-[.2em]" style={{ color }}>{round.phase} · Round {round.index}</span>{showVote && <button type="button" className="min-h-[48px] rounded-xl px-3 text-sm text-white/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent" disabled={voted} onClick={() => { onVoteHeatDown(); setVoted(true); }}>{voted ? '✓ Vote to cool sent' : 'Too hot? Cool it.'}</button>}</header>
-    <h1 className="text-display-lg font-bold leading-tight" style={{ fontSize: 'clamp(1.8rem, 7vw, 3.5rem)' }}><AnimatedWords text={round.promptText} /></h1>
-    {!participant && (round.kind === 'pair_dare' || round.kind === 'debrief') ? <GlassCard><p>They're talking…</p><p className="mt-2 text-sm text-white/60">Sit tight while the pair returns.</p></GlassCard> : submitted ? <GlassCard role="status"><p className="text-xl font-bold">You're in — waiting.</p></GlassCard> : <>
+  return <main className="mx-auto flex min-h-[100dvh] w-full max-w-2xl flex-col gap-6 px-4 pt-8 pb-28 text-white" style={{ color: '#f5f3ff' }}>
+    <header className="flex flex-wrap items-center justify-between gap-3">
+      <span className="text-xs font-bold uppercase tracking-[.2em]" style={{ color }}>{round.phase} · Round {round.index}</span>
+      <div className="flex items-center gap-3">
+        {!['shout', 'minigame', 'pair_dare'].includes(round.kind) && <RemainingLabel deadline={round.closesAt} />}
+        {showVote && <button type="button" className="min-h-[48px] rounded-xl px-3 text-sm text-white/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent" disabled={voted} onClick={() => { onVoteHeatDown(); setVoted(true); }}>{voted ? '✓ Vote to cool sent' : 'Too hot? Cool it.'}</button>}
+      </div>
+    </header>
+    <h1 className="text-display-lg font-bold leading-tight" style={{ fontSize: 'clamp(1.8rem, 7vw, 3.5rem)' }}><AnimatedWords text={displayPrompt(questionRound, room, you)} /></h1>
+    {callback && <p data-testid="callback-note" className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm leading-relaxed text-white/75"><span className="text-white/50">Earlier, someone said: </span>{callback}</p>}
+    {!participant && (round.kind === 'pair_dare' || round.kind === 'debrief') ? <GlassCard><p>They&apos;re talking…</p><p className="mt-2 text-sm text-white/60">Sit tight while the pair returns.</p></GlassCard> : submitted ? <GlassCard role="status"><p className="text-xl font-bold">Answer sent.</p><p className="mt-2 text-sm text-white/70">Waiting for everyone else. The next question comes when they finish or the timer runs out.</p></GlassCard> : <>
       {error && <p role="alert" className="text-red-300">{error}</p>}
-      {round.kind === 'pick' && <div className="grid grid-cols-2 gap-3">{others.map(p => <GlowButton key={p.id} onClick={() => void submit({ kind: 'pick', target: p.id })}>{p.alias}</GlowButton>)}</div>}
+      {round.kind === 'pick' && <div className="answer-arrival space-y-4">
+        <p className="text-sm text-white/70">Choose one person, then lock in your answer.</p>
+        <div className="grid grid-cols-2 gap-3">{others.map(p => <GlowButton key={p.id} aria-pressed={selected === p.id} onClick={() => setSelected(p.id)} className={selected === p.id ? 'ring-2 ring-white ring-offset-2 ring-offset-[#100019]' : 'opacity-80'}>{p.alias}</GlowButton>)}</div>
+        <GlowButton className="w-full" disabled={!selected} onClick={() => void submit({ kind: 'pick', target: selected })}>Lock in answer</GlowButton>
+      </div>}
       {(round.kind === 'text' || round.kind === 'debrief') && <><label htmlFor="answer" className="sr-only">Your {round.kind === 'debrief' ? 'private ' : ''}answer</label><textarea id="answer" className={`${field} min-h-36`} maxLength={280} value={text} onChange={e => setText(e.target.value)} placeholder="Your answer…"/><div className="flex items-center justify-between gap-3"><span className="text-sm text-white/60">{text.length}/280</span><GlowButton disabled={!text.trim()} onClick={() => void submit({ kind: 'text', text: text.trim() })}>Submit</GlowButton></div></>}
-      {round.kind === 'shout' && <><div className="flex items-center gap-4"><label htmlFor="shout" className="sr-only">Your word</label><input id="shout" className={`${field} min-w-0 font-bold`} style={{ fontSize: 'clamp(1.5rem, 6vw, 2.5rem)' }} maxLength={24} value={text} onChange={e => setText(e.target.value.replace(/\s/g, ''))} placeholder="ONE WORD"/><Clock seconds={seconds} total={15}/></div><GlowButton disabled={!text.trim()} onClick={() => void submit({ kind: 'shout', word: text.trim() })}>Shout it</GlowButton>{seconds === 0 && <GlowButton onClick={() => void submit({ kind: 'shout', word: text.trim() || 'Pass' })}>Retry submission</GlowButton>}</>}
-      {round.kind === 'rating' && <GlassCard className="space-y-5"><label className="block">Trait<select className={`${field} mt-2`} value={trait} onChange={e => setTrait(e.target.value as TraitId)}>{traits.map(t => <option className="text-black" key={t} value={t}>{t}</option>)}</select></label><label className="block">About<select className={`${field} mt-2`} value={about} onChange={e => setAbout(e.target.value)}><option className="text-black" value="self">Myself</option>{others.map(p => <option className="text-black" key={p.id} value={p.id}>{p.alias}</option>)}</select></label><label className="block">Rating: {rating}/10<input className="mt-3 min-h-[48px] w-full accent-lime-accent" type="range" min={1} max={10} value={rating} onChange={e => setRating(Number(e.target.value))}/></label><GlowButton onClick={() => void submit({ kind: 'rating', trait, about, value: rating })}>Submit rating</GlowButton></GlassCard>}
-      {round.kind === 'ios' && <GlassCard><label className="block">About<select className={`${field} mt-2`} value={about === 'self' ? '' : about} onChange={e => setAbout(e.target.value)}><option className="text-black" value="">Choose a player</option>{others.map(p => <option className="text-black" key={p.id} value={p.id}>{p.alias}</option>)}</select></label><fieldset className="mt-5"><legend>How close are you?</legend><div className="mt-3 grid grid-cols-2 gap-2 min-[400px]:grid-cols-4">{Array.from({ length: 7 }, (_, i) => <button type="button" key={i} aria-pressed={ios === i + 1} aria-label={`Closeness ${i + 1} of 7`} onClick={() => setIos(i + 1)} className={`min-h-[64px] rounded-xl border focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent ${ios === i + 1 ? 'border-lime-accent' : 'border-white/20'}`}><svg viewBox="0 0 72 40" className="mx-auto h-10 w-20 max-w-full" aria-hidden="true"><circle cx={20 + i * 1.8} cy="20" r="15" fill="#8b2fe0" fillOpacity=".65" stroke="white"/><circle cx={52 - i * 1.8} cy="20" r="15" fill="#b6ff3c" fillOpacity=".5" stroke="white"/></svg><span className="text-xs">{i + 1}</span></button>)}</div></fieldset><GlowButton className="mt-5" disabled={about === 'self' || !about} onClick={() => void submit({ kind: 'ios', about, value: ios })}>Submit closeness</GlowButton></GlassCard>}
-      {round.kind === 'minigame' && <GlassCard className="text-center"><Clock seconds={seconds} total={5}/><p className="my-4 text-3xl font-bold" aria-live="polite">{taps} taps</p><GlowButton className="min-h-32 w-full text-2xl" disabled={seconds === 0} onClick={() => setTaps(n => Math.min(999, n + 1))}>TAP!</GlowButton>{seconds === 0 && <GlowButton className="mt-4" onClick={() => void submit({ kind: 'minigame', score: taps })}>Submit score</GlowButton>}</GlassCard>}
-      {round.kind === 'dare' && <><GlowButton onClick={() => void submit({ kind: 'dare', status: 'done' })}>Done</GlowButton><GlowButton className="border border-lime-accent/50 bg-none" onClick={() => setReasonOpen(true)}>I can't</GlowButton>{reasonOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" role="dialog" aria-modal="true" aria-labelledby="reason-title" onKeyDown={e => { if (e.key === 'Escape') setReasonOpen(false); }}><GlassCard className="w-full max-w-md bg-[#0d0617]"><h2 id="reason-title" className="text-xl font-bold">Why can't you?</h2><label htmlFor="reason" className="mt-3 block">A reason is required.</label><textarea autoFocus id="reason" maxLength={140} value={reason} onChange={e => setReason(e.target.value)} className={`${field} mt-2 min-h-28`}/><p className="text-sm text-white/60">{reason.length}/140</p><div className="mt-4 flex flex-wrap gap-2"><GlowButton disabled={!reason.trim()} onClick={() => void submit({ kind: 'dare', status: 'passed', reason: reason.trim() })}>Pass dare</GlowButton><GlowButton onClick={() => setReasonOpen(false)}>Cancel</GlowButton></div></GlassCard></div>}</>}
-      {round.kind === 'pair_dare' && <GlassCard><p className="text-xl font-bold">Go talk together.</p><p className="mt-2 text-white/70">You have five minutes. Come back when you're ready.</p><div className="my-4"><Clock seconds={seconds} total={300}/></div><GlowButton onClick={() => void submit({ kind: 'dare', status: 'done' })}>We're back</GlowButton></GlassCard>}
+      {round.kind === 'shout' && <><div className="flex items-center gap-4"><label htmlFor="shout" className="sr-only">Your word</label><input id="shout" className={`${field} min-w-0 font-bold`} style={{ fontSize: 'clamp(1.5rem, 6vw, 2.5rem)' }} maxLength={24} value={text} onChange={e => setText(e.target.value.replace(/\s/g, ''))} placeholder="ONE WORD"/><Clock deadline={round.closesAt} total={15}/></div><GlowButton disabled={!text.trim()} onClick={() => void submit({ kind: 'shout', word: text.trim() })}>Shout it</GlowButton>{timedOut && <GlowButton onClick={() => void submit({ kind: 'shout', word: text.trim() || 'Pass' })}>Retry submission</GlowButton>}</>}
+      {round.kind === 'rating' && <GlassCard className="space-y-5"><label className="block">Trait<select className={`${field} mt-2`} value={trait} onChange={e => setTrait(e.target.value as TraitId | '')}><option className="text-black" value="">Choose a trait</option>{traits.map(t => <option className="text-black" key={t} value={t}>{t}</option>)}</select></label><label className="block">About<select className={`${field} mt-2`} value={about} onChange={e => setAbout(e.target.value)}><option className="text-black" value="">Choose a person</option><option className="text-black" value="self">Myself</option>{others.map(p => <option className="text-black" key={p.id} value={p.id}>{p.alias}</option>)}</select></label><label className="block">Rating: {rating}/10<input className="mt-3 min-h-[48px] w-full accent-lime-accent" type="range" min={1} max={10} value={rating} onChange={e => setRating(Number(e.target.value))}/></label><GlowButton disabled={!trait || !about} onClick={() => { if (trait && about) void submit({ kind: 'rating', trait, about, value: rating }); }}>Submit rating</GlowButton></GlassCard>}
+      {round.kind === 'ios' && <GlassCard><label className="block">About<select className={`${field} mt-2`} value={about} onChange={e => setAbout(e.target.value)}><option className="text-black" value="">Choose a player</option>{others.map(p => <option className="text-black" key={p.id} value={p.id}>{p.alias}</option>)}</select></label><fieldset className="mt-5"><legend>How close are you?</legend><div className="mt-3 grid grid-cols-2 gap-2 min-[400px]:grid-cols-4">{Array.from({ length: 7 }, (_, i) => <button type="button" key={i} aria-pressed={ios === i + 1} aria-label={`Closeness ${i + 1} of 7`} onClick={() => setIos(i + 1)} className={`min-h-[64px] rounded-xl border focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent ${ios === i + 1 ? 'border-lime-accent bg-white/10' : 'border-white/20'}`}><svg viewBox="0 0 72 40" className="mx-auto h-10 w-20 max-w-full" aria-hidden="true"><circle cx={20 + i * 1.8} cy="20" r="15" fill="#9f2cd4" fillOpacity=".65" stroke="white"/><circle cx={52 - i * 1.8} cy="20" r="15" fill="#efb4ff" fillOpacity=".5" stroke="white"/></svg><span className="text-xs">{i + 1}</span></button>)}</div></fieldset><GlowButton className="mt-5" disabled={!about || !ios} onClick={() => void submit({ kind: 'ios', about, value: ios })}>Submit closeness</GlowButton></GlassCard>}
+      {round.kind === 'minigame' && <GlassCard className="text-center"><div className="flex justify-center"><Clock deadline={tapDeadline} total={5}/></div><p className="my-4 text-3xl font-bold" aria-live="polite">{taps} taps</p><GlowButton className="min-h-32 w-full text-2xl" disabled={timedOut} onClick={() => setTaps(n => Math.min(999, n + 1))}>TAP!</GlowButton>{timedOut && <GlowButton className="mt-4" onClick={() => void submit({ kind: 'minigame', score: taps })}>Submit score</GlowButton>}</GlassCard>}
+      {round.kind === 'dare' && <GlowButton onClick={() => void submit({ kind: 'dare', status: 'done' })}>Done</GlowButton>}
+      {(round.kind === 'dare' || round.kind === 'pair_dare') && <><GlowButton className="border border-lime-accent/50 bg-none" onClick={() => setReasonOpen(true)}>I can&apos;t</GlowButton>{reasonOpen && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4" role="dialog" aria-modal="true" aria-labelledby="reason-title" onKeyDown={e => { e.stopPropagation(); if (e.key === 'Escape') setReasonOpen(false); }}><GlassCard className="w-full max-w-md bg-[#0d0617]"><h2 id="reason-title" className="text-xl font-bold">Why can&apos;t you?</h2><label htmlFor="reason" className="mt-3 block">A reason is required.</label><textarea autoFocus id="reason" maxLength={140} value={reason} onChange={e => setReason(e.target.value)} className={`${field} mt-2 min-h-28`}/><p className="text-sm text-white/60">{reason.length}/140</p><div className="mt-4 flex flex-wrap gap-2"><GlowButton disabled={!reason.trim()} onClick={() => void submit({ kind: 'dare', status: 'passed', reason: reason.trim() })}>Pass dare</GlowButton><GlowButton onClick={() => setReasonOpen(false)}>Cancel</GlowButton></div></GlassCard></div>}</>}
+      {round.kind === 'pair_dare' && <GlassCard><p className="text-xl font-bold">Go talk together.</p><p className="mt-2 text-white/70">You have five minutes. Come back when you&apos;re ready.</p><div className="my-4"><Clock deadline={round.closesAt - 30000} total={300}/></div><GlowButton onClick={() => void submit({ kind: 'dare', status: 'done' })}>We&apos;re back</GlowButton></GlassCard>}
     </>}
   </main>;
 }

@@ -13,12 +13,20 @@ import {
 } from "../../../packages/shared/src/contracts.ts";
 import { isAlias, isRoomCode, playerCountOk, validSubmit } from "../../../packages/shared/src/validate.ts";
 import { BankPromptProvider, fallbackServices, type GameServices, type HeatPhase, type PromptProvider } from "./services.ts";
+import { integratedServices } from "./integratedServices.ts";
+import { checkBanned, checkHardBlocked } from "../../../packages/prompts/src/filter.ts";
+import { bankForPhase, maxPlaceholderIndex } from "../../../packages/prompts/src/bank/index.ts";
+import { replaceCanonicalAliases } from "../../../packages/narrator/src/roster.ts";
 
 type SocketData = { roomCode?: string; playerId?: string };
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 type GameIO = Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 type Stage = "lobby" | "round" | "reveal" | "interlude" | "finale-building" | "finale" | "deleted";
-interface Player { id: string; alias: string; consent: Consent; secret: string; isBot: boolean; connected: boolean; socketId?: string; }
+interface Player {
+  id: string; alias: string; consent: Consent; secret: string; isBot: boolean; connected: boolean; socketId?: string;
+  /** A pending versioned resume is bound to a client-generated secret nonce. */
+  resumeRetry?: { secret: string; socketId: string; nonce?: string };
+}
 interface Definition { prompt: Prompt; phase: Phase; kind: RoundKind; text: string; onlyPlayers?: string[]; }
 interface LiveRound extends Definition { id: string; index: number; startedAt: number; closesAt: number; responses: Map<string, ResponseValue>; }
 interface SeenSubmit { roundId: string; fingerprint: string; }
@@ -29,6 +37,7 @@ interface Room {
   provider: PromptProvider; prepared: boolean; usedIds: Set<string>; custom: Prompt[]; log: LogRecord[];
   currentHeat?: HeatPhase; queue: Definition[]; round: LiveRound | null; pair?: [string, string];
   interactions: Map<string, number>; seen: Map<string, SeenSubmit>; votes: Set<string>;
+  callbackPhases: Set<HeatPhase>; callbackQuotes: Set<string>;
   pendingHeatDown?: HeatPhase; reveal?: TimedEvent<RevealView>; interlude?: TimedEvent<InterludeView>;
   finale?: FinaleView; decks: Map<string, SecretDeckView>; rng: () => number;
   timer?: ReturnType<typeof setTimeout>; botTimers: Set<ReturnType<typeof setTimeout>>;
@@ -52,6 +61,14 @@ const safeEqual = (a: string, b: string): boolean => {
   const x = Buffer.from(a), y = Buffer.from(b);
   return x.length === y.length && timingSafeEqual(x, y);
 };
+/** A versioned value is still an opaque JoinRequest.resume.secret string.
+ * Legacy bare tokens remain supported. The random nonce binds one pending
+ * rotation to its original client without making an old bearer token reusable. */
+function resumeProof(value: string): { token: string; nonce?: string } | null {
+  if (!value.startsWith("rr1.")) return { token: value };
+  const match = /^rr1\.([A-Za-z0-9_-]{43})\.([a-f0-9]{32})$/.exec(value);
+  return match ? { token: match[1]!, nonce: match[2]! } : null;
+}
 const validConsent = (v: unknown): v is Consent => !!v && typeof v === "object" &&
   (v as Consent).age === true && (v as Consent).terms === true && typeof (v as Consent).revealOptIn === "boolean";
 const validAlias = (v: unknown): v is string => typeof v === "string" && isAlias(v) && !/[\u0000-\u001f\u007f]/u.test(v);
@@ -60,14 +77,9 @@ const seedRng = (id: string): (() => number) => {
   let seed = createHash("sha256").update(id).digest().readUInt32LE(0);
   return () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t ^= t + Math.imul(t ^ (t >>> 7), 61 | t); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 };
-const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
 /** Replace aliases in arbitrary free text before a service can see the data. */
 function pseudonymizeText(text: string, players: Player[]): string {
-  const names = players.map((p, i) => ({ alias: p.alias, pseudo: pseudonym(i) })).sort((a, b) => b.alias.length - a.alias.length);
-  if (!names.length) return text;
-  const re = new RegExp(names.map((n) => escapeRegExp(n.alias)).join("|"), "giu");
-  return text.replace(re, (match) => names.find((n) => n.alias.toLocaleLowerCase() === match.toLocaleLowerCase())?.pseudo ?? match);
+  return replaceCanonicalAliases(text, players.map((p, i) => ({ alias: p.alias, pseudo: pseudonym(i) })));
 }
 function displayText(text: string, players: Player[]): string {
   return text.replace(/\bPlayer (1[01]|[1-9])\b/g, (match, n: string) => players[Number(n) - 1]?.alias ?? match);
@@ -101,7 +113,7 @@ function asSafePrompt(x: unknown, phase: HeatPhase): x is Prompt {
     ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare"].includes(p.kind) &&
     typeof p.text === "string" && p.text.trim().length > 0 && p.text.length <= 160 && validPlaceholders(p.text) &&
     Array.isArray(p.measures) && p.measures.length > 0 && p.measures.every((m) => typeof m === "string" && m.length > 0) &&
-    ["couple", "friendship", "trust", "friction", "rivalry", "status", "neutral"].includes(p.coding) && p.asksTarget === true;
+    ["couple", "friendship", "trust", "friction", "rivalry", "status", "neutral"].includes(p.coding) && typeof p.asksTarget === "boolean";
 }
 
 export class RoomManager {
@@ -110,7 +122,7 @@ export class RoomManager {
   private readonly now: () => number;
   private readonly sweepTimer: ReturnType<typeof setInterval>;
   constructor(private readonly io: GameIO, private readonly options: GameOptions) {
-    this.services = options.services ?? fallbackServices;
+    this.services = options.services ?? integratedServices;
     this.now = options.now ?? Date.now;
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
     this.purge();
@@ -125,8 +137,10 @@ export class RoomManager {
   }
   private clearRoomMemory(room: Room): void {
     this.clearTimers(room);
+    room.provider.dispose?.();
     room.log.length = 0; room.decks.clear(); room.seen.clear(); room.interactions.clear(); room.votes.clear(); room.usedIds.clear();
-    room.players.forEach((p) => { p.secret = ""; p.alias = ""; }); room.players.length = 0;
+    room.callbackPhases.clear(); room.callbackQuotes.clear();
+    room.players.forEach((p) => { p.secret = ""; p.alias = ""; p.resumeRetry = undefined; }); room.players.length = 0;
     room.round = null; room.queue = []; room.custom = []; room.pair = undefined; room.reveal = undefined; room.interlude = undefined; room.finale = undefined;
     room.currentHeat = undefined; room.pendingHeatDown = undefined; room.provider = new BankPromptProvider();
   }
@@ -146,12 +160,29 @@ export class RoomManager {
   }
   private schedule(room: Room, ms: number, fn: () => void): void {
     if (room.timer) clearTimeout(room.timer);
-    room.timer = setTimeout(() => { room.timer = undefined; if (room.stage !== "deleted") fn(); }, Math.max(0, ms));
+    room.timer = setTimeout(() => {
+      room.timer = undefined;
+      if (room.stage === "deleted" || this.liveRoom(room.code) !== room) return;
+      fn();
+    }, Math.max(0, ms));
     room.timer.unref();
   }
   private err(socket: GameSocket, code: string, message: string): void { socket.emit("error", { code, message }); }
+  private expired(room: Room): boolean {
+    const now = this.now();
+    return now - room.createdAt >= RETENTION_HOURS * HOUR || now - room.lastActivity >= IDLE_TTL_HOURS * HOUR;
+  }
+  private liveRoom(code: string): Room | undefined {
+    const room = this.rooms.get(code);
+    if (room && this.expired(room)) {
+      // If disk deletion fails, deny access and let a later sweep retry it.
+      this.deleteRoom(room);
+      return undefined;
+    }
+    return room;
+  }
   private identify(socket: GameSocket): { room: Room; player: Player } | undefined {
-    const room = socket.data.roomCode ? this.rooms.get(socket.data.roomCode) : undefined;
+    const room = socket.data.roomCode ? this.liveRoom(socket.data.roomCode) : undefined;
     const player = room?.players.find((p) => p.id === socket.data.playerId && p.socketId === socket.id && p.connected);
     if (!room || !player || room.stage === "deleted") { this.err(socket, "NOT_IN_ROOM", "Join a room first."); return undefined; }
     room.lastActivity = this.now();
@@ -199,9 +230,9 @@ export class RoomManager {
       try { writeFileSync(file, "", { flag: "wx", mode: 0o600 }); } catch { return ack({ ok: false, error: "Unable to create room storage." }); }
       const player: Player = { id: "p1", alias: input.alias.trim(), consent: { ...input.consent }, secret: secret(), isBot: false, connected: true, socketId: socket.id };
       let provider: PromptProvider;
-      try { provider = this.services.createPromptProvider(); } catch { provider = new BankPromptProvider(); }
+      try { provider = this.services.createPromptProvider({ roomId: id }); } catch { provider = new BankPromptProvider(); }
       const room: Room = { id, code, createdAt: now, lastActivity: now, file, hostId: player.id, players: [player], phase: "lobby", stage: "lobby", seq: 1, nextPlayer: 2, roundIndex: 0,
-        provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set() };
+        provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set() };
       this.rooms.set(code, room); socket.data = { roomCode: code, playerId: player.id }; void socket.join(code);
       ack({ ok: true, code, you: player.id, secret: player.secret, state: this.view(room, player.id) });
       this.states(room);
@@ -209,20 +240,38 @@ export class RoomManager {
     socket.on("join", (input, reply) => {
       const ack: (r: JoinReply) => void = typeof reply === "function" ? reply : () => {};
       if (!input || !isRoomCode(input.roomCode) || !validAlias(input.alias) || !validConsent(input.consent)) return ack({ ok: false, error: "Invalid room code, alias, or consent." });
-      const room = this.rooms.get(input.roomCode);
+      const room = this.liveRoom(input.roomCode);
       if (!room || room.stage === "deleted") return ack({ ok: false, error: "Room not found." });
       if (socket.data.playerId && (socket.data.roomCode !== room.code || socket.data.playerId !== input.resume?.playerId)) return ack({ ok: false, error: "Already joined a room." });
       let player: Player;
       if (input.resume) {
         const candidate = room.players.find((p) => p.id === input.resume?.playerId && !p.isBot);
-        if (!candidate || typeof input.resume.secret !== "string" || !safeEqual(candidate.secret, input.resume.secret)) return ack({ ok: false, error: "Invalid or expired session." });
+        const supplied = input.resume.secret;
+        if (!candidate || typeof supplied !== "string") return ack({ ok: false, error: "Invalid or expired session." });
+        const proof = resumeProof(supplied);
+        if (!proof) return ack({ ok: false, error: "Invalid or expired session." });
+        const previous = candidate.resumeRetry;
+        const sameAuthenticatedSocket = candidate.connected && candidate.socketId === socket.id &&
+          socket.data.roomCode === room.code && socket.data.playerId === candidate.id && previous?.socketId === socket.id;
+        // Legacy bare-token retries remain limited to the authenticated socket.
+        // A versioned retry can cross sockets only when both the previous token
+        // and the original 128-bit client nonce match the pending rotation.
+        const retry = !!previous && safeEqual(previous.secret, proof.token) &&
+          (proof.nonce ? !!previous.nonce && safeEqual(previous.nonce, proof.nonce) : !previous.nonce && sameAuthenticatedSocket);
+        if (!retry && !safeEqual(candidate.secret, proof.token)) return ack({ ok: false, error: "Invalid or expired session." });
         player = candidate;
         if (player.socketId && player.socketId !== socket.id) {
           const old = this.io.sockets.sockets.get(player.socketId);
           if (old) { old.data = {}; void old.leave(room.code); this.err(old, "SESSION_REPLACED", "This session reconnected elsewhere."); old.disconnect(true); }
         }
-        // Rotate on every successful re-join; previously issued tokens cannot be replayed.
-        player.secret = secret(); player.connected = true; player.socketId = socket.id;
+        if (retry) {
+          // Return the already-rotated token; do not spend it a second time.
+          previous!.socketId = socket.id;
+        } else {
+          player.resumeRetry = { secret: player.secret, socketId: socket.id, ...(proof.nonce ? { nonce: proof.nonce } : {}) };
+          player.secret = secret();
+        }
+        player.connected = true; player.socketId = socket.id;
       } else {
         if (room.stage !== "lobby") return ack({ ok: false, error: "The game has already started." });
         if (room.players.length >= MAX_PLAYERS) return ack({ ok: false, error: "Room is full." });
@@ -263,9 +312,9 @@ export class RoomManager {
         const text = line.slice(prefix?.[0].length ?? 0).trim();
         // Every host prompt must actually extract data about the room, not random spectacle.
         if (!text || !validPlaceholders(text) || !/(\{P(?:[1-9]|1[01])\}|\b(?:here|someone|anyone|person|people|player|friend|pair|room|each other|two of you)\b)/iu.test(text)) return this.err(socket, "INVALID_PROMPTS", "Every prompt must refer to someone in the room or a pair.");
-        // Conservative host-side guard; the complete shared prompt filter is
-        // owned by the provider agent and must also be wired at integration.
-        if (/\b(?:favou?rites?|zombies?|desert island|most likely to|underage|minors?|children|child|teens?|rape|molest|non.?consensual|without consent|oral sex|intercourse|blow.?job|hand.?job)\b/iu.test(text)) return this.err(socket, "INVALID_PROMPTS", "That prompt is not allowed in this game.");
+        // Host input must pass the same safety rules as generated prompts,
+        // plus the existing conservative checks for additional harmful wording.
+        if (checkBanned(text) || checkHardBlocked(text) || /\b(?:favou?rites?|zombies?|desert island|most likely to|underage|minors?|children|child|teens?|rape|molest|non.?consensual|without consent|oral sex|intercourse|blow.?job|hand.?job)\b/iu.test(text)) return this.err(socket, "INVALID_PROMPTS", "That prompt is not allowed in this game.");
         const kind: Prompt["kind"] = phase === "dare" ? (/\b(pair|two of you|each other)\b/i.test(text) ? "pair_dare" : "dare") : (/^\s*(who|which)\b/i.test(text) ? "pick" : "text");
         const coding: Prompt["coding"] = /\b(flirt|crush|romance|kiss)\b/i.test(text) ? "couple" : /\b(friend|appreciate)\b/i.test(text) ? "friendship" : /\b(trust|secret|honest)\b/i.test(text) ? "trust" : /\b(rival|argue|conflict)\b/i.test(text) ? "rivalry" : "neutral";
         custom.push({ id: `host-${phase}-${index + 1}`, source: "host", phase, kind, text, asksTarget: true, coding, measures: [kind === "dare" || kind === "pair_dare" ? "dareCompliance" : kind] });
@@ -304,10 +353,14 @@ export class RoomManager {
       if (!this.deleteRoom(found.room)) this.err(socket, "DELETE_FAILED", "Could not remove room storage; try again.");
     });
     socket.on("disconnect", () => {
-      const room = socket.data.roomCode ? this.rooms.get(socket.data.roomCode) : undefined;
+      const room = socket.data.roomCode ? this.liveRoom(socket.data.roomCode) : undefined;
       const player = room?.players.find((p) => p.id === socket.data.playerId && p.socketId === socket.id);
       if (!room || !player || room.stage === "deleted") return;
-      player.connected = false; player.socketId = undefined; room.votes.delete(player.id); room.lastActivity = this.now();
+      player.connected = false; player.socketId = undefined;
+      // A legacy retry is socket-bound; a nonce-bound pending request must
+      // survive a dropped connection so the same client can safely retry it.
+      if (!player.resumeRetry?.nonce) player.resumeRetry = undefined;
+      room.votes.delete(player.id); room.lastActivity = this.now();
       this.changed(room); this.checkVotes(room); this.maybeComplete(room);
     });
   }
@@ -330,16 +383,27 @@ export class RoomManager {
   }
   private phasePrompts(room: Room, phase: HeatPhase): Definition[] {
     let provided: Prompt[] = [];
-    try { const result = room.provider.forPhase(phase, 100, room.usedIds); if (Array.isArray(result)) provided = result; } catch { /* fallback */ }
+    try { const result = room.provider.forPhase(phase, 100, room.usedIds, room.players.length); if (Array.isArray(result)) provided = result; } catch { /* fallback */ }
     const fallback = new BankPromptProvider().forPhase(phase, 100, new Set());
-    const pool = [...room.custom.filter((p) => p.phase === phase && !room.usedIds.has(p.id)), ...provided, ...fallback].filter((p) => asSafePrompt(p, phase));
-    const desired: RoundKind[] = phase === "warmup" ? ["pick", "shout", "minigame"] : phase === "spicy" ? ["pick", "rating", "ios"] : phase === "deep" ? ["text", "rating", "pick"] : [...Array<RoundKind>(DARE_ROUNDS).fill("dare"), "pair_dare"];
+    // The packaged tap-war is authored as a warmup question. Reuse that same
+    // neutral bank prompt later so warmup can gather a public text callback.
+    const tapWar = phase === "deep" ? bankForPhase("warmup").filter((p) => p.kind === "minigame" && !room.usedIds.has(p.id)).map((p) => ({ ...p, phase })) : [];
+    const pool = [...room.custom.filter((p) => p.phase === phase && !room.usedIds.has(p.id)), ...provided, ...tapWar, ...fallback]
+      .filter((p) => asSafePrompt(p, phase) && maxPlaceholderIndex(p.text) <= room.players.length);
+    // One public text answer in warmup gives later chapters real material for
+    // callbacks. Every input kind and three coded picks still appear nightly.
+    const desired: RoundKind[] = phase === "warmup" ? ["pick", "shout", "text"] : phase === "spicy" ? ["pick", "rating", "ios"] : phase === "deep" ? ["text", "minigame", "pick"] : [...Array<RoundKind>(DARE_ROUNDS).fill("dare"), "pair_dare"];
     const slots = phase === "dare" ? desired : desired.slice(0, ROUNDS_PER_PHASE);
     const chosen = new Set<string>();
     return slots.map((kind) => {
       const permitted = (p: Prompt): boolean => phase === "dare" ? p.kind === kind : !["dare", "pair_dare", "debrief"].includes(p.kind);
       const candidates = pool.filter((p) => permitted(p) && !chosen.has(p.id));
+      // With only three pick slots, retain evidence for friendship, couple and
+      // negative claims even when generation is unavailable. Host prompts
+      // remain first and unused bank prompts remain preferred to repeats.
+      const pickCoding = phase === "warmup" ? "friction" : phase === "spicy" ? "couple" : "friendship";
       const prompt = candidates.find((p) => p.source === "host" && !room.usedIds.has(p.id)) ??
+        (kind === "pick" ? candidates.find((p) => p.kind === "pick" && p.coding === pickCoding && !room.usedIds.has(p.id)) : undefined) ??
         candidates.find((p) => p.kind === kind && !room.usedIds.has(p.id)) ?? candidates.find((p) => !room.usedIds.has(p.id)) ??
         candidates.find((p) => p.kind === kind) ?? candidates[0] ?? fallback.find((p) => p.kind === kind)!;
       chosen.add(prompt.id);
@@ -366,7 +430,32 @@ export class RoomManager {
     const rest = room.players.map((p) => p.id).filter((id) => !pair?.includes(id));
     for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(room.rng() * (i + 1)); [rest[i], rest[j]] = [rest[j]!, rest[i]!]; }
     const ids = [...(pair ?? []), ...rest];
-    return text.replace(/\{P(1[01]|[1-9])\}/g, (_whole, n: string) => room.players.find((p) => p.id === ids[(Number(n) - 1) % ids.length])?.alias ?? "someone");
+    return text.replace(/\{P(1[01]|[1-9])\}/g, (_whole, n: string) => room.players.find((p) => p.id === ids[Number(n) - 1])?.alias ?? "someone");
+  }
+  /** Add at most one callback per later phase. Only already-public text
+   * answers are eligible; private pair debriefs never enter this path. */
+  private withCallback(room: Room, definition: Definition, question: string): string {
+    const phase = definition.phase;
+    if (phase === "warmup" || phase === "debrief" || phase === "interlude" || phase === "lobby" || phase === "finale" || phase === "closed" ||
+        room.callbackPhases.has(phase) || definition.prompt.source === "host") return question;
+    const marker = "\n\nEarlier, someone said: “";
+    const maxQuote = 160 - question.length - marker.length - 2; // closing quote + optional ellipsis
+    if (maxQuote < 20) return question;
+    const quotes = room.log.flatMap((record) => record.roundKind === "text" && record.value.kind === "text" ? [record.value.text.trim()] : [])
+      .filter((quote) => quote.length >= 20 && !/[\u0000-\u001f\u007f“”]/u.test(quote) && !checkHardBlocked(quote));
+    const quote = quotes.find((value) => !room.callbackQuotes.has(value)) ?? quotes[0];
+    if (!quote) return question;
+    let excerpt = quote.slice(0, maxQuote);
+    if (/[\uD800-\uDBFF]$/.test(excerpt)) excerpt = excerpt.slice(0, -1);
+    if (excerpt.length < quote.length) {
+      const wordBoundary = excerpt.lastIndexOf(" ");
+      if (wordBoundary >= 20) excerpt = excerpt.slice(0, wordBoundary);
+    }
+    excerpt = excerpt.trimEnd();
+    if (excerpt.length < 20) return question;
+    room.callbackPhases.add(phase);
+    room.callbackQuotes.add(quote);
+    return `${question}${marker}${excerpt}”${excerpt.length < quote.length ? "…" : ""}`;
   }
   private nextRound(room: Room): void {
     if (room.stage === "deleted") return;
@@ -380,7 +469,8 @@ export class RoomManager {
     this.clearTimers(room); room.reveal = undefined; room.interlude = undefined; room.stage = "round";
     if (definition.kind === "pair_dare") { room.pair = this.pair(room); definition.onlyPlayers = [...room.pair]; }
     const startedAt = this.now();
-    const round: LiveRound = { ...definition, text: this.replacePlaceholders(room, definition.text, definition.onlyPlayers), id: `${room.id}-${++room.roundIndex}`, index: room.roundIndex, startedAt,
+    const question = this.replacePlaceholders(room, definition.text, definition.onlyPlayers);
+    const round: LiveRound = { ...definition, text: this.withCallback(room, definition, question), id: `${room.id}-${++room.roundIndex}`, index: room.roundIndex, startedAt,
       closesAt: startedAt + (this.options.roundTimers?.[definition.kind] ?? ROUND_TIMERS_MS[definition.kind]), responses: new Map() };
     room.round = round; room.usedIds.add(definition.prompt.id); this.changed(room);
     this.eachSocket(room, (socket, player) => socket.emit("round", this.roundView(round, player.id)));
@@ -393,7 +483,7 @@ export class RoomManager {
     const delay = min + Math.floor(room.rng() * (max - min + 1));
     const timer = setTimeout(() => {
       room.botTimers.delete(timer);
-      if (room.round?.id !== round.id || room.stage !== "round") return;
+      if (this.liveRoom(room.code) !== room || room.round?.id !== round.id || room.stage !== "round") return;
       const others = room.players.filter((p) => p.id !== player.id);
       const other = others[Math.floor(room.rng() * others.length)]!.id;
       const rand = (n: number): number => Math.floor(room.rng() * n);
@@ -487,6 +577,11 @@ export class RoomManager {
     this.clearTimers(room); room.stage = "interlude"; room.phase = "interlude"; room.round = null; room.reveal = undefined;
     let digest: NightDigest;
     try { digest = this.services.buildNightDigest(this.redactedLog(room).filter((r) => r.roundKind !== "debrief"), this.meta(room)); } catch { digest = emptyDigest(); }
+    if (next === "debrief" && room.provider.prepareAnalysis) {
+      // Start the optional public-text batch while players do their private
+      // debriefs. Never hold the next round or finale for an external service.
+      try { void room.provider.prepareAnalysis(this.redactedLog(room)).catch(() => {}); } catch { /* local tags remain available */ }
+    }
     const teaser = digest.pickTeasers[0] ? displayText(digest.pickTeasers[0], room.players) : undefined;
     const holdMs = this.options.interludeHoldMs ?? INTERLUDE_HOLD_MS;
     const view: InterludeView = { headline: cooled ? "Cooling things down" : next === "finale" ? "The room has spoken" : `Next: ${next}`, sub: cooled ? "The room chose a gentler level." : "Take a breath before the next chapter.", ...(teaser ? { teaser } : {}), holdMs };
@@ -521,7 +616,7 @@ export class RoomManager {
     const meta = this.meta(room), log = this.redactedLog(room);
     let signals, results, digest: NightDigest, decks: Map<PlayerId, SecretCard[]>;
     try { signals = this.services.computeSignals(log, meta); } catch { signals = fallbackServices.computeSignals(log, meta); }
-    try { results = this.services.computeResults(signals, log, meta); } catch { results = fallbackServices.computeResults(signals, log, meta); }
+    try { results = this.services.computeResults(signals, log, meta, room.provider); } catch { results = fallbackServices.computeResults(signals, log, meta); }
     // Debrief answers remain private even from the public digest and narrator.
     const publicLog = log.filter((r) => r.roundKind !== "debrief");
     try { digest = this.services.buildNightDigest(publicLog, meta); } catch { digest = fallbackServices.buildNightDigest(publicLog, meta); }
@@ -565,8 +660,8 @@ export class RoomManager {
     // therefore be purged immediately rather than waiting for the provider.
     privateDebriefs.length = 0; log.length = 0; signals = []; results = publicResults; digest = publicDigest;
     let skeleton: FinaleSlide[];
-    try { skeleton = this.services.buildSkeleton(publicResults, publicDigest); if (!Array.isArray(skeleton)) throw new Error("Invalid skeleton"); }
-    catch { skeleton = fallbackServices.buildSkeleton(publicResults, publicDigest); }
+    try { skeleton = this.services.buildSkeleton(publicResults, publicDigest, meta); if (!Array.isArray(skeleton)) throw new Error("Invalid skeleton"); }
+    catch { skeleton = fallbackServices.buildSkeleton(publicResults, publicDigest, meta); }
     // A provider polishing public slides receives public material only. In particular,
     // the private map never leaves this process or becomes input to public copy.
     // Engine-written secret copy remains the safe, useful no-key fallback.
@@ -574,9 +669,9 @@ export class RoomManager {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const deadline = new Promise<undefined>((resolve) => { timeout = setTimeout(() => resolve(undefined), this.options.writerTimeoutMs ?? 10_000); timeout.unref(); });
-      written = await Promise.race([Promise.resolve().then(() => this.services.writeFinale(structuredClone(skeleton), new Map(), structuredClone(publicResults), structuredClone(publicDigest))), deadline]);
+      written = await Promise.race([Promise.resolve().then(() => this.services.writeFinale(structuredClone(skeleton), new Map(), structuredClone(publicResults), structuredClone(publicDigest), meta, room.provider)), deadline]);
     } catch { /* deterministic template */ } finally { if (timeout) clearTimeout(timeout); }
-    if (room.stage !== "finale-building" || this.rooms.get(room.code) !== room) return;
+    if (room.stage !== "finale-building" || this.liveRoom(room.code) !== room) return;
     const publicIds = new Set(safeClaims.map((c) => c.id));
     const source = written && Array.isArray(written.slides) && written.slides.length === skeleton.length ? written.slides : skeleton;
     const slides: FinaleSlide[] = [];
@@ -586,6 +681,9 @@ export class RoomManager {
       const draft = source[i];
       const safeText = (candidate: unknown, original: string | undefined, title: boolean): string | undefined => {
         if (typeof candidate !== "string" || !candidate.trim() || candidate.length > (title ? 80 : 140) || (title && candidate.trim().split(/\s+/u).length > 6)) return original;
+        // The network writer only sees a pseudonymous roster, so perform the
+        // real-alias check here without ever sending that roster to a model.
+        if (pseudonymizeText(candidate, room.players) !== candidate) return original;
         // Numbers and player references may only come from the deterministic source.
         const numbers = (s: string): string[] => s.match(/\d+(?:\.\d+)?/g) ?? [];
         const allowed = new Set(numbers(`${original ?? ""} ${JSON.stringify(base.numbers ?? {})}`));
@@ -623,7 +721,7 @@ export class RoomManager {
   /** Also reaps logs left after an unclean server shutdown. */
   purge(): void {
     const now = this.now();
-    for (const room of this.rooms.values()) if (now - room.createdAt >= RETENTION_HOURS * HOUR || now - room.lastActivity >= IDLE_TTL_HOURS * HOUR) this.deleteRoom(room);
+    for (const room of this.rooms.values()) if (this.expired(room)) this.deleteRoom(room);
     const live = new Set([...this.rooms.values()].map((r) => r.file));
     try {
       for (const entry of readdirSync(this.options.dataDir, { withFileTypes: true })) {

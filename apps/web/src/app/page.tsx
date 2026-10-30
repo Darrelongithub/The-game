@@ -64,7 +64,9 @@ export default function PlayPage() {
 
   return (
     <>
-      <AnimatePresence mode="wait">
+      {/* Unmount the entire old room immediately when its session is cleared.
+          An exit animation must never retain a revealed private card. */}
+      <AnimatePresence key={inRoom ? "in-room" : "without-room"} mode="wait">
         {!inRoom && room.hasSession ? (
           <motion.div key="resuming" variants={pageVariants} initial="initial" animate="animate" exit="exit">
             <ResumeSplash onGiveUp={room.reset} />
@@ -103,14 +105,17 @@ export default function PlayPage() {
             />
           </motion.div>
         ) : (
-          <motion.div key="play" variants={pageVariants} initial="initial" animate="animate" exit="exit">
+          // Do not transform or blur this wrapper: finale and room controls
+          // are fixed to the viewport. A transformed zero-height wrapper made
+          // the entire finale invisible in real browsers.
+          <motion.div key="play" className="min-h-[100dvh]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
             <PlayScreen room={room} />
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Reconnect handling is global: it can hit any screen, any phase. */}
-      <ConnectionLostOverlay connected={room.connected} resuming={room.resuming} onRetry={room.retry} />
+      <ConnectionLostOverlay connected={room.connected} resuming={room.resuming} hasSession={room.hasSession} onRetry={room.retry} />
     </>
   );
 }

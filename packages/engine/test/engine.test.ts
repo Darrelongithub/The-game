@@ -10,6 +10,7 @@ import {
   computeResults,
   computeSignals,
   constrainedMatching,
+  jokerNominationWeights,
   maximumWeightMatching,
   mulberry32,
 } from "../src/index.ts";
@@ -85,7 +86,6 @@ test("golden 1: exact claim set, free agent, and claim numbers", () => {
   assert.deepEqual(claimSummary(results.claims), [
     { id: "ship-p1-p2", type: "ship", subjects: ["p1", "p2"], audience: "public", confidence: "high" },
     { id: "ship-p3-p4", type: "ship", subjects: ["p3", "p4"], audience: "public", confidence: "high" },
-    { id: "besties-p1-p5", type: "besties", subjects: ["p1", "p5"], audience: "public", confidence: "low" }, // overlap exactly 1/2 does not count; trait agreement only
     { id: "besties-p3-p4", type: "besties", subjects: ["p3", "p4"], audience: "public", confidence: "high" },
     { id: "spark-p1-p2", type: "spark", subjects: ["p1", "p2"], audience: "private", confidence: "high" },
     { id: "consensus-C2-p1", type: "consensus", subjects: ["p1"], audience: "public", confidence: "med" }, // single verdict round = med
@@ -131,7 +131,6 @@ test("golden 2: toxic percentile case, rivals, consensus — exact claim set", (
     { id: "ship-p1-p2", type: "ship", subjects: ["p1", "p2"], audience: "public", confidence: "high" },
     { id: "ship-p3-p5", type: "ship", subjects: ["p3", "p5"], audience: "public", confidence: "med" }, // mutualPick exactly 1/2 does not count
     { id: "besties-p1-p2", type: "besties", subjects: ["p1", "p2"], audience: "public", confidence: "med" }, // friendEvidence exactly 1/2 does not count
-    { id: "besties-p3-p5", type: "besties", subjects: ["p3", "p5"], audience: "public", confidence: "med" },
     { id: "spark-p1-p2", type: "spark", subjects: ["p1", "p2"], audience: "private", confidence: "high" },
     { id: "spark-p3-p5", type: "spark", subjects: ["p3", "p5"], audience: "private", confidence: "high" },
     { id: "rival-p1-p5", type: "rival", subjects: ["p1", "p5"], audience: "public", confidence: "med" }, // both pick rates strong; ratings agree, so no 3rd type
@@ -179,6 +178,7 @@ test("(a) everyone picks the same friend every round → NO high-confidence toxi
   const log = jokerLog();
   const meta = meta5("room-joker");
   const results = computeResults(computeSignals(log, meta), log, meta);
+  assert.equal(jokerNominationWeights(log, meta.players.map((player) => player.id)).get("p1"), 0.5);
   assert.deepEqual(results.claims.filter((c) => c.type === "toxic"), []); // stronger: no toxic claim at all
 });
 
@@ -360,4 +360,45 @@ test("private material never becomes public: spark + onesided audiences across f
       }
     }
   }
+});
+
+// Regression: the contract's IOS formula divides the two directions by 14;
+// an unanswered direction cannot be treated as another 7/7 vote.
+test("one-direction IOS contributes only its half of the pair score", () => {
+  const meta = meta5("one-direction");
+  const log = [{
+    roomId: meta.roomId, roundId: "ios", playerId: "p1", roundKind: "ios" as const,
+    promptId: "ios", coding: "friendship" as const,
+    value: { kind: "ios" as const, about: "p2", value: 7 }, at: 1, latencyMs: 1,
+  }];
+  approx(signal(computeSignals(log, meta), "p1", "p2").iosMean, 0.5, "one IOS direction");
+});
+
+test("ship and besties never publish a one-way positive nomination as mutual", () => {
+  const meta = meta5("one-way");
+  const log = [{
+    roomId: meta.roomId, roundId: "pick", playerId: "p1", roundKind: "pick" as const,
+    promptId: "pick", coding: "friendship" as const,
+    value: { kind: "pick" as const, target: "p2" }, at: 1, latencyMs: 1,
+  }];
+  const results = computeResults(computeSignals(log, meta), log, meta);
+  assert.ok(!results.claims.some((c) => c.type === "ship" || c.type === "besties"));
+});
+
+test("debrief Jaccard recognizes words in non-Latin scripts", () => {
+  const meta = meta5("unicode");
+  const log = ["p1", "p2"].map((playerId) => ({
+    roomId: meta.roomId, roundId: "debrief", playerId, roundKind: "debrief" as const,
+    promptId: "debrief", coding: "trust" as const,
+    value: { kind: "text" as const, text: "朋友 分享 快乐" }, at: 1, latencyMs: 1,
+  }));
+  approx(signal(computeSignals(log, meta), "p1", "p2").debriefSim, 1, "identical Unicode debriefs");
+});
+
+test("reveal opt-out suppresses every private card kind", () => {
+  const meta = meta5("room-digest", ["p2"]);
+  const log = digestLog();
+  const results = computeResults(computeSignals(log, meta), log, meta);
+  const decks = buildSecrets(results, buildNightDigest(log, meta), meta);
+  assert.ok([...decks.keys()].every((id) => id === "p2"));
 });

@@ -104,14 +104,11 @@ export function computeSignals(log: LogRecord[], meta: RoomMeta): PairSignal[] {
 
       const debriefSim = debriefSims.get(pairKey(a, b)) ?? 0.5;
 
-      // iosMean: (ios(a→b) + ios(b→a)) / 14 — i.e. mean of directional means / 7.
-      // A direction with no IOS records simply doesn't vote; none at all → 0.
-      const iosDirs: number[] = [];
-      const iab = ios.get(a)?.get(b);
-      const iba = ios.get(b)?.get(a);
-      if (iab !== undefined) iosDirs.push(iab);
-      if (iba !== undefined) iosDirs.push(iba);
-      const iosMean = iosDirs.length === 0 ? 0 : meanOf(iosDirs) / 7;
+      // Each direction contributes at most half: (ios(a→b) + ios(b→a)) / 14.
+      // Missing responses contribute zero, rather than doubling one person's vote.
+      const iab = ios.get(a)?.get(b) ?? 0;
+      const iba = ios.get(b)?.get(a) ?? 0;
+      const iosMean = (iab + iba) / 14;
 
       // traitAgreement: 1 − |self − peer|/9 per shared trait, both directions.
       const dirs: number[] = [];

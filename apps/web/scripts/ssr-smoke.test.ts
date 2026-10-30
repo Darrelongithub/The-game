@@ -53,9 +53,9 @@ const joinHtml = renderToString(
   })
 );
 ok("JoinScreen renders the alias field", joinHtml.includes("Your alias"));
-ok("JoinScreen renders the 18+ gate", joinHtml.includes("or older"));
+ok("JoinScreen omits the consent checkboxes and accompanying notice", !joinHtml.includes("18+") && !joinHtml.includes("house rules") && !joinHtml.includes("Private cards") && !joinHtml.includes("type=\"checkbox\""));
 ok("JoinScreen renders both tabs", joinHtml.includes("Create a room") && joinHtml.includes("Join a room"));
-ok("JoinScreen keeps the action disabled pre-consent", joinHtml.includes("disabled"));
+ok("JoinScreen keeps the action disabled without an alias", joinHtml.includes("disabled"));
 
 // LobbyScreen (host view)
 const lobbyHost = renderToString(

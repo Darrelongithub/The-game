@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react'
 import confetti from 'canvas-confetti'
 
-const LIME = '#b6ff3c'
+const LIME = '#efb4ff'
 const PURPLE = '#8b2fe0'
 const WHITE = '#f5f3ff'
 
@@ -23,7 +23,9 @@ export function prefersReducedMotion(): boolean {
 
 /** React hook form of prefersReducedMotion — tracks changes live. */
 export function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState<boolean>(prefersReducedMotion)
+  // Match the server's first render; the effect applies the browser setting
+  // immediately after hydration. CSS also suppresses motion before that.
+  const [reduced, setReduced] = useState(false)
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
