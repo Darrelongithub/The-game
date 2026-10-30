@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { io, type Socket } from "socket.io-client";
 import type { ClientToServerEvents, LogRecord, ResponseValue, RoundView, ServerToClientEvents } from "../../../packages/shared/src/contracts.ts";
-import { bootBanner, createGameServer, lanAddresses } from "../src/server.ts";
+import { bootBanner, createGameServer, lanAddresses, selectLanAddress } from "../src/server.ts";
 import { fallbackServices, type GameServices } from "../src/services.ts";
 
 type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -38,10 +38,12 @@ test("same-origin HTTP static export and preview-proxy Socket.IO origins", async
 test("LAN banner includes every non-loopback IPv4 URL and a QR code", () => {
   const fake: ReturnType<typeof networkInterfaces> = {
     lo: [{ address: "127.0.0.1", family: "IPv4", internal: true, cidr: "127.0.0.1/8", netmask: "255.0.0.0", mac: "00:00:00:00:00:00" }],
-    wifi: [{ address: "192.168.1.20", family: "IPv4", internal: false, cidr: "192.168.1.20/24", netmask: "255.255.255.0", mac: "00:00:00:00:00:01" }],
+    wlan0: [{ address: "192.168.1.20", family: "IPv4", internal: false, cidr: "192.168.1.20/24", netmask: "255.255.255.0", mac: "00:00:00:00:00:01" }],
+    docker0: [{ address: "172.17.0.1", family: "IPv4", internal: false, cidr: "172.17.0.1/16", netmask: "255.255.0.0", mac: "00:00:00:00:00:03" }],
     hotspot: [{ address: "10.0.0.2", family: "IPv4", internal: false, cidr: "10.0.0.2/24", netmask: "255.255.255.0", mac: "00:00:00:00:00:02" }],
   };
-  assert.deepEqual(lanAddresses(fake), ["10.0.0.2", "192.168.1.20"]);
+  assert.deepEqual(lanAddresses(fake), ["10.0.0.2", "172.17.0.1", "192.168.1.20"]);
+  assert.equal(selectLanAddress(fake), "192.168.1.20", "prefer Wi-Fi over hotspot and virtual bridge addresses");
   const original = console.log, output: string[] = [];
   try { console.log = (...args: unknown[]) => output.push(args.join(" ")); bootBanner(3001, "0.0.0.0", fake); } finally { console.log = original; }
   const text = output.join("\n");
@@ -53,7 +55,7 @@ test("three built-in bots answer on the production 600–3500ms delay", { timeou
   const dir = mkdtempSync(join(tmpdir(), "reveal-bots-delay-")), server = createGameServer({ dataDir: dir });
   const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
   t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
-  const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true } }, resolve));
+  const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" } }, resolve));
   assert.ok(made.ok);
   for (let i = 0; i < 3; i++) host.emit("add_bot");
   const records = new Promise<LogRecord[]>((resolve) => {
@@ -84,7 +86,7 @@ test("one host and three in-server bots can finish the entire game without API k
   const server = createGameServer({ dataDir: dir, services, writerTimeoutMs: 20, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2 });
   const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
   t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
-  const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true } }, resolve));
+  const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" } }, resolve));
   for (let i = 0; i < 3; i++) host.emit("add_bot");
   const done = event(host, "finale"), seen = new Set<string>();
   host.on("round", (round: RoundView) => {
@@ -95,8 +97,8 @@ test("one host and three in-server bots can finish the entire game without API k
       case "pick": value = { kind: "pick", target: "p2" }; break;
       case "shout": value = { kind: "shout", word: "vibes" }; break;
       case "text": case "debrief": value = { kind: "text", text: "I enjoyed a great conversation with someone here." }; break;
-      case "rating": value = { kind: "rating", trait: "warmth", about: "self", value: 7 }; break;
-      case "ios": value = { kind: "ios", about: "p2", value: 5 }; break;
+      case "rating": value = { kind: "rating", trait: round.trait!, about: round.about!, value: 7 }; break;
+      case "ios": value = { kind: "ios", about: round.about!, value: 5 }; break;
       case "minigame": value = { kind: "minigame", score: 23 }; break;
       case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
     }
@@ -126,7 +128,7 @@ test("delete during pending narration purges data and suppresses late finale/sec
   const server = createGameServer({ dataDir: dir, services, writerTimeoutMs: 5000, botDelayMs: [10000, 10000], revealHoldMs: 10000, interludeHoldMs: 10000 });
   const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
   t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
-  const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true } }, resolve));
+  const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" } }, resolve));
   for (let i = 0; i < 3; i++) host.emit("add_bot");
   let publicOrPrivateEvents = 0;
   host.on("finale", () => publicOrPrivateEvents++); host.on("secrets", () => publicOrPrivateEvents++);
@@ -137,6 +139,6 @@ test("delete during pending narration purges data and suppresses late finale/sec
   releaseWriter(); await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(publicOrPrivateEvents, 0, "late provider response must not resurrect a deleted room");
   const another = await socketFor(port);
-  const rejected = await new Promise<any>((resolve) => another.emit("join", { roomCode: made.code, alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, resume: { playerId: made.you, secret: made.secret } }, resolve));
+  const rejected = await new Promise<any>((resolve) => another.emit("join", { roomCode: made.code, alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" }, resume: { playerId: made.you, secret: made.secret } }, resolve));
   another.disconnect(); assert.equal(rejected.ok, false);
 });
