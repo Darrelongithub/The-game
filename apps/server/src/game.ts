@@ -1,5 +1,5 @@
 import { randomBytes, randomInt, timingSafeEqual, createHash } from "node:crypto";
-import { appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Server, Socket } from "socket.io";
 import {
@@ -25,6 +25,7 @@ interface Definition { prompt: Prompt; phase: Phase; kind: RoundKind; text: stri
 interface LiveRound extends Definition { id: string; index: number; startedAt: number; closesAt: number; responses: Map<string, ResponseValue>; targets?: Map<string, string>; trait?: typeof TRAITS[number]; pairPassed?: boolean; }
 interface SeenSubmit { roundId: string; fingerprint: string; }
 interface TimedEvent<T> { value: T; endsAt: number; }
+interface PersistedRoom { version: 1; id: string; code: string; createdAt: number; lastActivity: number; hostId: string; nextPlayer: number; players: Omit<Player, "connected" | "socketId">[]; }
 interface Room {
   id: string; code: string; createdAt: number; lastActivity: number; file: string; hostId: string;
   players: Player[]; phase: Phase; stage: Stage; seq: number; nextPlayer: number; roundIndex: number; dareCount: number;
@@ -53,6 +54,7 @@ export interface GameOptions {
   };
 }
 const HOUR = 60 * 60 * 1000;
+const metadataFile = (file: string): string => file.replace(/\.jsonl$/u, ".meta.json");
 const PAIR_KEY = (a: string, b: string): string => [a, b].sort().join("\u0000");
 const secret = (): string => randomBytes(32).toString("base64url");
 const safeEqual = (a: string, b: string): boolean => {
@@ -135,6 +137,7 @@ export class RoomManager {
     this.services = options.services ?? fallbackServices;
     this.now = options.now ?? Date.now;
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
+    this.restore();
     this.purge();
     this.sweepTimer = setInterval(() => this.purge(), HOUR);
     this.sweepTimer.unref();
@@ -151,6 +154,48 @@ export class RoomManager {
     room.players.forEach((p) => { p.secret = ""; p.alias = ""; }); room.players.length = 0;
     room.round = null; room.queue = []; room.custom = []; room.pair = undefined; room.reveal = undefined; room.interlude = undefined; room.finale = undefined;
     room.currentHeat = undefined; room.pendingHeatDown = undefined; room.provider.dispose?.(); room.provider = new BankPromptProvider();
+  }
+  private persistRoom(room: Room): void {
+    const file = metadataFile(room.file), temporary = `${file}.tmp`;
+    const state: PersistedRoom = {
+      version: 1, id: room.id, code: room.code, createdAt: room.createdAt, lastActivity: room.lastActivity,
+      hostId: room.hostId, nextPlayer: room.nextPlayer,
+      players: room.players.map(({ connected: _connected, socketId: _socketId, ...player }) => player),
+    };
+    try { writeFileSync(temporary, JSON.stringify(state), { encoding: "utf8", mode: 0o600 }); renameSync(temporary, file); }
+    catch { try { unlinkSync(temporary); } catch { /* ignore */ } }
+  }
+  private restore(): void {
+    let entries;
+    try { entries = readdirSync(this.options.dataDir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (!entry.isFile() || !/^\d{13}-[0-9a-f]{32}\.jsonl$/u.test(entry.name)) continue;
+      const file = join(this.options.dataDir, entry.name), metaFile = metadataFile(file);
+      try {
+        const state = JSON.parse(readFileSync(metaFile, "utf8")) as PersistedRoom;
+        if (state.version !== 1 || typeof state.id !== "string" || !isRoomCode(state.code) || !Array.isArray(state.players) || this.rooms.has(state.code)) continue;
+        const players: Player[] = state.players.map((p) => ({ ...p, connected: false })).filter((p) => validAlias(p.alias) && validConsent(p.consent) && validProfile(p.profile) && typeof p.id === "string" && typeof p.secret === "string" && typeof p.isBot === "boolean");
+        if (players.length !== state.players.length || players.length === 0 || !players.some(p => p.id === state.hostId)) continue;
+        const records = readFileSync(file, "utf8").split(/\r?\n/u).filter(Boolean).flatMap((line) => {
+          try {
+            const value = JSON.parse(line) as LogRecord;
+            return value && value.roomId === state.id && typeof value.roundId === "string" && players.some(p => p.id === value.playerId) && validSubmit(value.value, value.playerId) ? [value] : [];
+          } catch { return []; }
+        });
+        const createdAt = Number.isFinite(state.createdAt) ? state.createdAt : Number(entry.name.slice(0, 13));
+        const lastActivity = Math.max(Number.isFinite(state.lastActivity) ? state.lastActivity : createdAt, ...records.map(r => r.at));
+        const provider = this.services.createPromptProvider(state.id);
+        const room: Room = {
+          id: state.id, code: state.code, createdAt, lastActivity, file, hostId: state.hostId, players,
+          phase: "lobby", stage: "lobby", seq: records.length + 1, nextPlayer: Math.max(Number(state.nextPlayer) || 2, players.length + 1),
+          roundIndex: records.reduce((max, r) => Math.max(max, Number(r.roundId.match(/-(\d+)$/u)?.[1] ?? 0)), 0),
+          dareCount: records.filter(r => r.roundKind === "dare").length, provider, prepared: false, usedIds: new Set(records.map(r => r.promptId)), custom: [], log: records,
+          queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), decks: new Map(), rng: seedRng(state.id), botTimers: new Set(),
+        };
+        this.rooms.set(room.code, room);
+        if (records.length > 0) void this.finale(room);
+      } catch { /* Incomplete or corrupt metadata is ignored; never execute malformed replay data. */ }
+    }
   }
   private code(): string {
     for (let tries = 0; tries < 10000; tries++) {
@@ -224,7 +269,7 @@ export class RoomManager {
       try { provider = this.services.createPromptProvider(id); } catch { provider = new BankPromptProvider(); }
       const room: Room = { id, code, createdAt: now, lastActivity: now, file, hostId: player.id, players: [player], phase: "lobby", stage: "lobby", seq: 1, nextPlayer: 2, roundIndex: 0, dareCount: 0,
         provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set() };
-      this.rooms.set(code, room); socket.data = { roomCode: code, playerId: player.id }; void socket.join(code);
+      this.rooms.set(code, room); this.persistRoom(room); socket.data = { roomCode: code, playerId: player.id }; void socket.join(code);
       ack({ ok: true, code, you: player.id, secret: player.secret, state: this.view(room, player.id) });
       this.states(room);
     });
@@ -254,7 +299,7 @@ export class RoomManager {
           room.players.push(player);
         }
       }
-      room.lastActivity = this.now(); socket.data = { roomCode: room.code, playerId: player.id }; void socket.join(room.code);
+      room.lastActivity = this.now(); this.persistRoom(room); socket.data = { roomCode: room.code, playerId: player.id }; void socket.join(room.code);
       room.seq++;
       ack({ ok: true, you: player.id, secret: player.secret, state: this.view(room, player.id) });
       this.states(room); this.replay(room, socket, player); this.prepare(room);
@@ -273,7 +318,7 @@ export class RoomManager {
       if (room.players.length >= MAX_PLAYERS) return this.err(socket, "PLAYER_COUNT", "Room is full.");
       let n = 1; while (room.players.some((p) => p.alias.toLocaleLowerCase() === `🤖 Bot ${n}`.toLocaleLowerCase())) n++;
       room.players.push({ id: `p${room.nextPlayer++}`, alias: `🤖 Bot ${n}`, consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 30, relationship: "single", partnersToDate: 0, longestMonths: 0, crushingHere: false, tonight: "vibes" }, secret: "", isBot: true, connected: true });
-      this.changed(room); this.prepare(room);
+      this.persistRoom(room); this.changed(room); this.prepare(room);
     });
     socket.on("custom_prompts", (input) => {
       const found = this.host(socket); if (!found) return;
@@ -484,7 +529,7 @@ export class RoomManager {
       value, at, latencyMs: Math.max(0, at - round.startedAt), ...(round.kind === "dare" && round.performer ? { performerId: round.performer } : round.kind === "pair_dare" ? { performerId: player.id } : {}) };
     try { appendFileSync(room.file, `${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 }); }
     catch { return { ok: false, error: "Unable to save the answer." }; }
-    room.log.push(record); room.seen.set(key, { roundId: r.roundId, fingerprint }); round.responses.set(player.id, value); if (round.kind === "pair_dare" && value.kind === "dare" && value.status === "passed") round.pairPassed = true; room.lastActivity = at;
+    room.log.push(record); room.seen.set(key, { roundId: r.roundId, fingerprint }); round.responses.set(player.id, value); if (round.kind === "pair_dare" && value.kind === "dare" && value.status === "passed") round.pairPassed = true; room.lastActivity = at; this.persistRoom(room);
     this.options.audit?.persisted(room.code, room.file, { roundId: r.roundId, playerId: player.id, clientUuid: r.clientUuid });
     if (target) { const k = PAIR_KEY(player.id, target); room.interactions.set(k, (room.interactions.get(k) ?? 0) + 1); }
     this.changed(room);
@@ -681,6 +726,7 @@ export class RoomManager {
   }
   private deleteRoom(room: Room): boolean {
     try { unlinkSync(room.file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false; }
+    try { unlinkSync(metadataFile(room.file)); } catch { /* legacy room without metadata */ }
     room.stage = "deleted"; room.phase = "closed"; this.transitions.delete(room.id); this.rooms.delete(room.code);
     this.io.to(room.code).emit("deleted");
     this.eachSocket(room, (socket) => { socket.data = {}; void socket.leave(room.code); });
@@ -699,7 +745,7 @@ export class RoomManager {
         const file = join(this.options.dataDir, entry.name); if (live.has(file)) continue;
         try {
           const modified = statSync(file).mtimeMs;
-          if (now - Number(match[1]) >= RETENTION_HOURS * HOUR || now - modified >= IDLE_TTL_HOURS * HOUR) unlinkSync(file);
+          if (now - Number(match[1]) >= RETENTION_HOURS * HOUR || now - modified >= IDLE_TTL_HOURS * HOUR) { unlinkSync(file); try { unlinkSync(metadataFile(file)); } catch { /* absent sidecar */ } }
         } catch { /* Retry next sweep; never delete unrelated files. */ }
       }
     } catch { /* Retry next sweep. */ }

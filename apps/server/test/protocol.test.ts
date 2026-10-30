@@ -9,6 +9,7 @@ import { createGameServer, type ServerOptions } from "../src/server.ts";
 
 type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
 const consent = { age: true, terms: true, revealOptIn: true };
+const profile = { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" } as const;
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const limit = <T>(promise: Promise<T>, ms = 4000): Promise<T> => new Promise((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms);
@@ -32,16 +33,18 @@ async function setup(t: TestContext, options: ServerOptions = {}) {
   };
   return { server, connect, dir, base };
 }
-const create = (client: Client, alias = "Host"): Promise<JoinReply & { code?: string }> => new Promise((resolve) => client.emit("create", { alias, consent }, resolve));
-const joinRoom = (client: Client, code: string, alias: string, resume?: {playerId:string; secret:string}): Promise<JoinReply> => new Promise((resolve) => client.emit("join", { roomCode: code, alias, consent, ...(resume ? { resume } : {}) }, resolve));
+const create = (client: Client, alias = "Host"): Promise<JoinReply & { code?: string }> => new Promise((resolve) => client.emit("create", { alias, consent, profile }, resolve));
+const joinRoom = (client: Client, code: string, alias: string, resume?: {playerId:string; secret:string}): Promise<JoinReply> => new Promise((resolve) => client.emit("join", { roomCode: code, alias, consent, profile, ...(resume ? { resume } : {}) }, resolve));
 const submit = (client: Client, roundId: string, value: ResponseValue, clientUuid = "test-uuid"): Promise<{ok:boolean;error?:string}> => new Promise((resolve) => client.emit("submit", { roundId, value, clientUuid }, resolve));
 const expectError = async (client: Client, action: () => void, code: string): Promise<void> => { const promise = event<{code:string}>(client, "error"); action(); assert.equal((await limit(promise)).code, code); };
 
 test("validation, host controls, maximum seats, custom prompts and submit idempotency", async (t) => {
   const { connect, dir } = await setup(t, { botDelayMs: [10000, 10000], roundTimers: { pick: 10000, shout: 10000, minigame: 10000, text: 10000 }, graceMs: 1000, revealHoldMs: 10000, interludeHoldMs: 10000 });
   const host = await connect(), guest = await connect(), extra = await connect();
-  const underage: JoinReply = await new Promise((resolve) => host.emit("create", { alias: "Host", consent: { ...consent, age: false } }, resolve));
+  const underage: JoinReply = await new Promise((resolve) => host.emit("create", { alias: "Host", consent: { ...consent, age: false }, profile }, resolve));
   assert.equal(underage.ok, false);
+  const missingProfile = await new Promise<JoinReply>((resolve) => (host as any).emit("create", { alias: "Host", consent }, resolve));
+  assert.equal(missingProfile.ok, false, "creation requires all profile answers");
   assert.equal((await create(host, "x")).ok, false);
   const made = await create(host); assert.ok(made.ok && made.code && made.you);
   assert.equal((await joinRoom(guest, "OOOO", "Guest")).ok, false);
@@ -75,7 +78,7 @@ test("validation, host controls, maximum seats, custom prompts and submit idempo
   assert.equal((await submit(host, round.roundId, v, "same-id")).ok, true);
   assert.equal((await submit(host, round.roundId, { kind: "pick", target: "p3" }, "same-id")).ok, false);
   assert.equal((await submit(host, round.roundId, v, "different-id")).ok, false);
-  const lines = readFileSync(join(dir, readdirSync(dir)[0]!), "utf8").trim().split("\n");
+  const lines = readFileSync(join(dir, readdirSync(dir).find((name) => name.endsWith(".jsonl"))!), "utf8").trim().split("\n");
   assert.equal(lines.length, 1);
   assert.ok(!lines[0]!.includes("EXTRANEOUS_PRIVATE_FIELD"));
   const spicy = event<RoundView>(host, "round", (r) => r.phase === "spicy");
@@ -84,6 +87,91 @@ test("validation, host controls, maximum seats, custom prompts and submit idempo
   host.on("interlude", () => host.emit("skip_round"));
   host.emit("skip_round");
   assert.match((await limit(spicy)).promptText, /funniest secrets/);
+});
+
+
+test("rating rounds assign every phone a non-self subject and trait without dropdown selection", async (t) => {
+  const { connect } = await setup(t, { roundTimers: { pick: 10000, shout: 10000, minigame: 10000, rating: 10000 }, graceMs: 1000 });
+  const clients = await Promise.all(Array.from({ length: 4 }, () => connect()));
+  const made = await create(clients[0]!); const replies = [made];
+  for (let i = 1; i < clients.length; i++) replies.push(await joinRoom(clients[i]!, made.code!, `Rater${i}`));
+  const observations = clients.map(c => event<RoundView>(c, "round", r => r.kind === "rating"));
+  clients[0]!.on("round", r => { if (r.kind !== "rating") clients[0]!.emit("skip_round"); });
+  clients[0]!.on("interlude", () => clients[0]!.emit("skip_round"));
+  clients[0]!.emit("start");
+  const rounds = await Promise.all(observations);
+  for (let i = 0; i < rounds.length; i++) {
+    assert.equal(rounds[i]!.roundId, rounds[0]!.roundId);
+    assert.ok(rounds[i]!.about, "server must assign subject");
+    assert.notEqual(rounds[i]!.about, replies[i]!.you, "subject must not be self");
+    assert.ok(rounds[i]!.trait, "server must assign trait");
+  }
+});
+
+test("IOS rounds assign each phone a non-self subject", async (t) => {
+  const { connect } = await setup(t, { roundTimers: { pick: 10000, shout: 10000, minigame: 10000, rating: 10000, ios: 10000 }, graceMs: 1000 });
+  const clients = await Promise.all(Array.from({ length: 4 }, () => connect()));
+  const made = await create(clients[0]!); const replies = [made];
+  for (let i = 1; i < clients.length; i++) replies.push(await joinRoom(clients[i]!, made.code!, `IOS${i}`));
+  const observations = clients.map(c => event<RoundView>(c, "round", r => r.kind === "ios"));
+  clients[0]!.on("round", r => { if (r.kind !== "ios") clients[0]!.emit("skip_round"); });
+  clients[0]!.on("interlude", () => clients[0]!.emit("skip_round"));
+  clients[0]!.emit("start");
+  const rounds = await Promise.all(observations);
+  for (let i = 0; i < rounds.length; i++) {
+    assert.equal(rounds[i]!.roundId, rounds[0]!.roundId);
+    assert.ok(rounds[i]!.about, "server must assign an IOS subject");
+    assert.notEqual(rounds[i]!.about, replies[i]!.you, "IOS subject must not be self");
+  }
+});
+
+test("solo dare has one rotating performer; pair dare is shared and records both pass reasons", async (t) => {
+  const { connect, dir } = await setup(t, { roundTimers: { dare: 10000, pair_dare: 10000 }, graceMs: 1000, revealHoldMs: 5, interludeHoldMs: 5 });
+  const clients = await Promise.all(Array.from({ length: 4 }, () => connect()));
+  const made = await create(clients[0]!); const replies = [made];
+  for (let i = 1; i < clients.length; i++) replies.push(await joinRoom(clients[i]!, made.code!, `Dare${i}`));
+  const firstDareEvents = clients.map(c => event<RoundView>(c, "round", r => r.kind === "dare"));
+  clients[0]!.on("round", r => { if (r.kind !== "dare" && r.kind !== "pair_dare") clients[0]!.emit("skip_round"); });
+  clients[0]!.on("interlude", () => clients[0]!.emit("skip_round"));
+  clients[0]!.emit("start");
+  const dareViews = await Promise.all(firstDareEvents);
+  const solo = dareViews[0]!;
+  assert.ok(solo.performer);
+  assert.deepEqual(solo.onlyPlayers, [solo.performer]);
+  for (let i = 0; i < dareViews.length; i++) {
+    assert.equal(dareViews[i]!.performer, solo.performer);
+    const performerIndex = replies.findIndex(r => r.you === solo.performer);
+    const performerAlias = performerIndex === 0 ? "Host" : `Dare${performerIndex}`;
+    assert.ok(!solo.promptText.toLocaleLowerCase().includes(performerAlias.toLocaleLowerCase()), "dare copy must not name its performer");
+  }
+  const nonPerformer = replies.findIndex(r => r.you !== solo.performer);
+  assert.equal((await submit(clients[nonPerformer]!, solo.roundId, { kind: "dare", status: "done" }, "spectator-dare")).ok, false);
+  const secondDareEvents = clients.map(c => event<RoundView>(c, "round", r => r.kind === "dare" && r.roundId !== solo.roundId));
+  const pairEvents = clients.map(c => event<RoundView>(c, "round", r => r.kind === "pair_dare"));
+  clients[0]!.on("round", r => { if (r.kind === "dare" && r.roundId !== solo.roundId) clients[0]!.emit("skip_round"); });
+  assert.equal((await submit(clients[replies.findIndex(r => r.you === solo.performer)]!, solo.roundId, { kind: "dare", status: "done" }, "performer-done")).ok, true);
+  const secondDare = await Promise.all(secondDareEvents);
+  assert.notEqual(secondDare[0]!.performer, solo.performer, "successive dare turns rotate the performer fairly");
+  const pairViews = await Promise.all(pairEvents);
+  const pair = pairViews[0]!;
+  assert.ok(pair.onlyPlayers && pair.onlyPlayers.length === 2);
+  assert.ok(pair.promptText.startsWith("You two:"));
+  for (const id of pair.onlyPlayers!) {
+    const index = replies.findIndex(r => r.you === id);
+    assert.equal(pairViews[index]!.promptText, pair.promptText, "both participants receive identical instructions");
+    assert.deepEqual(pairViews[index]!.onlyPlayers, pair.onlyPlayers);
+  }
+  const a = replies.findIndex(r => r.you === pair.onlyPlayers![0]);
+  const b = replies.findIndex(r => r.you === pair.onlyPlayers![1]);
+  assert.equal((await submit(clients[a]!, pair.roundId, { kind: "dare", status: "passed", reason: "I am not comfortable." }, "pair-pass-a")).ok, true);
+  assert.equal((await submit(clients[b]!, pair.roundId, { kind: "dare", status: "done" }, "pair-done-b")).ok, false);
+  assert.equal((await submit(clients[b]!, pair.roundId, { kind: "dare", status: "passed", reason: "Not tonight for me." }, "pair-pass-b")).ok, true);
+  const rows = readFileSync(join(dir, readdirSync(dir).find((name) => name.endsWith(".jsonl"))!), "utf8").trim().split("\n").map(line => JSON.parse(line) as any);
+  const soloRecord = rows.find(r => r.roundId === solo.roundId);
+  assert.equal(soloRecord.performerId, solo.performer);
+  const pairRecords = rows.filter(r => r.roundId === pair.roundId);
+  assert.deepEqual(pairRecords.map(r => r.value.reason).sort(), ["I am not comfortable.", "Not tonight for me."].sort());
+  assert.deepEqual(pairRecords.map(r => r.performerId).sort(), [...pair.onlyPlayers!].sort());
 });
 
 test("timer honors grace, skip advances, and reconnect restores the personalized submitted snapshot", async (t) => {
@@ -98,6 +186,7 @@ test("timer honors grace, skip advances, and reconnect restores the personalized
   clients[0]!.emit("start"); const first = await limit(firstPromise);
   await wait(120); assert.equal(early, false, "timer alone must not close before grace");
   const reveal = await limit(revealPromise); assert.equal(reveal.roundId, first.roundId);
+  assert.ok(!(reveal.items ?? []).some((item) => /chose\s/i.test(item.text)), "pick targets must not be broadcast in round reveals");
   assert.ok(Date.now() >= first.closesAt + 90 - 15, "grace elapsed");
   const secondPromise = event<RoundView>(clients[0]!, "round", (r) => r.index === 2);
   clients[0]!.emit("skip_round");
@@ -106,7 +195,7 @@ test("timer honors grace, skip advances, and reconnect restores the personalized
   clients[3]!.disconnect();
   const resumed = await connect();
   const reconnect = await joinRoom(resumed, made.code!, "Guest3", { playerId: replies[3]!.you!, secret: replies[3]!.secret! });
-  assert.ok(reconnect.ok && reconnect.secret !== replies[3]!.secret);
+  assert.ok(reconnect.ok && reconnect.secret === replies[3]!.secret, "session secret remains stable for the room lifetime");
   assert.equal(reconnect.state?.round?.roundId, second.roundId);
   assert.equal(reconnect.state?.round?.youSubmitted, true);
   assert.ok((reconnect.state?.seq ?? 0) > (made.state?.seq ?? 0));
@@ -115,7 +204,12 @@ test("timer honors grace, skip advances, and reconnect restores the personalized
   const secondReveal = event<RevealView>(clients[0]!, "reveal", (r) => r.roundId === second.roundId);
   assert.equal((await submit(clients[0]!, first.roundId, { kind: "pick", target: replies[1]!.you! }, "stale")).ok, false);
   clients[2]!.disconnect(); // an unanswered disconnected player cannot hold the phase hostage
+  const reclaimed = await connect();
+  const aliasResume = await joinRoom(reclaimed, made.code!, "Guest2");
+  assert.ok(aliasResume.ok && aliasResume.you === replies[2]!.you, "alias + room code reclaims the disconnected seat without storage");
+  assert.equal(aliasResume.state?.round?.roundId, second.roundId, "reclaim restores the active round snapshot");
   for (const i of [0, 1]) assert.equal((await submit(clients[i]!, second.roundId, { kind: "shout", word: "vibes" }, `guest-${i}`)).ok, true);
+  assert.equal((await submit(reclaimed, second.roundId, { kind: "shout", word: "vibes" }, "reclaimed")).ok, true);
   assert.ok((await limit(secondReveal)).items?.[0]?.text.includes("vibes"));
 });
 
@@ -155,7 +249,7 @@ test("dare pass requires a bounded nonblank reason, including for the direct dar
   assert.equal((await submit(host, current.roundId, {kind:"dare",status:"passed"}, "bad")).ok, false);
   const accepted = event<RoundView>(host, "round", (r) => r.roundId === current.roundId && r.youSubmitted);
   host.emit("dare_pass", { roundId: current.roundId, reason: "My ankle needs a break." }); await limit(accepted);
-  const rows = readFileSync(join(dir, readdirSync(dir)[0]!), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  const rows = readFileSync(join(dir, readdirSync(dir).find((name) => name.endsWith(".jsonl"))!), "utf8").trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(rows.length, 1); assert.equal(rows[0].value.reason, "My ankle needs a break.");
 });
 

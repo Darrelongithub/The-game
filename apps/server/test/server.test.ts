@@ -51,6 +51,60 @@ test("LAN banner includes every non-loopback IPv4 URL and a QR code", () => {
   assert.match(text, /Scan to join/); assert.ok(output.length > 4, "QR code was rendered");
 });
 
+test("persisted JSONL replays to the same results after two server restarts", { timeout: 15000 }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "reveal-replay-"));
+  const outcomes: unknown[] = [];
+  let notify!: () => void;
+  let ready = new Promise<void>(resolve => { notify = resolve; });
+  const services: GameServices = {
+    ...fallbackServices,
+    computeResults(signals, log, meta) {
+      const result = fallbackServices.computeResults(signals, log, meta);
+      outcomes.push(structuredClone(result)); notify(); return result;
+    },
+  };
+  const profile = { age: 29, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" as const };
+  let server = createGameServer({ dataDir: dir, services, roundTimers: { pick: 10000 }, graceMs: 1000 });
+  let port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
+  const guests: Client[] = [];
+  t.after(async () => { host.disconnect(); guests.forEach(c => c.disconnect()); await server.close(); rmSync(dir, { recursive: true, force: true }); });
+  const made = await new Promise<any>(resolve => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile }, resolve));
+  for (let i = 0; i < 3; i++) {
+    const guest = await socketFor(port); guests.push(guest);
+    await new Promise(resolve => guest.emit("join", { roomCode: made.code, alias: `Replay${i}`, consent: { age: true, terms: true, revealOptIn: true }, profile }, resolve));
+  }
+  const activeRound = event<RoundView>(host, "round"); host.emit("start");
+  const round = await limit(activeRound);
+  assert.equal(round.kind, "pick");
+  const accepted = await new Promise<{ ok: boolean }>(resolve => host.emit("submit", { roundId: round.roundId, clientUuid: "replay-one", value: { kind: "pick", target: "p2" } }, resolve));
+  assert.equal(accepted.ok, true);
+  const logFile = readdirSync(dir).find(name => name.endsWith(".jsonl"))!;
+  const rawLog = readFileSync(join(dir, logFile), "utf8"); assert.equal(rawLog.trim().split("\\n").length, 1);
+  await server.close(); host.disconnect(); guests.forEach(c => c.disconnect());
+
+  const waitForReplay = async (count: number) => {
+    if (outcomes.length >= count) return;
+    ready = new Promise<void>(resolve => { notify = resolve; });
+    const timer = setTimeout(() => { throw new Error("room replay timed out"); }, 6000);
+    try { while (outcomes.length < count) await ready; } finally { clearTimeout(timer); }
+  };
+  server = createGameServer({ dataDir: dir, services });
+  await waitForReplay(1);
+  port = await server.listen(0, "127.0.0.1", false);
+  const resumed = await socketFor(port), finale = event(resumed, "finale");
+  const joined = await new Promise<any>(resolve => resumed.emit("join", { roomCode: made.code, alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, resume: { playerId: made.you, secret: made.secret } }, resolve));
+  assert.equal(joined.ok, true);
+  assert.equal(joined.state.phase, "finale");
+  assert.ok(await limit(finale));
+  await server.close(); resumed.disconnect();
+
+  ready = new Promise<void>(resolve => { notify = resolve; });
+  server = createGameServer({ dataDir: dir, services });
+  await waitForReplay(2);
+  assert.deepEqual(outcomes[1], outcomes[0], "same persisted JSONL yields deeply equal Results after restart");
+  await server.close();
+});
+
 test("three built-in bots answer on the production 600–3500ms delay", { timeout: 7000 }, async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "reveal-bots-delay-")), server = createGameServer({ dataDir: dir });
   const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
@@ -61,7 +115,7 @@ test("three built-in bots answer on the production 600–3500ms delay", { timeou
   const records = new Promise<LogRecord[]>((resolve) => {
     host.on("state", () => {
       const names = readdirSync(dir); if (!names.length) return;
-      const text = readFileSync(join(dir, names[0]!), "utf8").trim();
+      const text = readFileSync(join(dir, names.find((name) => name.endsWith(".jsonl"))!), "utf8").trim();
       const rows: LogRecord[] = text ? text.split("\n").map((line) => JSON.parse(line)) : [];
       if (rows.length >= 3) resolve(rows);
     });
@@ -105,7 +159,7 @@ test("one host and three in-server bots can finish the entire game without API k
     host.emit("submit", { roundId: round.roundId, clientUuid: `host-${round.roundId}`, value }, () => {});
   });
   host.emit("start"); await limit(done, 5000);
-  const rows: LogRecord[] = readFileSync(join(dir, readdirSync(dir)[0]!), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  const rows: LogRecord[] = readFileSync(join(dir, readdirSync(dir).find((name) => name.endsWith(".jsonl"))!), "utf8").trim().split("\n").map((line) => JSON.parse(line));
   const bots = rows.filter((r) => r.playerId !== made.you);
   assert.ok(prepared && readBank && writerStarted, "hung/failed providers were exercised without blocking play");
   assert.ok(bots.length > 30); assert.ok(bots.some((r) => r.roundKind === "pair_dare")); assert.ok(bots.some((r) => r.roundKind === "debrief"));

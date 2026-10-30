@@ -137,8 +137,8 @@ test("five real sockets complete all rounds; public finale is identical; private
   assert.ok(captured.length >= 2);
   for (const payload of captured) assert.ok(!payload.includes("Alice.*"), "real alias must not reach a service");
   assert.ok(!captured.at(-1)!.includes("PRIVATE_DEBRIEF"), "private debriefs never reach public writer");
-  const files = readdirSync(dir); assert.equal(files.length, 1);
-  const rawLog = readFileSync(join(dir, files[0]!), "utf8");
+  const files = readdirSync(dir); assert.equal(files.filter(name => name.endsWith(".jsonl")).length, 1);
+  const rawLog = readFileSync(join(dir, files.find(name => name.endsWith(".jsonl"))!), "utf8");
   assert.ok(!rawLog.includes("PRIVATE_SECRET"));
   const records: LogRecord[] = rawLog.trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(records.length, 68, "additional pick slots increase logged answers while solo dares remain performer-only");

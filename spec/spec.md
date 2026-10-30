@@ -181,8 +181,9 @@ pair_score(i,j) = weighted mean over measured components only; weights renormali
 - Reconnect = full snapshot. Payloads <5KB, JSON only.
 
 ## 9. Persistence & retention
-- v1: in-memory + one JSONL log per room (`apps/server/data/`).
-- Hourly purge: rooms older than 48h hard-deleted (files included).
+- v1: in-memory + one JSONL answer log per room (`apps/server/data/`) and an atomic mode-0600 metadata sidecar for room/player identity, consent, profiles, and resume credentials (inside a mode-0700 directory).
+- On restart, valid JSONL records are replayed through deterministic engine services; interrupted rounds are not resumed, and rooms with recorded answers recover as a replayed finale. Corrupt metadata/records are ignored safely.
+- Hourly purge: rooms older than 48h hard-deleted (log + sidecar included).
 - `delete_room` by ANY player → immediate hard delete + `deleted` broadcast.
 
 ## 10. Front-end stack & UI system
