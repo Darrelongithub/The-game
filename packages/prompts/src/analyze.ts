@@ -2,7 +2,7 @@
 // CODE-FIRST ANALYSIS. Everything here is deterministic code first; the Gemini
 // lane may REFINE at most once per night, per batch:
 //   • tagBatch     → ONE `PROVIDERS.gemini.tag` call for every text of the night
-//   • debriefBatch → ONE `PROVIDERS.gemini.analyze` call for every pair
+//   • debriefBatch → ONE `PROVIDERS.gemini.analyze` call for every pair; narration is never Gemini
 // Any invalid model output is ignored row-by-row and the code result stands.
 // Nothing here ever throws, and nothing here is allowed to change a number the
 // engine computes (spec §0.1: the LLM never produces a score — debrief
@@ -217,7 +217,7 @@ export async function tagBatch(texts: readonly string[], opts: TagBatchOptions):
   return refined;
 }
 
-/** Token-Jaccard debrief similarity, 0..1 (0.5 = unknown / either side blank). */
+/** Token-Jaccard debrief similarity, 0..1; blank text returns zero and missing records stay omitted. */
 export function debriefSimilarity(a: string, b: string): number {
   return jaccard(a, b);
 }

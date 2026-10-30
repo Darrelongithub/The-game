@@ -3,7 +3,9 @@
 // network, no Date.now(), no unseeded randomness anywhere in this package.
 import {
   CONFIDENCE_RULES,
+  CONSENSUS_MIN_PICKERS,
   MIN_PLAYERS,
+  SPARK_MIN_MUTUAL,
   pseudonym,
   type Confidence,
   type LogRecord,
@@ -30,7 +32,7 @@ export const ENGINE_TUNING = {
     pickOverlap: 0.5,
     mutualPick: 0.5,
     evidence: 0.5,
-    debriefSim: 0.5, // strictly greater than this (0.5 itself means "unknown")
+    debriefSim: 0.6, // measured similarity must clear this evidence bar
     iosMean: 0.65,
     traitAgreement: 0.8, // uniform-random ratings average ~0.633; 0.8 means mean |self-peer| <= 1.8
   },
@@ -44,11 +46,12 @@ export const ENGINE_TUNING = {
   blindspotMinRaters: 2,
   blindspotSecretMinGap: 1,
   onesided: { minRate: 0.5, maxReverseRate: 0.25, minGap: 0.5, minPositivePicks: 2 },
-  consensusMinVoters: 3,
+  consensusMinVoters: CONSENSUS_MIN_PICKERS,
 } as const;
 
 export const POSITIVE_CODINGS: ReadonlySet<PromptCoding> = new Set(["couple", "friendship"]);
 export const NEGATIVE_CODINGS: ReadonlySet<PromptCoding> = new Set(["friction", "rivalry"]);
+export { SPARK_MIN_MUTUAL };
 
 export const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 
@@ -250,15 +253,15 @@ export function buildIosIndex(log: readonly LogRecord[]): Map<PlayerId, Map<Play
 export const tokenize = (text: string): Set<string> =>
   new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 0));
 
-/** Jaccard over lowercase alphanumeric token sets. Both empty → 0.5 (unknown). */
+/** Jaccard over lowercase alphanumeric token sets. Both empty → 0 (measured absence). */
 export function tokenJaccard(a: string, b: string): number {
   const sa = tokenize(a);
   const sb = tokenize(b);
-  if (sa.size === 0 && sb.size === 0) return 0.5;
+  if (sa.size === 0 && sb.size === 0) return 0;
   let inter = 0;
   for (const t of sa) if (sb.has(t)) inter++;
   const union = sa.size + sb.size - inter;
-  return union === 0 ? 0.5 : inter / union;
+  return union === 0 ? 0 : inter / union;
 }
 
 /**
@@ -268,7 +271,7 @@ export function tokenJaccard(a: string, b: string): number {
  *  2. else debrief records sharing a promptId with exactly 2 distinct players
  *     (pair not already found in step 1);
  *  3. else, if exactly 2 players in the whole log have debrief texts, them.
- * Pairs with no determination get debriefSim 0.5 ("unknown") upstream.
+ * Missing debrief data produces no component value; it never invents a midpoint.
  */
 export function buildDebriefSims(log: readonly LogRecord[]): Map<string, number> {
   const textsByPlayer = new Map<PlayerId, string[]>();

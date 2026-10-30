@@ -4,7 +4,7 @@ import type { LogRecord, ResponseValue, RoomMeta, RoundKind } from "../../../pac
 import { buildNightDigest, buildSecrets, buildSkeleton, computeResults, computeSignals } from "../src/services.ts";
 
 test("offline signals, digest and secrets are deterministic and private", () => {
-  const meta: RoomMeta = { roomId: "room", players: [1,2,3,4].map((i) => ({ id: `p${i}`, alias: `Player ${i}` })), revealOptIn: ["p1", "p2", "p3"] };
+  const meta: RoomMeta = { roomId: "room", players: [1,2,3,4].map((i) => ({ id: `p${i}`, alias: `Player ${i}` })), revealOptIn: ["p1", "p2", "p3"], profiles: {} };
   const row = (roundId: string, playerId: string, value: ResponseValue, roundKind: RoundKind = value.kind): LogRecord => ({ roomId: "room", roundId, playerId, roundKind, promptId: "prompt", coding: "couple", value, at: 1000, latencyMs: 400 });
   const log: LogRecord[] = [
     row("pick", "p1", { kind:"pick",target:"p2" }), row("pick", "p2", { kind:"pick",target:"p1" }),
@@ -18,7 +18,7 @@ test("offline signals, digest and secrets are deterministic and private", () => 
   ];
   const signals = computeSignals(log, meta), pair = signals.find((s) => s.a === "p1" && s.b === "p2")!;
   assert.equal(pair.pickOverlap, 0); assert.equal(pair.mutualPick, 1); assert.equal(pair.debriefSim, 1);
-  assert.equal(pair.iosMean, 1); assert.equal(pair.traitAgreement, 1); assert.ok(Math.abs(pair.pairScore - 0.70) < 1e-12);
+  assert.equal(pair.iosMean, 1); assert.equal(pair.traitAgreement, 1); assert.equal(pair.pairScore, 1, "all measured positive pair components score 1; absent overlap is not a vote");
   assert.deepEqual(computeSignals(log, meta), signals);
   const results = computeResults(signals, log, meta), digest = buildNightDigest(log, meta);
   assert.deepEqual(computeResults(signals, log, meta), results);
