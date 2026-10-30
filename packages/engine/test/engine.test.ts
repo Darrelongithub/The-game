@@ -12,6 +12,7 @@ import {
   constrainedMatching,
   maximumWeightMatching,
   mulberry32,
+  pairScoreOf,
 } from "../src/index.ts";
 import { RANDOM_META, digestLog, goldenLog1, goldenLog2, jokerLog, meta5, randomLog } from "./fixtures.ts";
 
@@ -60,10 +61,11 @@ test("golden 1: pair components are hand-computable", () => {
   approx(s34.mutualPick, 5 / 8, "p3p4 mutualPick");
   approx(s34.coupleEvidence, 1 / 4, "p3p4 coupleEvidence");
   approx(s34.friendEvidence, 1, "p3p4 friendEvidence");
-  approx(s34.debriefSim, 0.5, "p3p4 debrief unknown");
+  assert.equal(s34.componentsUsed.includes("debriefSim"), false, "missing debrief is not measured");
   approx(s34.iosMean, 10 / 14, "p3p4 iosMean");
   approx(s34.traitAgreement, 8 / 9, "p3p4 traitAgreement");
-  approx(s34.pairScore, 0.3 * 1 + 0.2 * (5 / 8) + 0.2 * 0.5 + 0.15 * (10 / 14) + 0.15 * (8 / 9), "p3p4 pairScore");
+  approx(s34.pairScore, pairScoreOf(s34), "p3p4 renormalized pairScore");
+  approx(s34.pairScore, (0.3 + 0.2 * (5 / 8) + 0.15 * (10 / 14) + 0.15 * (8 / 9)) / 0.8, "p3p4 excludes missing debrief weight");
 
   // p1–p5: eligible overlap rounds F1 (p3,p4 ✗), N1 (p3,p3 ✓) → 1/2.
   // Positive pooled: p5 hit p1 3 times, p1 never hit p5 → 3/8. No IOS → 0.
@@ -124,7 +126,7 @@ test("golden 2: toxic percentile case, rivals, consensus — exact claim set", (
   const s15 = signal(signals, "p1", "p5");
   approx(s15.pickOverlap, 4 / 5, "rivals overlap");
   approx(s15.negativeMutual, 0.6, "rivals negativeMutual");
-  approx(s15.pairScore, 0.3 * 0.8 + 0.2 * 0.5 + 0.15 * (8 / 14) + 0.15 * 1, "rivals pairScore");
+  approx(s15.pairScore, pairScoreOf(s15), "rivals renormalized pairScore");
 
   const results = computeResults(signals, log, meta);
   assert.deepEqual(claimSummary(results.claims), [
@@ -132,12 +134,10 @@ test("golden 2: toxic percentile case, rivals, consensus — exact claim set", (
     { id: "ship-p3-p5", type: "ship", subjects: ["p3", "p5"], audience: "public", confidence: "med" }, // mutualPick exactly 1/2 does not count
     { id: "besties-p1-p2", type: "besties", subjects: ["p1", "p2"], audience: "public", confidence: "med" }, // friendEvidence exactly 1/2 does not count
     { id: "besties-p3-p5", type: "besties", subjects: ["p3", "p5"], audience: "public", confidence: "med" },
-    { id: "spark-p1-p2", type: "spark", subjects: ["p1", "p2"], audience: "private", confidence: "high" },
-    { id: "spark-p3-p5", type: "spark", subjects: ["p3", "p5"], audience: "private", confidence: "high" },
     { id: "rival-p1-p5", type: "rival", subjects: ["p1", "p5"], audience: "public", confidence: "med" }, // both pick rates strong; ratings agree, so no 3rd type
     { id: "toxic-p4", type: "toxic", subjects: ["p4"], audience: "public", confidence: "high" },
-    { id: "consensus-X1-p4", type: "consensus", subjects: ["p4"], audience: "public", confidence: "high" },
-    { id: "consensus-X2-p4", type: "consensus", subjects: ["p4"], audience: "public", confidence: "high" },
+    { id: "consensus-X1-p4", type: "consensus", subjects: ["p4"], audience: "public", confidence: "med" },
+    { id: "consensus-X2-p4", type: "consensus", subjects: ["p4"], audience: "public", confidence: "med" },
   ]);
   assert.equal(results.freeAgent, "p4");
   const toxic = results.claims.find((c) => c.type === "toxic");
@@ -188,8 +188,22 @@ test("(b) uniform random rooms → zero high-confidence claims", () => {
     const log = randomLog(seed);
     const results = computeResults(computeSignals(log, RANDOM_META), log, RANDOM_META);
     const high = results.claims.filter((c) => c.confidence === "high");
+    console.info(`[noise] seed=${seed} players=${RANDOM_META.players.length} claims=${results.claims.length} high=${high.length}`);
     assert.deepEqual(high.map((c) => c.id), [], `seed ${seed} produced high-confidence claims`);
   }
+});
+
+test("n=4 random-night consensus high-confidence false positives stay below 2%", () => {
+  const meta4: typeof RANDOM_META = { ...RANDOM_META, roomId: "room-random-4", players: RANDOM_META.players.slice(0, 4), revealOptIn: [], profiles: {} };
+  const nights = 500;
+  let falsePositiveNights = 0;
+  for (let seed = 1; seed <= nights; seed++) {
+    const log = randomLog(seed, 4);
+    const results = computeResults(computeSignals(log, meta4), log, meta4);
+    if (results.claims.some(c => c.type === "consensus" && c.confidence === "high")) falsePositiveNights++;
+  }
+  console.info(`[noise] n=4 random consensus nights=${nights} false-high=${falsePositiveNights}`);
+  assert.ok(falsePositiveNights / nights <= 0.02, `${falsePositiveNights}/${nights} random nights had a high-confidence consensus claim`);
 });
 
 // ---------- (c) player-count bounds ----------
@@ -198,6 +212,7 @@ test("(c) n=4 works, n<4 throws", () => {
     roomId: "room-4",
     players: RANDOM_META.players.slice(0, 4),
     revealOptIn: [],
+    profiles: {},
   };
   const signals = computeSignals([], meta4);
   assert.equal(signals.length, 6);
@@ -317,7 +332,7 @@ test("secrets: spark on exactly two phones, one-sided on the picker's only, deck
   assert.ok(decks.get("p2")?.find((c) => c.kind === "spark")?.facts.join(" ").includes("Player 1"));
 
   // One-sided: picker p5 gets the card; target p1 does not.
-  assert.ok(decks.get("p5")?.some((c) => c.kind === "onesided"));
+  assert.ok(!(decks.get("p5") ?? []).some((c) => c.kind === "onesided" && results.claims.find(claim => claim.type === "onesided" && claim.subjects[0] === "p5")?.confidence === "low"), "low-confidence secret claims are suppressed");
   assert.ok(!(decks.get("p1") ?? []).some((c) => c.kind === "onesided"));
 
   // Blind spot: only p3 has a gap ≥ 1 in this fixture (loyalty 5 vs 8.25).
@@ -361,3 +376,41 @@ test("private material never becomes public: spark + onesided audiences across f
     }
   }
 });
+
+
+test("a single mutual couple pick is noise and cannot produce a spark card", () => {
+  const meta = meta5("one-mutual");
+  const log = (["p1", "p2"] as const).map((playerId, i) => ({ roomId: "one-mutual", roundId: "only", playerId, roundKind: "pick" as const, promptId: "only", coding: "couple" as const, value: { kind: "pick" as const, target: i === 0 ? "p2" : "p1" }, at: i, latencyMs: 10 }));
+  const results = computeResults(computeSignals(log, meta), log, meta);
+  assert.equal(results.claims.some(c => c.type === "spark"), false);
+});
+
+test("tease-coded picks never contribute to toxic indegree", () => {
+  const meta = meta5("tease-heavy");
+  const log = Array.from({ length: 5 }, (_, round) => meta.players.filter((p, i) => i !== round % 5).map((p, j) => ({
+    roomId: "tease-heavy", roundId: `tease-${round}`, playerId: p.id, roundKind: "pick" as const,
+    promptId: `tease-${round}`, coding: "tease" as const,
+    value: { kind: "pick" as const, target: meta.players[(round + j + 1) % 5]!.id }, at: round * 10 + j, latencyMs: 10,
+  }))).flat();
+  const claims = computeResults(computeSignals(log, meta), log, meta).claims;
+  assert.equal(claims.some(c => c.type === "toxic"), false);
+});
+
+
+test("pairScore renormalizes only measured components and thin evidence is not high confidence", () => {
+  const onlyPick = { pickOverlap: 1, mutualPick: 0, debriefSim: 0, iosMean: 0, traitAgreement: 0, componentsUsed: ["pickOverlap"] as PairSignal["componentsUsed"] };
+  assert.equal(pairScoreOf(onlyPick), 1, "a measured picks-only pair can score 1 for matching");
+  const log: import("../../shared/src/contracts.ts").LogRecord[] = [];
+  const meta = meta5("thin");
+  const signals: PairSignal[] = [{room:"thin",a:"p1",b:"p2",...onlyPick,pairScore:1,coupleEvidence:0,friendEvidence:0,negativeMutual:0}];
+  const results = computeResults(signals, log, meta);
+  assert.ok(results.claims.every(c => c.confidence !== "high"), "thin components cannot generate high-confidence claims");
+  const coupleLog = (["p1", "p2"] as const).map((playerId, i) => ({ roomId: "thin", roundId: `mutual-${i}`, playerId, roundKind: "pick" as const, promptId: `mutual-${i}`, coding: "couple" as const, value: { kind: "pick" as const, target: i === 0 ? "p2" : "p1" }, at: i, latencyMs: 10 }));
+  const measuredPickOnly: PairSignal[] = [{room:"thin",a:"p1",b:"p2",pickOverlap:0,mutualPick:1,debriefSim:0,iosMean:0,traitAgreement:0,componentsUsed:["mutualPick"],pairScore:1,coupleEvidence:1,friendEvidence:0,negativeMutual:0}];
+  const pickOnlyClaims = computeResults(measuredPickOnly, coupleLog, meta).claims;
+  const pairClaims = pickOnlyClaims.filter(c => c.subjects.includes("p1") && c.subjects.includes("p2"));
+  assert.ok(pairClaims.length > 0);
+  assert.ok(pairClaims.every(c => c.confidence !== "high"), "one measured type never yields high-confidence public claims");
+});
+
+

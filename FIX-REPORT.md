@@ -1,0 +1,44 @@
+# Remediation report
+
+**Decision: NO-GO.** This turn implements the requested shared-contract baseline and the pick-target privacy correction, but does not complete the P0 blockers or the remainder of R1–R17. Do not run a real game night on this branch as a remediated release.
+
+## Completed
+
+- **Step 1 — contract baseline:** Added `tease`, personalized RoundView metadata, dare performer log metadata, role/profile contract and `PROFILE_QUESTIONS`, requested tunables, and updated provider constants. Mirrored the contract summary in `spec/spec.md`; added optional model overrides in `.env.example`; added selfcheck assertions for all three new tunables.
+  - Evidence: `npx -y tsx scripts/selfcheck.ts` — **34 checks passed**.
+- **R4 — pick secrecy:** Removed the round-reveal `Chose <name>` entry. Added a protocol regression assertion that fails if a pick reveal contains a “Chose” item.
+  - Evidence: protocol test passed in the suite run below.
+- **Contract integration cleanup:** Added empty profile maps to existing RoomMeta fixtures and adjusted stale Gemini `reveal` model references so the contract typechecks. This is compile compatibility only; it does not implement profile collection or route finale narration through Grok.
+  - Evidence: `npm run typecheck` passed.
+
+## Not completed / release blockers
+
+- **R1 — rating/IOS subjects:** Implemented server-assigned non-self subjects and rating traits, submit enforcement, personalized RoundView metadata, live submitted IDs, and removed client dropdowns. Regression test checks four personalized rating views. IOS uses the same assignment path; an explicit IOS-only metadata assertion remains desirable.
+- **R2 — solo dares:** One rotating performer per dare; only that phone can answer, prompts are substituted without naming the performer, spectators see the same prompt, and `performerId` is persisted.
+- **R3 — pair dares:** Both players receive identical “You two:” instructions. A pass blocks the other player from marking it done; both must submit a required reason, recorded separately. Debriefs remain `onlyPlayers`-private.
+- **R5 — profile collection/enforcement:** Added a `PROFILE_QUESTIONS`-driven join flow for age, relationship, dating history, private-crush status, and tonight intent; age is hard-gated at 18+, and existing consent choices remain required. Create and first-time join now validate and store bounded profile data; room metadata carries profiles into the engine, bots receive deterministic neutral profiles, and resume/reclaim paths retain the seat's stored profile. Added protocol regressions for missing create/join profiles. Raw profile answers are not included in RoomView or shown directly in UI. Regression coverage rejects missing profiles at both creation and first join. The web mock-flow (53 checks), Socket.IO transport test, strict typecheck, selfcheck (34/34), server suite (20/20), and engine/prompts/narrator suite (171/171) passed. This R5 item is ready for its per-item commit; later requirements remain outstanding.
+- **R6 — rejoin:** Resume credentials stay stable; active credential replay cannot displace an already-connected seat; disconnected seat can be reclaimed mid-round by alias + room code. Protocol test verifies same seat and active-round snapshot.
+- **R7 — pseudonymization:** Implemented Unicode word-boundary substitution, stable alias table, and deterministic swap-back; tests cover Ian/Brian, overlapping aliases, and reverse mapping.
+- **R8 — statistical gates:** Spark requires at least two mutual couple-coded picks in each direction; consensus uses the picker threshold and allows below-threshold claims only when unanimous, capped at medium confidence. Secret generation suppresses low-confidence claims. Single-mutual spark regression passes. Consensus high confidence now requires the same target on the same coding to clear the threshold in three independent rounds. A 500-night n=4 randomized regression recorded 0 high-confidence consensus false positives (≤2%).
+- **R9 — tease coding:** Toxic indegree remains limited to friction/rivalry; added `tease` to server prompt validation and recoded w4, s2, u8, u16 in the prompt bank/source references. Added a tease-heavy no-toxic-claim regression test.
+- **R10–R11:** Profile-derived signals and increased pick-round density are not implemented.
+- **R12–R13:** LAN interface selection improvements and deterministic JSONL replay after restart are not implemented.
+- **R14–R17:** Grok finale/secret narration, increased generated prompt share, display role/stage UI, lazy loading/bundle-size target and audit remediation are not implemented. No Android/iPhone real-device pass was performed.
+- **Bot/acceptance verification:** Latest full test run passed **190/190 tests**; `npm run smoke:verified` passed the external-socket phase, finale equality, secret ownership/deck-limit, duplicate persistence, active/finale resume, dare-pass, and deletion checks. These do not cover unfinished profiles, performer/pair-dare behavior, display role, or restart replay.
+
+## Follow-up clarifications R18–R20
+
+- **R18 — measured-only pair scoring:** Implemented `PairSignal.componentsUsed`, renormalization over measured components only, and removed the 0.5 debrief unknown default. Measured zero is retained as data; missing components are excluded. Pair confidence counts only independent measured components. Regression covers a picks-only pair scoring 1.0 while yielding no high-confidence claim.
+- **R19 — Gemini reveal removal/model override:** Removed Gemini narration from `writeFinale`; it is deterministic template output. Gemini reveal requests are explicitly rejected before network access. `GEMINI_MODEL` is resolved by one shared helper for both provider analysis call sites and the legacy narrator transport helper. Tests assert zero Gemini network calls for finale and override coverage.
+- **R20 — deterministic runtime:** No wall-clock APIs/cutoffs exist in `packages/engine/src`. Toxic Monte Carlo is one room-level simulation over all candidates. Noise tests print one line per seed/night; same-log determinism is asserted. For an 11-player / 1,320-pick log, isolated 5-run medians were **362.2 ms before** and **424.5 ms after** the measured-component change (single-process timings were noisy); the final isolated perf test measured **308.2 ms**, below the 2 s requirement. No MC change was needed.
+
+## Validation run
+
+- `npx -y tsx scripts/selfcheck.ts` — PASS (34/34).
+- `npm run typecheck` — PASS.
+- `npm run smoke:verified` — PASS: phases, finale equality, secret ownership/deck limits, duplicate persistence, active/finale resume, dare pass, deletion.
+- `npx tsx --test packages/engine/test/engine.test.ts packages/engine/test/performance.test.ts` — PASS (engine regressions, noise output, deterministic equality, measured-only pair score, and 11-player perf).
+- `npx tsx --test apps/server/test/pseudonyms.test.ts` — PASS (2 tests).
+- `npx tsx --test apps/server/test/protocol.test.ts` — PASS (7 tests, including R1–R3, stable credential and alias reclaim).
+- `npx tsx --test apps/server/test/*.test.ts packages/engine/test/*.test.ts packages/prompts/test/*.test.ts packages/narrator/test/*.test.ts` — PASS (190/190).
+- **Real-device test script (requires human):** On one Android phone and one iPhone, create a room, join four players, background/kill one tab mid-round, clear its session storage, reclaim with alias + room code, complete a rating/IOS round and both dare types, verify no pick identities appear before finale, then verify the big-screen display receives public beats only and no private deck. Confirm the room resumes after a server restart. Record OS/browser versions and results before release.

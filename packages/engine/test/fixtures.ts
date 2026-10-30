@@ -85,6 +85,7 @@ export const meta5 = (roomId: string, revealOptIn: PlayerId[] = ["p1", "p2", "p3
     { id: "p5", alias: "Eli" },
   ],
   revealOptIn,
+  profiles: {},
 });
 
 // ---------------------------------------------------------------------------
@@ -198,11 +199,12 @@ export const RANDOM_META: RoomMeta = {
   roomId: "room-random",
   players: ["p1", "p2", "p3", "p4", "p5", "p6"].map((id, i) => ({ id, alias: `Rnd${i + 1}` })),
   revealOptIn: ["p1", "p2", "p3", "p4", "p5", "p6"],
+  profiles: {},
 };
 
-export function randomLog(seed: number): LogRecord[] {
+export function randomLog(seed: number, playerCount = RANDOM_META.players.length): LogRecord[] {
   const rng = mulberry32(seed);
-  const ids = RANDOM_META.players.map((p) => p.id);
+  const ids = RANDOM_META.players.slice(0, playerCount).map((p) => p.id);
   const b = new LogBuilder("room-random");
   const codings: PromptCoding[] = ["couple", "friendship", "friction", "rivalry", "trust", "status"];
   const pickTarget = (self: PlayerId): PlayerId => {
