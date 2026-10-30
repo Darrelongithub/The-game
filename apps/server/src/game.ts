@@ -85,6 +85,11 @@ const privatePhraseLeak = (copy: string, privateFacts: readonly string[]): boole
     return false;
   });
 };
+export function choosePhaseCandidate(candidates: readonly Prompt[], desiredKind: RoundKind, preferGenerated = false): Prompt | undefined {
+  return candidates.find(p => p.source === "host") ??
+    (preferGenerated ? candidates.find(p => p.source === "grok") : undefined) ??
+    candidates.find(p => p.kind === desiredKind) ?? candidates[0];
+}
 const emptyDigest = (): NightDigest => ({ quotes: [], stats: {}, runningGags: [], pickTeasers: [], dodges: [], selfVsRoom: [] });
 const seedRng = (id: string): (() => number) => {
   let seed = createHash("sha256").update(id).digest().readUInt32LE(0);
@@ -436,9 +441,11 @@ export class RoomManager {
     return slots.map((kind) => {
       const permitted = (p: Prompt): boolean => phase === "dare" ? p.kind === kind : !["dare", "pair_dare", "debrief"].includes(p.kind);
       const candidates = pool.filter((p) => permitted(p) && !chosen.has(p.id));
-      const prompt = candidates.find((p) => p.source === "host" && !room.usedIds.has(p.id)) ??
-        candidates.find((p) => p.kind === kind && !room.usedIds.has(p.id)) ?? candidates.find((p) => !room.usedIds.has(p.id)) ??
-        candidates.find((p) => p.kind === kind) ?? candidates[0] ?? fallback.find((p) => p.kind === kind)!;
+      const fresh = candidates.filter(p => !room.usedIds.has(p.id));
+      // Generated prompts now fill otherwise non-pick slots before the bank;
+      // designated pick slots stay picks so the density floor cannot regress.
+      const prompt = choosePhaseCandidate(fresh, kind, kind !== "pick") ??
+        choosePhaseCandidate(candidates, kind, false) ?? fallback.find((p) => p.kind === kind)!;
       chosen.add(prompt.id);
       return { prompt, phase, kind: prompt.kind, text: prompt.text };
     });

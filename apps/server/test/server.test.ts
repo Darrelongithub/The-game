@@ -4,8 +4,9 @@ import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { io, type Socket } from "socket.io-client";
-import type { ClientToServerEvents, LogRecord, ResponseValue, RoundView, ServerToClientEvents } from "../../../packages/shared/src/contracts.ts";
+import type { ClientToServerEvents, LogRecord, Prompt, ResponseValue, RoundView, ServerToClientEvents } from "../../../packages/shared/src/contracts.ts";
 import { bootBanner, createGameServer, lanAddresses, selectLanAddress } from "../src/server.ts";
+import { choosePhaseCandidate } from "../src/game.ts";
 import { fallbackServices, type GameServices } from "../src/services.ts";
 
 type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -18,6 +19,14 @@ async function socketFor(port: number): Promise<Client> {
   const socket: Client = io(`http://127.0.0.1:${port}`, { transports: ["polling", "websocket"], reconnection: false, autoConnect: false });
   socket.on("error", () => {}); const ready = event<void>(socket, "connect"); socket.connect(); await limit(ready); return socket;
 }
+
+test("generated prompts take non-pick slots before bank while host prompts stay first", () => {
+  const prompt = (id: string, source: Prompt["source"], kind: Prompt["kind"]): Prompt => ({ id, source, phase: "warmup", kind, text: "Who here would make the group laugh on a long trip?", coding: "friendship", measures: ["pick"], asksTarget: true });
+  const bankShout = prompt("bank-shout", "bank", "shout"), generatedPick = prompt("generated-pick", "grok", "pick"), hostPick = prompt("host-pick", "host", "pick");
+  assert.equal(choosePhaseCandidate([bankShout, generatedPick], "shout", true), generatedPick, "generated material fills an otherwise non-pick slot");
+  assert.equal(choosePhaseCandidate([bankShout, generatedPick], "shout", false), bankShout, "pick-density slots preserve their requested kind");
+  assert.equal(choosePhaseCandidate([generatedPick, hostPick], "pick", true), hostPick, "host-authored prompts retain precedence");
+});
 
 test("same-origin HTTP static export and preview-proxy Socket.IO origins", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "reveal-http-")), web = join(dir, "web"), data = join(dir, "data");
