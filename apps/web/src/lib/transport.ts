@@ -14,6 +14,7 @@ import type {
   JoinReply,
   JoinRequest,
   PlayerId,
+  ResponseValue,
   RevealView,
   RoomCode,
   RoomView,
@@ -50,6 +51,13 @@ export interface Transport {
   /** "I'm ready for the pending reveal" — the reveal waits for every phone
    *  (spec ROUND 4), so this is what releases the moment. */
   ready(): void;
+  /** DEMO ROOMS ONLY (host): puppeted seats, all played from this laptop. */
+  demoAddPlayer(alias: string): Promise<{ ok: boolean; playerId?: PlayerId }>;
+  demoRemovePlayer(playerId: PlayerId): void;
+  demoSetBotMode(playerId: PlayerId, mode: "auto" | "manual"): void;
+  demoAnswerAs(p: { playerId: PlayerId; roundId: string; clientUuid: string; value: ResponseValue }): void;
+  demoAllReady(): void;
+  demoSpeed(scale: number): void;
   start(): void;
   addBot(): void;
   skipRound(): void;

@@ -17,6 +17,7 @@ import type {
   JoinReply,
   JoinRequest,
   PlayerId,
+  ResponseValue,
   RoomCode,
   ServerToClientEvents,
   SubmitRequest,
@@ -254,6 +255,24 @@ export class SocketTransport implements Transport {
   }
 
   ready(): void { this.socket?.emit("ready"); }
+
+  // ------------------------------------------------------------- demo rooms
+  async demoAddPlayer(alias: string): Promise<{ ok: boolean; playerId?: PlayerId }> {
+    const socket = await this.socketReady();
+    return new Promise((resolve) => {
+      socket.timeout(this.ackTimeoutMs).emit("demo_add_player", { alias }, (error, reply) => {
+        if (error) resolve({ ok: false });
+        else resolve(reply && typeof reply.ok === "boolean" ? reply : { ok: false });
+      });
+    });
+  }
+  demoRemovePlayer(playerId: PlayerId): void { this.socket?.emit("demo_remove_player", { playerId }); }
+  demoSetBotMode(playerId: PlayerId, mode: "auto" | "manual"): void { this.socket?.emit("demo_set_bot_mode", { playerId, mode }); }
+  demoAnswerAs(p: { playerId: PlayerId; roundId: string; clientUuid: string; value: ResponseValue }): void {
+    this.socket?.emit("demo_answer_as", p);
+  }
+  demoAllReady(): void { this.socket?.emit("demo_all_ready"); }
+  demoSpeed(scale: number): void { this.socket?.emit("demo_speed", { scale }); }
 
   start(): void { this.socket?.emit("start"); }
   addBot(): void { this.socket?.emit("add_bot"); }

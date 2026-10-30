@@ -1,7 +1,7 @@
 "use client";
 // components/LobbyScreen.tsx — Agent A. Big room code, live player list with
 // connection dots, and the four host-only controls from spec §1.
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { PlayerId, RoomCode, RoomView } from "@shared/contracts.ts";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@shared/contracts.ts";
@@ -22,6 +22,7 @@ export function LobbyScreen({
   onCustomPrompts,
   onDelete,
   onHeatDown,
+  demoPanel,
 }: {
   view: RoomView;
   you: PlayerId | null;
@@ -34,6 +35,8 @@ export function LobbyScreen({
   onCustomPrompts: (lines: string[]) => void;
   onDelete: () => void;
   onHeatDown: () => void;
+  /** ROUND 4: the host's demo console (rendered only in a demo room) */
+  demoPanel?: ReactNode;
 }) {
   const [showPrompts, setShowPrompts] = useState(false);
   const [promptText, setPromptText] = useState("");
@@ -62,7 +65,10 @@ export function LobbyScreen({
 
   const total = view.players.length;
   const connected = view.players.filter((p) => p.connected).length;
-  const canStart = total >= MIN_PLAYERS;
+  // A demo room plays every seat from this laptop, so the 4-seat floor is the
+  // real room's rule, not the rehearsal's.
+  const minSeats = view.demo ? 2 : MIN_PLAYERS;
+  const canStart = total >= minSeats;
   const lines = promptText
     .split("\n")
     .map((l) => l.trim())
@@ -136,7 +142,9 @@ export function LobbyScreen({
 
             {!canStart && (
               <p className="mt-3 text-[11px] text-white/40">
-                Needs {MIN_PLAYERS}+ players. Solo testing? {isHost ? "Add bots to fill the seats." : "The host can add bots."}
+                {view.demo
+                  ? "Demo room: add one more seat to start."
+                  : <>Needs {MIN_PLAYERS}+ players. Solo testing? {isHost ? "Add bots, or create a demo room." : "The host can add bots."}</>}
               </p>
             )}
           </GlassCard>
@@ -146,7 +154,7 @@ export function LobbyScreen({
         {isHost ? (
           <motion.div variants={staggerItem} className="flex flex-col gap-2.5">
             <GlowButton className="w-full" onClick={onStart} disabled={!canStart || busy}>
-              {canStart ? `Start the night · ${total} players` : `Start (needs ${MIN_PLAYERS}+)`}
+              {canStart ? `Start the night · ${total} players` : `Start (needs ${minSeats}+)`}
             </GlowButton>
 
             <div className="grid grid-cols-2 gap-2.5">
@@ -157,6 +165,8 @@ export function LobbyScreen({
                 Custom prompts
               </GlowButton>
             </div>
+
+            {demoPanel}
 
             <AnimatePresence>
               {showPrompts && (

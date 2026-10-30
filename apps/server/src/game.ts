@@ -1041,7 +1041,7 @@ export class RoomManager {
     const view: InterludeView = { headline: cooled ? "Cooling things down" : next === "finale" ? "The room has spoken" : `Next: ${next}`, sub: cooled ? "The room chose a gentler level." : "Take a breath before the next chapter.", ...(teaser ? { teaser } : {}), holdMs };
     room.interlude = { value: view, endsAt: this.now() + holdMs };
     // Store the transition independently of the label exposed to clients.
-    this.transitions.set(room.id, next); this.changed(room); this.io.to(room.code).emit("interlude", view);
+    this.transitions.set(room.id, next); this.changed(room); this.io.to(room.code).emit("interlude", this.guard(view));
     this.schedule(room, holdMs, () => this.afterInterlude(room));
   }
   private readonly transitions = new Map<string, HeatPhase | "debrief" | "finale">();
