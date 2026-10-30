@@ -1,0 +1,1 @@
+- Generation register and phase-preferred runtime bank examples added; prompt regression tests and prompts suite pass.
