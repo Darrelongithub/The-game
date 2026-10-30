@@ -53,7 +53,7 @@ const joinHtml = renderToString(
   })
 );
 ok("JoinScreen renders the alias field", joinHtml.includes("Your alias"));
-ok("JoinScreen renders the 18+ gate", joinHtml.includes("or older"));
+ok("JoinScreen renders the 18+ gate", joinHtml.includes("18") && joinHtml.includes("+ only"));
 ok("JoinScreen renders both tabs", joinHtml.includes("Create a room") && joinHtml.includes("Join a room"));
 ok("JoinScreen keeps the action disabled pre-consent", joinHtml.includes("disabled"));
 
@@ -107,6 +107,9 @@ for (const kind of kinds) {
     closesAt: Date.now() + 20_000,
     youSubmitted: false,
     ...(kind === "pair_dare" || kind === "debrief" ? { onlyPlayers: ["p1", "p2"] } : {}),
+    ...(kind === "rating" ? { trait: "loyalty", about: "p2" } : {}),
+    ...(kind === "ios" ? { about: "p3" } : {}),
+    ...(kind === "dare" ? { performer: "p1" } : {}),
   };
   const html = renderToString(
     React.createElement(PromptScreen, {
@@ -119,7 +122,7 @@ for (const kind of kinds) {
   );
   ok(`RoundPanel renders ${kind}`, html.includes(`Rendered prompt for ${kind}`));
   if (kind === "rating") {
-    ok("Rating requires an explicit trait and subject", html.includes("Choose a trait") && html.includes("Choose who") && /<button[^>]*disabled[^>]*>Submit rating/.test(html));
+    ok("Rating displays its server-assigned subject and trait", html.includes("Bot 1") && html.includes("loyalty") && !html.includes("Choose a trait") && !html.includes("Choose who"));
   }
   const touchOk =
     html.includes("min-h-[48px]") ||
