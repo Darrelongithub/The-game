@@ -56,6 +56,29 @@ current pricing and availability). Do not use Supabase realtime: the kit notes
 that it has no Africa region. Remote deployment requires internet; the
 no-keys/offline guarantee applies to a local LAN after installation.
 
+## Accounts (optional — guest play is unchanged)
+
+Accounts are **optional**. A room full of guests plays exactly the same game; an
+account never gates a room, a round, a score or a claim.
+
+- **Create:** username (3–16 chars, letters/numbers/underscore, case-insensitive
+  unique) + a 4–6 digit PIN. The server shows a **one-time recovery code**.
+  Write it down when you see it: **there is no email and no reset link** — that
+  code is the only way back into the account. It rotates every time it is used.
+- **Sign in:** username + PIN. Sessions are opaque tokens kept in the browser's
+  `localStorage`; the server stores only scrypt hashes and hashed token seeds.
+  Repeated wrong PINs lock the door for a few minutes.
+- **Lost the PIN:** `recover` with the recovery code.
+- **Delete:** the in-app delete-account action (`DELETE /api/account`, which
+  requires an explicit confirmation) hard-wipes the identity, its night links and
+  any carried-over suspicions. There is nothing left to restore.
+- **Retention:** identity lives in `apps/server/data/accounts.json` (mode 0600)
+  and is deliberately **not** touched by the 48-hour room purge — rooms are
+  data, accounts are identity. Back up that file if you care about the accounts;
+  delete it to wipe every account at once.
+- Accounts never require a network: the whole API is served by the game server
+  on the same origin.
+
 ## Logs, deletion and retention
 
 Server room logs are specified as JSONL files under `apps/server/data/`; server

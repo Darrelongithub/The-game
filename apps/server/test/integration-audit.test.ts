@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { io, type Socket } from "socket.io-client";
 import type { ClientToServerEvents, FinaleView, LogRecord, ResponseValue, RoomMeta, RoundView, ServerToClientEvents } from "../../../packages/shared/src/contracts.ts";
-import { computeResults, computeSignals } from "../../../packages/engine/src/index.ts";
+import { computeResults, computeSignals, updateHypotheses } from "../../../packages/engine/src/index.ts";
 import { bankForPhase } from "../../../packages/prompts/src/bank/index.ts";
 import { createGameServer } from "../src/server.ts";
 
@@ -79,8 +79,13 @@ test("production defaults use the full bank and deterministic engine in a comple
   assert.ok(rows.some((r) => r.promptId === "w6"), "group-signal bank prompts with asksTarget=false must remain playable");
   assert.ok(rows.some((r) => r.promptId === "dd5"), "the packaged pair dare must not be discarded");
   const meta: RoomMeta = { roomId: rows[0]!.roomId, players: [1, 2, 3, 4].map((i) => ({ id: `p${i}`, alias: `Player ${i}` })), revealOptIn: ["p1", "p2", "p3", "p4"] };
-  const expected = computeResults(computeSignals(rows, meta), rows, meta);
-  const publicIds = expected.claims.filter((c) => c.audience === "public").map((c) => c.id);
+  const signals = computeSignals(rows, meta);
+  const expected = computeResults(signals, rows, meta);
+  // ROUND 4: the Director's graduated suspicions are deterministic engine
+  // output too (re-derived from the log at the finale), so they are legitimate
+  // public claims — but nothing else may appear on a slide.
+  const graduated = updateHypotheses(signals, rows, meta).claims;
+  const publicIds = [...expected.claims, ...graduated].filter((c) => c.audience === "public").map((c) => c.id);
   for (const slide of finale.slides) if (slide.claimId) assert.ok(publicIds.includes(slide.claimId), `not an engine public claim: ${slide.claimId}`);
   assert.ok(!JSON.stringify(finale).includes('"cards"'));
 });

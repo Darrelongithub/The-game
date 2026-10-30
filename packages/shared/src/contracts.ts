@@ -239,6 +239,35 @@ export interface SecretDeckView {
 export const SECRET_DECK_MAX = 6;    // cards per player, per night
 export const SECRET_HOLD_MS = 400;   // press-and-hold ramp before a card opens; release hides it again
 
+// ---------- INTERNAL: Director hypotheses (ROUND 4) ----------
+// INTERNAL — engine/server only. NEVER serialized to any client: not on
+// `state`, `round`, `reveal`, `interlude`, `finale`, `secrets`, `error`, not in
+// a room log line that leaves the process, not in any JSONL file a player can
+// read. Hypotheses are game-DIRECTION hints (what the engine privately wants
+// to probe next), never content. Players see the freshness they cause and
+// nothing else. Do not add a Hypothesis to ServerToClientEvents.
+export type HypothesisKind = "tension" | "besties" | "secret" | "selfimage" | "onesided" | "freeagent";
+export type HypothesisStatus = "open" | "supported" | "refuted" | "unresolved";
+
+export interface Hypothesis {
+    id: string;
+    kind: HypothesisKind;
+    subjects: PlayerId[];        // pseudonymous in any LLM context
+    status: HypothesisStatus;
+    strength: number;            // 0..1 — deterministic engine value
+    evidence: string[];          // engine-written, incremental
+    openedAt: number;            // epoch ms — may be a PREVIOUS night
+    lastTestedRound?: string;
+}
+
+// ---------- INTERNAL: accounts (ROUND 4) ----------
+// Server-side identity only. The client holds a token, never a hash and never
+// an email address — there is no email field anywhere in this contract, by
+// design ("store it, there is no email").
+export interface AccountInfo { username: string; createdAt: number; nightsPlayed: number; }
+// server stores: username (3–16 chars, [a-z0-9_], case-insensitive unique),
+// pinHash (scrypt), recoveryCodeHash, token seeds
+
 // ---------- Socket contract ----------
 export interface Consent { age: boolean; terms: boolean; revealOptIn: boolean; }
 
@@ -314,6 +343,36 @@ export const SPOTLIGHT_ANSWER_MAX = 80;
 export const SPOTLIGHT_REVEAL_MS = 8_000;
 /** verdict: the room's answer lands, then the phase moves on */
 export const VERDICT_REVEAL_MS = 6_000;
+
+// ---------- Director tunables (ROUND 4 — INTERNAL, never player-visible) ----------
+/**
+ * MID-BAND FORMATION. A suspicion only becomes a hypothesis when its
+ * deterministic strength lands inside this band: strong enough to be worth
+ * probing, weak enough to be a suspicion rather than a conclusion.
+ *  - inside [lo, hi]      → the hypothesis forms / keeps updating;
+ *  - above the band WITH ≥3 independent signals (and ≥70% consensus where it
+ *    applies) → it GRADUATES to an ordinary Claim and leaves the hypothesis
+ *    set (paying off at the finale like any other claim);
+ *  - below the band       → noise. Never opens, and an existing one fades.
+ */
+export const HYPOTHESIS_FORM_BAND = { lo: 0.35, hi: 0.65 } as const;
+
+/**
+ * THE VISIBLE MAGIC — how every non-live round is chosen.
+ *   test    50% — probe an OPEN hypothesis's subjects on its dimension
+ *   explore 30% — least-covered (pair × dimension) cell of the coverage matrix
+ *   classic 20% — bank/callback rounds as before
+ * Fractions are config, not logic: retune by replaying logs (spec §14).
+ */
+export const ROUND_MIX = { test: 0.5, explore: 0.3, classic: 0.2 } as const;
+
+/**
+ * ANTI-TELEGRAPH. Never more than this many CONSECUTIVE rounds touching the
+ * same subject pair. Without it the engine machine-guns two people and the
+ * room clocks the game — which is the one thing players must never be able to
+ * do. A hidden rule that makes the hidden engine believable.
+ */
+export const ANTI_TELEGRAPH_MAX = 2;
 
 export const ROUND_TIMERS_MS: Record<RoundKind, number> = {
     pick: 45_000, text: 90_000, shout: 15_000, rating: 40_000, ios: 40_000,

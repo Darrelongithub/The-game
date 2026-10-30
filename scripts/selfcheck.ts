@@ -8,6 +8,7 @@ import {
 import {
     ROUND_TIMERS_MS, TRAITS, HEAT_ORDER, SECRET_DECK_MAX, SECRET_HOLD_MS,
     MAX_PROVIDER_CALLS_PER_NIGHT, VERDICT_DISCUSS_MS, VERDICT_VOTE_MS, type RoundKind,
+    HYPOTHESIS_FORM_BAND, ROUND_MIX, ANTI_TELEGRAPH_MAX,
 } from "../packages/shared/src/contracts.ts";
 
 let pass = 0, fail = 0;
@@ -67,6 +68,14 @@ ok("6 traits defined", TRAITS.length === 6);
 ok("4 heat phases in order", HEAT_ORDER.length === 4 && HEAT_ORDER[0] === "warmup" && HEAT_ORDER[3] === "dare");
 ok("secret deck config sane", SECRET_DECK_MAX >= 3 && SECRET_DECK_MAX <= 8 && SECRET_HOLD_MS >= 200 && SECRET_HOLD_MS <= 1000);
 ok("provider call cap sane", MAX_PROVIDER_CALLS_PER_NIGHT >= 5 && MAX_PROVIDER_CALLS_PER_NIGHT <= 12);
+
+// ROUND 4 — the Director's tunables must stay tunable, never broken.
+ok("hypothesis band has lo < hi (mid-band, both inside 0..1)",
+   HYPOTHESIS_FORM_BAND.lo < HYPOTHESIS_FORM_BAND.hi &&
+   HYPOTHESIS_FORM_BAND.lo > 0 && HYPOTHESIS_FORM_BAND.hi < 1);
+ok("round mix sums to 1", Math.abs(ROUND_MIX.test + ROUND_MIX.explore + ROUND_MIX.classic - 1) < 1e-9);
+ok("round mix stays test-heavy", ROUND_MIX.test > ROUND_MIX.explore && ROUND_MIX.explore > ROUND_MIX.classic);
+ok("anti-telegraph cap is at least 2", ANTI_TELEGRAPH_MAX >= 2);
 
 console.log(fail === 0 ? `\nALL ${pass} CHECKS PASSED ✅ — safe to spawn agents` : `\n${fail} FAILED / ${pass} passed ❌ — fix before spawning`);
 process.exit(fail === 0 ? 0 : 1);

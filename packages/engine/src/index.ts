@@ -23,6 +23,39 @@ export {
   type NameClusterResult,
 } from "./live.ts";
 
+// ROUND 4 — the Director. INTERNAL: hypotheses are game-direction hints and
+// are never serialized to a client. Selection is deterministic (seeded).
+export {
+  assertNoHypothesisLeak,
+  aboveBand,
+  carryOver,
+  consecutiveTouches,
+  coverageCells,
+  coverageCount,
+  coverageKey,
+  DIMENSIONS,
+  directNextRound,
+  emptyDirectorState,
+  formHypotheses,
+  HYPOTHESIS_DIMENSION,
+  inBand,
+  pickMode,
+  planRound,
+  recordSelection,
+  starvedCells,
+  subjectPairKey,
+  updateHypotheses,
+  type Coverage,
+  type CoverageCell,
+  type Dimension,
+  type DirectedMode,
+  type DirectedRound,
+  type DirectorState,
+  type HypothesisOptions,
+  type HypothesisUpdate,
+  type PlanInput,
+} from "./director.ts";
+
 // Exposed for tuning, tests and Agent Z's hand-verification:
 export { maximumWeightMatching, constrainedMatching, type Matching } from "./matching.ts";
 export { mulberry32 } from "./rng.ts";
