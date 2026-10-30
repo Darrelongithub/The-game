@@ -61,10 +61,10 @@ test("golden 1: pair components are hand-computable", () => {
   approx(s34.mutualPick, 5 / 8, "p3p4 mutualPick");
   approx(s34.coupleEvidence, 1 / 4, "p3p4 coupleEvidence");
   approx(s34.friendEvidence, 1, "p3p4 friendEvidence");
-  approx(s34.debriefSim, 0.5, "p3p4 debrief unknown");
+  approx(s34.debriefSim, 0, "p3p4 absent debrief does not vote");
   approx(s34.iosMean, 10 / 14, "p3p4 iosMean");
   approx(s34.traitAgreement, 8 / 9, "p3p4 traitAgreement");
-  approx(s34.pairScore, 0.3 * 1 + 0.2 * (5 / 8) + 0.2 * 0.5 + 0.15 * (10 / 14) + 0.15 * (8 / 9), "p3p4 pairScore");
+  approx(s34.pairScore, (0.3 * 1 + 0.2 * (5 / 8) + 0.15 * (10 / 14) + 0.15 * (8 / 9)) / 0.8, "p3p4 renormalized pairScore");
 
   // p1–p5: eligible overlap rounds F1 (p3,p4 ✗), N1 (p3,p3 ✓) → 1/2.
   // Positive pooled: p5 hit p1 3 times, p1 never hit p5 → 3/8. No IOS → 0.
@@ -124,19 +124,17 @@ test("golden 2: toxic percentile case, rivals, consensus — exact claim set", (
   const s15 = signal(signals, "p1", "p5");
   approx(s15.pickOverlap, 4 / 5, "rivals overlap");
   approx(s15.negativeMutual, 0.6, "rivals negativeMutual");
-  approx(s15.pairScore, 0.3 * 0.8 + 0.2 * 0.5 + 0.15 * (8 / 14) + 0.15 * 1, "rivals pairScore");
+  approx(s15.pairScore, 0.594642857142857, "rivals pairScore with only measured components voting");
 
   const results = computeResults(signals, log, meta);
   assert.deepEqual(claimSummary(results.claims), [
     { id: "ship-p1-p2", type: "ship", subjects: ["p1", "p2"], audience: "public", confidence: "high" },
     { id: "ship-p3-p5", type: "ship", subjects: ["p3", "p5"], audience: "public", confidence: "med" }, // mutualPick exactly 1/2 does not count
     { id: "besties-p1-p2", type: "besties", subjects: ["p1", "p2"], audience: "public", confidence: "med" }, // friendEvidence exactly 1/2 does not count
-    { id: "spark-p1-p2", type: "spark", subjects: ["p1", "p2"], audience: "private", confidence: "high" },
-    { id: "spark-p3-p5", type: "spark", subjects: ["p3", "p5"], audience: "private", confidence: "high" },
     { id: "rival-p1-p5", type: "rival", subjects: ["p1", "p5"], audience: "public", confidence: "med" }, // both pick rates strong; ratings agree, so no 3rd type
     { id: "toxic-p4", type: "toxic", subjects: ["p4"], audience: "public", confidence: "high" },
-    { id: "consensus-X1-p4", type: "consensus", subjects: ["p4"], audience: "public", confidence: "high" },
-    { id: "consensus-X2-p4", type: "consensus", subjects: ["p4"], audience: "public", confidence: "high" },
+    { id: "consensus-X1-p4", type: "consensus", subjects: ["p4"], audience: "public", confidence: "med" },
+    { id: "consensus-X2-p4", type: "consensus", subjects: ["p4"], audience: "public", confidence: "med" },
   ]);
   assert.equal(results.freeAgent, "p4");
   const toxic = results.claims.find((c) => c.type === "toxic");
@@ -316,9 +314,8 @@ test("secrets: spark on exactly two phones, one-sided on the picker's only, deck
   assert.ok(decks.get("p1")?.find((c) => c.kind === "spark")?.facts.join(" ").includes("Player 2"));
   assert.ok(decks.get("p2")?.find((c) => c.kind === "spark")?.facts.join(" ").includes("Player 1"));
 
-  // One-sided: picker p5 gets the card; target p1 does not.
-  assert.ok(decks.get("p5")?.some((c) => c.kind === "onesided"));
-  assert.ok(!(decks.get("p1") ?? []).some((c) => c.kind === "onesided"));
+  // Picks-only evidence may score the pair but cannot create a high-confidence claim/card.
+  assert.ok(![...decks.values()].some((cards) => cards.some((card) => card.kind === "onesided")));
 
   // Blind spot: only p3 has a gap ≥ 1 in this fixture (loyalty 5 vs 8.25).
   const blindHolders = [...decks.entries()].filter(([, cs]) => cs.some((c) => c.kind === "blindspot")).map(([p]) => p);

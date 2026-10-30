@@ -45,7 +45,7 @@ import { computeSignals, computeResults, buildNightDigest, buildSecrets }
   coding set (couple+friendship, couple only, friendship only,
   friction+rivalry respectively). 0 when neither player made such a pick.
 - `debriefSim` — token-Jaccard (lowercase alphanumeric token sets) of the
-  pair's two debrief texts; **0.5 = unknown**. Pairing is inferred from
+  pair's two debrief texts; missing data is omitted from measured components. Pairing is inferred from
   the log (no pair id exists in `LogRecord`): shared roundId with exactly
   2 writers → shared promptId with exactly 2 writers → the only 2
   debrief writers in the log. Gemini refinement, when it exists, arrives
@@ -110,7 +110,7 @@ numerals other than the pseudonym — every quantity lives in
 (`ENGINE_TUNING` in `src/internal.ts`): pick rates must clear ½
 *strictly* (an exactly-half rate over a handful of rounds is
 chance-sized), `iosMean ≥ 0.65`, `traitAgreement ≥ 0.80` (uniform-random
-ratings average ≈ 0.633), `debriefSim > 0.5`. High = ≥ 3 types, med = 2
+ratings average ≈ 0.633), measured `debriefSim > 0.6`; missing debrief is excluded. High = ≥ 3 types, med = 2
 (`CONFIDENCE_RULES`). Low-confidence negative claims are never public:
 toxic/rival lows are omitted entirely; blindspot lows go private.
 

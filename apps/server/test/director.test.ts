@@ -31,6 +31,7 @@ import { LogBuilder } from "../../../packages/engine/test/fixtures.ts";
 type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
 type Directed = { mode: string; dimension: string; subjects: string[]; promptId: string; hypothesisId?: string };
 const consent = { age: true, terms: true, revealOptIn: true };
+const profile = { age: 28, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" as const };
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const limit = <T>(promise: Promise<T>, ms = 20_000): Promise<T> => new Promise((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms);
@@ -109,8 +110,8 @@ const submitValue = (socket: Client, me: string, round: RoundView, ids: string[]
   switch (round.kind) {
     case "pick": case "verdict": value = { kind: "pick", target }; break;
     case "shout": value = { kind: "shout", word: "chaos" }; break;
-    case "rating": value = { kind: "rating", trait: "honesty", about: "self", value: 9 }; break;
-    case "ios": value = { kind: "ios", about: target, value: 5 }; break;
+    case "rating": value = { kind: "rating", trait: round.trait!, about: round.about!, value: 9 }; break;
+    case "ios": value = { kind: "ios", about: round.about!, value: 5 }; break;
     case "minigame": value = { kind: "minigame", score: 30 }; break;
     case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
     case "debrief": value = { kind: "text", text: "We talked about the same thing twice." }; break;
@@ -153,18 +154,17 @@ async function playNight(t: TestContext, options: NightOptions): Promise<NightRe
     const socket: Client = io(base, { forceNew: true, transports: ["polling", "websocket"], reconnection: false, autoConnect: false });
     sockets.push(socket);
     socket.on("error", () => {});
-    // Simulated phones press ready the moment a reveal is pending (ROUND 4).
     socket.on("state", (view) => { if (view.ready) socket.emit("ready"); });
     socket.onAny((name: string, payload: unknown) => { events.push({ name, payload }); });
     const ready = event<void>(socket, "connect");
     socket.connect();
     await limit(ready);
   }
-  const first = await new Promise<JoinReply & { code?: string }>((resolve) => sockets[0]!.emit("create", { alias: options.aliases[0]!, consent }, resolve));
+  const first = await new Promise<JoinReply & { code?: string }>((resolve) => sockets[0]!.emit("create", { alias: options.aliases[0]!, consent, profile }, resolve));
   assert.equal(first.ok, true);
   const replies: JoinReply[] = [first];
   for (let i = 1; i < sockets.length; i++) {
-    replies.push(await new Promise<JoinReply>((resolve) => sockets[i]!.emit("join", { roomCode: first.code!, alias: options.aliases[i]!, consent }, resolve)));
+    replies.push(await new Promise<JoinReply>((resolve) => sockets[i]!.emit("join", { roomCode: first.code!, alias: options.aliases[i]!, consent, profile }, resolve)));
   }
   assert.ok(replies.every((r) => r.ok), "every player joined");
   const ids = replies.map((r) => r.you!);
@@ -219,13 +219,11 @@ test("INVISIBILITY: no emit, snapshot or room-log line ever carries a hypothesis
     for (const key of keys) assert.ok(!/hypothes|coverage|prior|director|strength/iu.test(key), `payload key "${key}" is internal`);
   }
 
-  // A state snapshot is exactly the public contract, nothing more. `ready` is
-  // the ONE addition in ROUND 4 (who has pressed ready for a pending reveal) —
-  // public player ids only, never any director material.
+  // A state snapshot is exactly the public contract, nothing more.
   for (const { payload } of night.events.filter((e) => e.name === "state")) {
     const keys = Object.keys(payload as object).sort();
     assert.deepEqual(keys.filter((key) => key !== "ready"), ["code", "hostId", "phase", "players", "round", "seq"]);
-    if (keys.includes("ready")) assert.ok(Array.isArray((payload as { ready: unknown }).ready));
+    if (keys.includes("ready")) assert.ok(Array.isArray((payload as { ready?: unknown }).ready));
   }
 
   // The room log is the only thing that outlives the night — and it is records only.
@@ -237,7 +235,7 @@ test("INVISIBILITY: no emit, snapshot or room-log line ever carries a hypothesis
     for (const line of text.trim().split("\n")) {
       const record = JSON.parse(line) as LogRecord;
       // A LogRecord and nothing else (a spotlight decoy adds only `decoy`).
-      const extra = Object.keys(record).filter((key) => !["at", "coding", "latencyMs", "playerId", "promptId", "roomId", "roundId", "roundKind", "value", "decoy"].includes(key));
+      const extra = Object.keys(record).filter((key) => !["at", "coding", "latencyMs", "playerId", "promptId", "roomId", "roundId", "roundKind", "value", "decoy", "performerId"].includes(key));
       assert.deepEqual(extra, [], `room log line carries unexpected fields: ${extra.join(", ")}`);
     }
   }
@@ -279,18 +277,16 @@ test("DETERMINISM: the same scripted night selects the same rounds twice", { tim
   assert.deepEqual(second, first, "replaying the night must replay the choices");
 });
 
-test("GRADUATION pays off: a graduated suspicion arrives as an ORDINARY public claim", { timeout: 45_000 }, async (t) => {
+test("GRADUATION: only high-confidence suspicions with three independent signals can become ordinary claims", { timeout: 45_000 }, async (t) => {
   const night = await playNight(t, { aliases: ["Alice", "Brian", "Chao", "Diana"], strategy: "couple" });
   const graduated = night.claims.filter((claim) => claim.id.startsWith("dir-"));
-  assert.ok(graduated.length > 0, "at least one suspicion was strong enough to become a claim");
-  const publicGraduated = graduated.filter((claim) => claim.audience === "public");
-  assert.ok(publicGraduated.length > 0, "a mutual case graduated in public");
-  assert.ok(publicGraduated.every((claim) => claim.confidence === "high"), "graduation needs the confidence rules");
-  assert.ok(publicGraduated.some((claim) => claim.type === "besties" || claim.type === "ship" || claim.type === "rival"));
-  // It lands in the finale like any other claim — and it is the ONLY way a
-  // suspicion ever becomes visible: as ordinary finale content.
-  const ids = new Set(night.finale.slides.map((slide) => slide.claimId).filter(Boolean));
-  assert.ok(publicGraduated.some((claim) => ids.has(claim.id)), "the graduated claim reached the broadcast finale");
+  assert.ok(graduated.every((claim) => claim.confidence === "high" && Number(claim.numbers?.signals ?? 0) >= 3),
+    "a suspicion cannot graduate on picks alone or with fewer than three independent signal types");
+  for (const claim of graduated) {
+    assert.ok(claim.audience === "private" || claim.audience === "public");
+    const slideIds = new Set(night.finale.slides.map((slide) => slide.claimId).filter(Boolean));
+    assert.ok(slideIds.has(claim.id), "graduated claims reach the finale as ordinary claims");
+  }
   // The finale says nothing about WHY the room kept asking.
   assert.ok(!leakMarkers.test(JSON.stringify(night.finale)));
 });

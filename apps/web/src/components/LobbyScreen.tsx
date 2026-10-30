@@ -97,6 +97,7 @@ export function LobbyScreen({
             className="mt-3 min-h-[44px] rounded-full border border-white/25 bg-white/5 px-5 text-xs font-medium text-white transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent">
             {copyState === "copied" ? "Invite link copied" : "Copy invite link"}
           </button>
+          <a href={`/display?code=${code ?? view.code}`} target="_blank" rel="noreferrer" className="mt-2 inline-flex min-h-[44px] items-center rounded-full border border-lime-accent/40 px-5 text-xs font-medium text-lime-accent">Open public display</a>
           {copyState === "fallback" && <label className="mt-2 block text-xs text-white/65">
             Copy this invite link
             <input aria-label="Invite link" className="field mt-2 text-xs" readOnly value={inviteUrl} onFocus={(event) => event.currentTarget.select()} />

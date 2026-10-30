@@ -33,7 +33,7 @@ export type RoundKind =
 | "spotlight" | "verdict";
 
 export type PromptCoding =
-| "couple" | "friendship" | "trust" | "friction" | "rivalry" | "status" | "neutral";
+| "couple" | "friendship" | "trust" | "friction" | "tease" | "rivalry" | "status" | "neutral";
 
 export interface Prompt {
     id: string;
@@ -70,11 +70,7 @@ export interface LogRecord {
     value: ResponseValue;
     at: number;                  // epoch ms
     latencyMs: number;           // round open → submit. Night-Digest fuel.
-    /** DEMO ROOMS ONLY — the host who puppeted this seat (see the `demo_*`
-     *  events). METADATA ONLY: the engine ignores it completely, so a
-     *  demo night scores exactly like a real one (parity is the point). It
-     *  never rides any client payload and never reaches signals, claims or
-     *  the digest. */
+    /** DEMO ROOMS ONLY: host identity for puppeted seats; ignored by the engine. */
     impersonatedBy?: PlayerId;
     /** Spotlight decoy answer: the subject's throwaway reply to the cover
      *  round. EXCLUDED from every signal, score and claim (data-or-dead does
@@ -82,12 +78,25 @@ export interface LogRecord {
      *  the captions ("While the room captioned X, X wrote: …") and lands last
      *  in the caption-wall reveal. */
     decoy?: boolean;
+    /** Solo dare performer or pair-dare respondent; persisted for accountability. */
+    performerId?: PlayerId;
 }
+
+export interface ProfileAnswers { age: number; relationship: "single" | "dating" | "committed" | "married" | "complicated"; partnersToDate: number; longestMonths: number; crushingHere: boolean; tonight: "chaos" | "vibes" | "feelings" | "mission"; }
+export const PROFILE_QUESTIONS = [
+    { field: "age", label: "How old are you?", kind: "number" },
+    { field: "relationship", label: "Your relationship status?", kind: "select" },
+    { field: "partnersToDate", label: "How many people have you dated?", kind: "number" },
+    { field: "longestMonths", label: "Longest relationship (months)?", kind: "number" },
+    { field: "crushingHere", label: "Crushing on someone here? (stays secret)", kind: "boolean", secret: true },
+    { field: "tonight", label: "What are you here for tonight?", kind: "select" },
+] as const;
 
 export interface RoomMeta {
     roomId: string;
     players: { id: PlayerId; alias: string }[];
     revealOptIn: PlayerId[];     // consented to private spark / one-sided / secret cards
+    profiles?: Record<PlayerId, ProfileAnswers>;
 }
 
 // ---------- Engine: pair signals ----------
@@ -97,7 +106,8 @@ export interface PairSignal {
     b: PlayerId;
     pickOverlap: number;         // 0..1
     mutualPick: number;          // 0..1
-    debriefSim: number;          // 0..1 (0.5 = unknown)
+    debriefSim: number;          // 0..1; componentsUsed distinguishes measured zero from missing
+    componentsUsed: ("pickOverlap" | "mutualPick" | "debriefSim" | "iosMean" | "traitAgreement")[];
     iosMean: number;             // 0..1
     traitAgreement: number;      // 0..1
     pairScore: number;           // weighted, 0..1
@@ -168,6 +178,10 @@ export interface RoundView {
     /** false for the spotlight subject's IDLE cover screen — the phone waits
      *  the round out without offering an input. Absent means "answer me". */
     expectsAnswer?: boolean;
+    about?: PlayerId;
+    trait?: TraitId;
+    performer?: PlayerId;
+    submitted?: PlayerId[];
 }
 
 export interface RoomView {    // PUBLIC — contains nothing private
@@ -286,11 +300,15 @@ export interface AccountInfo { username: string; createdAt: number; nightsPlayed
 // ---------- Socket contract ----------
 export interface Consent { age: boolean; terms: boolean; revealOptIn: boolean; }
 
+export type JoinRole = "player" | "display";
+
 export interface JoinRequest {
     roomCode: RoomCode;
     alias: string;               // 2–14 chars
     consent: Consent;            // age must be true (18+)
     resume?: { playerId: PlayerId; secret: string };
+    role?: JoinRole;
+    profile?: ProfileAnswers;
 }
 
 export interface JoinReply {
@@ -305,8 +323,9 @@ export interface SubmitRequest { roundId: string; clientUuid: string; value: Res
 export interface DarePassRequest { roundId: string; reason: string; }   // reason REQUIRED, ≤140
 
 export type ClientToServerEvents = {
-    create: (p: { alias: string; consent: Consent; demo?: boolean }, reply: (r: JoinReply & { code?: RoomCode }) => void) => void;
+    create: (p: { alias: string; consent: Consent; profile?: ProfileAnswers; role?: JoinRole; demo?: boolean }, reply: (r: JoinReply & { code?: RoomCode }) => void) => void;
     join: (p: JoinRequest, reply: (r: JoinReply) => void) => void;
+    display_join: (p: { roomCode: RoomCode }, reply: (r: { ok: boolean; state?: RoomView; error?: string }) => void) => void;
     submit: (p: SubmitRequest, reply: (r: { ok: boolean; error?: string }) => void) => void;
     dare_pass: (p: DarePassRequest) => void;
     /** "I'm ready for the pending reveal" — every player's round-trip to the
@@ -362,7 +381,7 @@ export const CONFIDENCE_RULES = {
 
 export const JOKER_GUARD = { sameTargetShare: 0.70, downweight: 0.5 } as const;
 
-export const MC_SIMULATIONS = 4000;   // seeded PRNG → deterministic
+export const MC_SIMULATIONS = 1000;   // seeded PRNG → deterministic, once per room
 
 /** verdict: seconds of open debate ("PHONES DOWN. ARGUE IT OUT.") */
 export const VERDICT_DISCUSS_MS = 90_000;
@@ -421,7 +440,10 @@ export const REVEAL_HOLD_MS = 4200;
 export const REVEAL_READY_GRACE_MS = 20_000;
 export const INTERLUDE_HOLD_MS = 3200;
 export const GRACE_MS = 8000;         // extra wait after timer for stragglers
-export const ROUNDS_PER_PHASE = 3;    // warmup / spicy / deep
+export const PICK_ROUNDS_PER_PHASE = 2;
+export const SPARK_MIN_MUTUAL = 2;
+export const CONSENSUS_MIN_PICKERS = 4;
+export const ROUNDS_PER_PHASE = 4;    // warmup / spicy / deep including pick slots
 export const DARE_ROUNDS = 2;         // solo dares before the pair dare
 
 // ---------- LLM providers ----------
@@ -429,7 +451,7 @@ export const DARE_ROUNDS = 2;         // solo dares before the pair dare
 // prompts, Jaccard similarity, lexicon tags, template finale); providers only
 // augment. Each lane checks only its own key and degrades to code silently:
 //   Grok   (XAI_API_KEY)    → unhinged prompt generation ONLY.
-//   Gemini (GEMINI_API_KEY) → data analysis + finale narration (higher tier).
+//   Gemini (GEMINI_API_KEY) → batched tagging and debrief analysis only; never finale narration.
 // Gemini never generates game prompts (it soft-refuses spicy); Grok never
 // analyzes or narrates. Neither key → full game, zero internet.
 export const PROVIDERS = {
@@ -448,13 +470,10 @@ export const PROVIDERS = {
         generate: "grok-4-1-fast", // unhinged generation + callbacks — Grok's only job
     },
     gemini: {
-        // Analysis + narration lane — the higher tier. All calls BATCHED:
-        // tags once per night (all texts), debrief-similarity once (all pairs),
-        // reveal+secrets copy ONCE per night. SAFETY_OFF attached (see below) so
-        // it can analyze spicy text without refusing.
+        // Analysis-only lane. Batched tags and debrief similarity are local
+        // analysis aids; finale copy is deterministic/Grok and never Gemini.
         tag: "gemini-3.5-flash-lite",       // cheap classification, one batch call
         analyze: "gemini-3.1-pro-preview",  // pair-dare debrief judgment
-        reveal: "gemini-3.1-pro-preview",   // finale slides + secret card copy, ONE call/night
     },
 } as const;
 
@@ -462,6 +481,10 @@ export const PROVIDERS = {
 // reveal+secrets 1 = 7. "Most things are done through code" — the cap is
 // enforced in code, not vibes.
 export const MAX_PROVIDER_CALLS_PER_NIGHT = 8;
+
+/** Shared resolver for every Gemini API call site. */
+export const resolveGeminiModel = (override?: string): string =>
+    typeof override === "string" && override.trim() ? override.trim() : PROVIDERS.gemini.analyze;
 
 // Gemini-only request field: set all four adjustable filters to the most
 // permissive threshold the current API accepts ("OFF" on the new interactions

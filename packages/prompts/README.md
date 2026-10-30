@@ -11,7 +11,7 @@ src/bank/index.ts  loader, SPICY_TIER gate, {{{Pn}}} / player-count aware select
 src/filter.ts    THE guardrail: schema, dedupe, banned patterns, 20–160 chars,
                  valid {P1}..{P11}, hard blocks, DATA-OR-DEAD
 src/guard.ts     ONE per-room in-memory call ledger for BOTH lanes (cap 8, slots)
-src/provider.ts  Grok lane (generation) + Gemini lane (analysis/narration)
+src/provider.ts  Grok lane (generation/reveal) + Gemini lane (analysis only)
 src/analyze.ts   lexicon tags + token-Jaccard (primary), one optional Gemini refine
 src/generate.ts  ONE Grok call per phase → filtered prompts, callbacks verified
 src/custom.ts    host custom lines (≤10, ≤160, optional spicy:/deep:/dare: prefix)
@@ -83,8 +83,8 @@ gameplay loop.
 
 | lane | key | job | model |
 |---|---|---|---|
-| Grok | `XAI_API_KEY` | unhinged **generation only** | `PROVIDERS.grok.generate` (override: `XAI_MODEL`) |
-| Gemini | `GEMINI_API_KEY` | tags, debrief judgment, narration support | `PROVIDERS.gemini.tag/analyze/reveal` |
+| Grok | `XAI_API_KEY` | prompt generation + one validated reveal polish call | `PROVIDERS.grok.generate` (override: `XAI_MODEL`) |
+| Gemini | `GEMINI_API_KEY` | tagging and debrief analysis only; no reveal path | `PROVIDERS.gemini.tag/analyze` |
 
 Both spend from one `CallGuard` per room: total ≤ `MAX_PROVIDER_CALLS_PER_NIGHT`
 (8) with batching slots `generate 4 / tag 1 / analyze 1 / reveal 1`. Missing key →

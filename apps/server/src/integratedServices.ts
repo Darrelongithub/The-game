@@ -7,7 +7,7 @@ import {
 import {
   buildNightDigest, buildSecrets, computeResults, computeSignals, logRecordId,
 } from "../../../packages/engine/src/index.ts";
-import { buildSkeleton, writeFinale } from "../../../packages/narrator/src/index.ts";
+import { buildSkeleton, SYSTEM_PROMPT, writeFinale } from "../../../packages/narrator/src/index.ts";
 import {
   CallGuard, Provider, createPromptProvider, maxPlaceholderIndex, selectFromBank, tagBatch, tagText,
   type FetchLike, type PromptProvider as PackagePromptProvider,
@@ -46,20 +46,21 @@ class IntegratedPromptProvider implements PromptProvider {
   private readonly provider: Provider;
   private facade?: PackagePromptProvider;
   private playerCount = 4;
-  private geminiKey: string;
   private readonly publicTags = new Map<string, string[]>();
+  private aliases: readonly string[] = [];
   private analysis?: Promise<void>;
   private disposed = false;
 
   constructor(private readonly roomId: string) {
-    this.geminiKey = process.env.GEMINI_API_KEY?.trim() ?? "";
     this.provider = new Provider({ guard: new CallGuard(), fetchImpl: this.network.fetch as FetchLike });
   }
+
+  setAliases(aliases: readonly string[]): void { this.aliases = [...aliases]; }
 
   async prepare(input: { playerCount: number; usedIds: string[]; digest: NightDigest }): Promise<void> {
     this.playerCount = input.playerCount;
     this.facade = createPromptProvider({
-      room: this.roomId, playerCount: input.playerCount, usedIds: input.usedIds, provider: this.provider,
+      room: this.roomId, playerCount: input.playerCount, usedIds: input.usedIds, provider: this.provider, aliases: this.aliases,
     });
     // No player names or custom prompts are included. Generation never blocks
     // play; each phase has one budgeted batch, and the bank is always ready.
@@ -92,17 +93,23 @@ class IntegratedPromptProvider implements PromptProvider {
   tagsFor(recordId: string): string[] | undefined { return this.publicTags.get(recordId); }
 
   narrationOptions(meta: RoomMeta) {
-    // Model tags can suggest a gentle tone, never alter numeric results.
-    // Forward only a fixed positive enum, not the original classifications.
-    const warm = [...this.publicTags.values()].some((tags) => tags.includes("affection") || tags.includes("admiration"));
-    return { apiKey: this.geminiKey, fetchImpl: this.network.fetch, roster: meta.players, publicToneHint: warm ? "warm" as const : undefined };
+    const aliases = meta.players.map(player => player.alias);
+    return {
+      roster: meta.players,
+      grok: async (payload: Record<string, unknown>) => {
+        const result = await this.provider.grokJson({
+          room: this.roomId, purpose: "reveal", json: true, aliases,
+          messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: JSON.stringify(payload) }],
+        });
+        return result.result.ok ? result.value : null;
+      },
+    };
   }
 
   dispose(): void {
     this.disposed = true;
     this.network.dispose();
     this.publicTags.clear();
-    this.geminiKey = "";
     this.facade = undefined;
   }
 }

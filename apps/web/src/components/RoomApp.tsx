@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import type { ProfileAnswers, Consent } from "@shared/contracts.ts";
 import { AnimatePresence, motion } from "framer-motion";
 import dynamic from "next/dynamic";
 import { useRoom } from "@/lib/useRoom";
@@ -19,19 +20,17 @@ export function RoomApp() {
   const room = useRoom();
   const [joining, setJoining] = useState(false);
 
-  const handleCreate = async (alias: string, consent: Parameters<typeof room.createRoom>[1], options?: { demo?: boolean }) => {
+  const handleCreate = async (alias: string, consent: Consent, profile: ProfileAnswers, options?: { demo?: boolean }) => {
     setJoining(true);
     try {
-      return await room.createRoom(alias, consent, options);
-    } finally {
-      setJoining(false);
-    }
+      return await room.createRoom(alias, consent, profile, options);
+    } finally { setJoining(false); }
   };
 
-  const handleJoin = async (code: Parameters<typeof room.joinRoom>[0], alias: string, consent: Parameters<typeof room.createRoom>[1]) => {
+  const handleJoin = async (code: Parameters<typeof room.joinRoom>[0], alias: string, consent: Consent, profile: ProfileAnswers) => {
     setJoining(true);
     try {
-      return await room.joinRoom(code, alias, consent);
+      return await room.joinRoom(code, alias, consent, profile);
     } finally {
       setJoining(false);
     }

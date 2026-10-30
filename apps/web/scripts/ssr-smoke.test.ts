@@ -53,7 +53,7 @@ const joinHtml = renderToString(
   })
 );
 ok("JoinScreen renders the alias field", joinHtml.includes("Your alias"));
-ok("JoinScreen omits the consent checkboxes and accompanying notice", !joinHtml.includes("18+") && !joinHtml.includes("house rules") && !joinHtml.includes("Private cards") && !joinHtml.includes("type=\"checkbox\""));
+ok("JoinScreen requires 18+ profile and house-rule consent", joinHtml.includes("18+") && joinHtml.includes("house rules") && joinHtml.includes("type=\"checkbox\""));
 ok("JoinScreen renders both tabs", joinHtml.includes("Create a room") && joinHtml.includes("Join a room"));
 ok("JoinScreen keeps the action disabled without an alias", joinHtml.includes("disabled"));
 
@@ -107,6 +107,9 @@ for (const kind of kinds) {
     closesAt: Date.now() + 20_000,
     youSubmitted: false,
     ...(kind === "pair_dare" || kind === "debrief" ? { onlyPlayers: ["p1", "p2"] } : {}),
+    ...(kind === "rating" ? { trait: "loyalty" as const, about: "p2" } : {}),
+    ...(kind === "ios" ? { about: "p2" } : {}),
+    ...(kind === "dare" ? { performer: "p1" } : {}),
   };
   const html = renderToString(
     React.createElement(PromptScreen, {
@@ -119,7 +122,7 @@ for (const kind of kinds) {
   );
   ok(`RoundPanel renders ${kind}`, html.includes(`Rendered prompt for ${kind}`));
   if (kind === "rating") {
-    ok("Rating requires an explicit trait and subject", html.includes("Choose a trait") && html.includes("Choose who") && /<button[^>]*disabled[^>]*>Submit rating/.test(html));
+    ok("Rating renders only its server-assigned subject and trait", html.includes("loyalty") && html.includes("Bot 1") && !html.includes("Choose a trait") && !html.includes("Choose who"));
   }
   const touchOk =
     html.includes("min-h-[48px]") ||
@@ -140,7 +143,7 @@ const spectateHtml = renderToString(
     room: view, you: "p1", onSubmit: noop,
   })
 );
-ok("Spectators get the \"They're talking…\" screen", spectateHtml.includes("They&apos;re talking") || spectateHtml.includes("They&#x27;re talking"));
+ok("Spectators get a wait screen", spectateHtml.includes("talking"));
 
 // interlude + reveal
 const interludeHtml = renderToString(

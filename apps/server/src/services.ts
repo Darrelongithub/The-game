@@ -15,6 +15,8 @@ export interface PromptProvider {
   /** Classify public, pseudonymized answers in the background; private debriefs stay local. */
   prepareAnalysis?(log: LogRecord[]): Promise<void>;
   tagsFor?(recordId: string): string[] | undefined;
+  /** Supply the private room roster for provider-side alias scrubbing. */
+  setAliases?(aliases: readonly string[]): void;
   /** Cancel room-scoped provider work when the room is deleted or expires. */
   dispose?(): void;
 }
@@ -47,6 +49,7 @@ const BANK: Prompt[] = [
   p("f-d1", "deep", "text", "What do you wish a person in this room understood about you?", "trust", ["text"]),
   p("f-d2", "deep", "rating", "Rate the warmth of yourself or another person here.", "friendship", ["rating"]),
   p("f-d3", "deep", "pick", "Who here would you call when things get complicated?", "friendship", ["pick"]),
+  p("f-d6", "deep", "pick", "Who in this room makes it easiest to ask for help?", "friendship", ["pick"]),
   p("f-d4", "deep", "ios", "Choose someone here: how close are your lives right now?", "trust", ["ios"]),
   p("f-d5", "deep", "text", "Tell someone here what you appreciate about them.", "friendship", ["text"]),
   p("f-a1", "dare", "dare", "Give someone here a sincere, specific compliment out loud.", "friendship", ["dareCompliance"]),
@@ -118,12 +121,18 @@ export function computeSignals(allRecords: LogRecord[], meta: RoomMeta): PairSig
     }
     const pickOverlap = comparable ? overlap / comparable : 0;
     const mutualPick = mutual();
-    const debriefSim = deb.length ? average(deb) : 0.5;
+    const debriefSim = deb.length ? average(deb) : 0;
     const iosMean = (ios(a, b) + ios(b, a)) / 14;
     const traitAgreement = average(agreement);
-    const pairScore = DEFAULT_WEIGHTS.pickOverlap * pickOverlap + DEFAULT_WEIGHTS.mutualPick * mutualPick +
-      DEFAULT_WEIGHTS.debriefSim * debriefSim + DEFAULT_WEIGHTS.iosMean * iosMean + DEFAULT_WEIGHTS.traitAgreement * traitAgreement;
-    out.push({ room: meta.roomId, a, b, pickOverlap, mutualPick, debriefSim, iosMean, traitAgreement, pairScore,
+    const componentsUsed: PairSignal["componentsUsed"] = [];
+    if (comparable > 0) componentsUsed.push("pickOverlap");
+    if (log.some(r => r.value.kind === "pick" && (r.playerId === a || r.playerId === b))) componentsUsed.push("mutualPick");
+    if (deb.length > 0) componentsUsed.push("debriefSim");
+    if (log.some(r => r.value.kind === "ios" && ((r.playerId === a && r.value.about === b) || (r.playerId === b && r.value.about === a)))) componentsUsed.push("iosMean");
+    if (agreement.length > 0) componentsUsed.push("traitAgreement");
+    const weights = componentsUsed.reduce((sum, key) => sum + DEFAULT_WEIGHTS[key], 0);
+    const pairScore = weights ? componentsUsed.reduce((sum, key) => sum + DEFAULT_WEIGHTS[key] * ({pickOverlap, mutualPick, debriefSim, iosMean, traitAgreement})[key], 0) / weights : 0;
+    out.push({ room: meta.roomId, a, b, pickOverlap, mutualPick, debriefSim, iosMean, traitAgreement, pairScore, componentsUsed,
       coupleEvidence: mutual("couple"), friendEvidence: mutual("friendship"),
       negativeMutual: Math.max(mutual("friction"), mutual("rivalry")) });
   }

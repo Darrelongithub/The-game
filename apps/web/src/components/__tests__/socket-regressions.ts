@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import { createGameServer } from '../../../../server/src/server.ts'
 import { SocketTransport } from '../../lib/socketTransport.ts'
 
+const profile = { age: 28, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" as const }
+
 async function main() {
   delete process.env.XAI_API_KEY; delete process.env.GEMINI_API_KEY
   const dir = mkdtempSync(join(tmpdir(), 'reveal-web-transport-'))
@@ -37,7 +39,7 @@ async function main() {
   transport.setHandlers({ onError: (error) => errors.push(error.code), onDeleted,
     onConnection: (connected, info) => connections.push({ connected, resuming: info?.resuming }) })
   try {
-    const made = await transport.create('Host', { age: true, terms: true, revealOptIn: false })
+    const made = await transport.create('Host', { age: true, terms: true, revealOptIn: false }, profile)
     assert.ok(made.ok && made.secret)
     // visibilitychange and the hook can request a snapshot at the same time.
     // They must not both spend the same single-use session secret.
@@ -96,7 +98,7 @@ async function main() {
     assert.equal((transport as any).url(), undefined, 'browsers never use a localhost override')
     delete (globalThis as any).window.location
     transport.forgetSession()
-    const fresh = await transport.create('Fresh host', { age: true, terms: true, revealOptIn: false })
+    const fresh = await transport.create('Fresh host', { age: true, terms: true, revealOptIn: false }, profile)
     assert.ok(fresh.ok, 'starting over detaches the old socket seat')
     transport.deleteRoom(); await deleted
     assert.equal(storage.getItem('reveal.session'), null, 'deletion forgets the rotating token')

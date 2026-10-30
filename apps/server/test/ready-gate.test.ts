@@ -26,6 +26,7 @@ import { createGameServer, type GameServer } from "../src/server.ts";
 
 type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
 const consent = { age: true, terms: true, revealOptIn: true };
+const profile = { age: 28, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" as const };
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const limit = <T>(promise: Promise<T>, ms = 10_000): Promise<T> => new Promise((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms);
@@ -61,13 +62,13 @@ async function room(t: { after: (fn: () => Promise<void> | void) => void }, opti
     return socket;
   };
   const host = await connect();
-  const made = await new Promise<JoinReply & { code?: string }>((resolve) => host.emit("create", { alias: "Host", consent }, resolve));
+  const made = await new Promise<JoinReply & { code?: string }>((resolve) => host.emit("create", { alias: "Host", consent, profile }, resolve));
   assert.equal(made.ok, true);
   for (let i = 0; i < (options.bots ?? 3); i++) host.emit("add_bot");
   if ((options.bots ?? 3) === 0) {
     for (let i = 1; i < 4; i++) {
       const socket = await connect();
-      const reply = await new Promise<JoinReply>((resolve) => socket.emit("join", { roomCode: made.code!, alias: `Guest${i}`, consent }, resolve));
+      const reply = await new Promise<JoinReply>((resolve) => socket.emit("join", { roomCode: made.code!, alias: `Guest${i}`, consent, profile }, resolve));
       assert.equal(reply.ok, true);
     }
   }
@@ -88,7 +89,7 @@ test("the reveal waits for every connected phone, then fires on the last ready",
       if (round.youSubmitted || round.expectsAnswer === false) return;
       const value = round.kind === "shout" ? { kind: "shout" as const, word: "vibes" }
         : round.kind === "text" || round.kind === "spotlight" || round.kind === "debrief" ? { kind: "text" as const, text: "A quiet answer from the room." }
-        : round.kind === "rating" ? { kind: "rating" as const, trait: "warmth" as const, about: "self" as const, value: 6 }
+        : round.kind === "rating" ? { kind: "rating" as const, trait: round.trait!, about: round.about!, value: 6 }
         : round.kind === "ios" ? { kind: "ios" as const, about: index === 0 ? "p2" : "p1", value: 5 }
         : round.kind === "minigame" ? { kind: "minigame" as const, score: 12 }
         : round.kind === "dare" || round.kind === "pair_dare" ? { kind: "dare" as const, status: "done" as const }
@@ -133,7 +134,7 @@ test("a phone that drops out is no longer waited for", { timeout: 20_000 }, asyn
       if (round.youSubmitted || round.expectsAnswer === false) return;
       const value = round.kind === "shout" ? { kind: "shout" as const, word: "chaos" }
         : round.kind === "text" || round.kind === "spotlight" || round.kind === "debrief" ? { kind: "text" as const, text: "Still here, mostly." }
-        : round.kind === "rating" ? { kind: "rating" as const, trait: "chaos" as const, about: "self" as const, value: 4 }
+        : round.kind === "rating" ? { kind: "rating" as const, trait: round.trait!, about: round.about!, value: 4 }
         : round.kind === "ios" ? { kind: "ios" as const, about: index === 0 ? "p3" : "p1", value: 4 }
         : round.kind === "minigame" ? { kind: "minigame" as const, score: 9 }
         : round.kind === "dare" || round.kind === "pair_dare" ? { kind: "dare" as const, status: "done" as const }
@@ -163,8 +164,8 @@ test("the grace fallback reveals anyway so one AFK phone cannot stall the night"
     if (round.youSubmitted || round.expectsAnswer === false) return;
     const value = round.kind === "shout" ? { kind: "shout" as const, word: "mood" }
       : round.kind === "text" || round.kind === "spotlight" || round.kind === "debrief" ? { kind: "text" as const, text: "An answer from the host seat." }
-      : round.kind === "rating" ? { kind: "rating" as const, trait: "warmth" as const, about: "self" as const, value: 5 }
-      : round.kind === "ios" ? { kind: "ios" as const, about: "p2", value: 5 }
+      : round.kind === "rating" ? { kind: "rating" as const, trait: round.trait!, about: round.about!, value: 5 }
+      : round.kind === "ios" ? { kind: "ios" as const, about: round.about!, value: 5 }
       : round.kind === "minigame" ? { kind: "minigame" as const, score: 20 }
       : round.kind === "dare" || round.kind === "pair_dare" ? { kind: "dare" as const, status: "done" as const }
       : { kind: "pick" as const, target: "p2" };
@@ -189,8 +190,8 @@ test("a lone host with bots never blocks on the gate (solo testing still flows)"
     if (round.youSubmitted || round.expectsAnswer === false) return;
     const value = round.kind === "shout" ? { kind: "shout" as const, word: "solo" }
       : round.kind === "text" || round.kind === "spotlight" || round.kind === "debrief" ? { kind: "text" as const, text: "Testing alone tonight." }
-      : round.kind === "rating" ? { kind: "rating" as const, trait: "honesty" as const, about: "self" as const, value: 8 }
-      : round.kind === "ios" ? { kind: "ios" as const, about: "p2", value: 3 }
+      : round.kind === "rating" ? { kind: "rating" as const, trait: round.trait!, about: round.about!, value: 8 }
+      : round.kind === "ios" ? { kind: "ios" as const, about: round.about!, value: 3 }
       : round.kind === "minigame" ? { kind: "minigame" as const, score: 15 }
       : round.kind === "dare" || round.kind === "pair_dare" ? { kind: "dare" as const, status: "done" as const }
       : { kind: "pick" as const, target: "p2" };

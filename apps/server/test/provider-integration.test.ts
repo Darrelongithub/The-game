@@ -12,6 +12,7 @@ import type { GameServices } from "../src/services.ts";
 
 type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
 const consent = { age: true, terms: true, revealOptIn: true };
+const profile = { age: 28, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" as const };
 const limit = <T>(promise: Promise<T>, ms = 8000): Promise<T> => new Promise((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms);
   promise.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
@@ -41,8 +42,8 @@ async function setup(t: TestContext, fakeFetch: typeof fetch, services?: GameSer
   };
   return { connect, dir, server };
 }
-const create = (socket: Client, alias: string): Promise<any> => new Promise((resolve) => socket.emit("create", { alias, consent }, resolve));
-const joinRoom = (socket: Client, roomCode: string, alias: string): Promise<any> => new Promise((resolve) => socket.emit("join", { roomCode, alias, consent }, resolve));
+const create = (socket: Client, alias: string): Promise<any> => new Promise((resolve) => socket.emit("create", { alias, consent, profile }, resolve));
+const joinRoom = (socket: Client, roomCode: string, alias: string): Promise<any> => new Promise((resolve) => socket.emit("join", { roomCode, alias, consent, profile }, resolve));
 
 // These are entirely synthetic fixtures and fake HTTP responses. No request is
 // ever sent to an external endpoint by this file.
@@ -51,28 +52,28 @@ test("real integration filters generated prompts and sends only pseudonymous pub
   let generated!: () => void;
   const allGenerated = new Promise<void>((resolve) => { generated = resolve; });
   const candidate = "Who here would laugh first during a serious group photo? Point at them.";
+  const grokPayloads: string[] = [];
   const fakeFetch: typeof fetch = async (input, init) => {
     const url = String(input), body = String(init?.body ?? ""); calls.push({ url, body });
     if (url.includes("x.ai")) {
-      if (calls.filter((call) => call.url.includes("x.ai")).length === 4) generated();
+      const xaiCalls = calls.filter((call) => call.url.includes("x.ai")).length;
+      if (xaiCalls === 4) generated();
+      if (xaiCalls > 4) {
+        const request = JSON.parse(body) as { messages?: { role: string; content: string }[] };
+        grokPayloads.push(request.messages?.find((message) => message.role === "user")?.content ?? "");
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ slides: [], secretCards: [] }) } }] }), { status: 200 });
+      }
       const choices = [
-        { text: "Who here would shoplift something for the group? Point at them.", kind: "pick", coding: "friction", measures: ["social risk"], asksTarget: true },
-        { text: candidate, kind: "pick", coding: "friction", measures: ["social risk"], asksTarget: true },
+        { text: "Who here would shoplift something for the group? Point at them.", kind: "pick", coding: "friendship", measures: ["friendship"], asksTarget: true },
+        { text: candidate, kind: "pick", coding: "friendship", measures: ["friendship"], asksTarget: true },
       ];
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(choices) } }] }), { status: 200 });
     }
     const request = JSON.parse(body) as { contents: { parts: { text: string }[] }[] };
-    const payload = JSON.parse(request.contents[0]!.parts[0]!.text) as { slides?: unknown[]; secretCards?: unknown[]; lines?: { i: number; text: string }[]; night?: { publicToneHint?: string } };
-    if (payload.lines) {
-      const tags = payload.lines.map(({ i }) => ({ i, tags: ["contempt", "admiration"] }));
-      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(tags) }] } }] }), { status: 200 });
-    }
-    assert.deepEqual(payload.secretCards, [], "public narrator must never receive private decks");
-    assert.equal(payload.night?.publicToneHint, "warm", "completed public tags can suggest a bounded narration style");
-    const bad = { slides: payload.slides!.map((_, i) => i === 0
-      ? { i, title: "Alice.*", body: "A quiet opening." }
-      : { i, title: "INVENTED 999999", body: "Alice.* invented 999999 facts." }), cards: [] };
-    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(bad) }] } }] }), { status: 200 });
+    const payload = JSON.parse(request.contents[0]!.parts[0]!.text) as { lines?: { i: number; text: string }[] };
+    assert.ok(payload.lines, "Gemini is used only for batched analysis, never reveal narration");
+    const tags = payload.lines.map(({ i }) => ({ i, tags: ["contempt", "admiration"] }));
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(tags) }] } }] }), { status: 200 });
   };
   let observedTags: { public: (string[] | undefined)[]; private: (string[] | undefined)[] } | undefined;
   const services: GameServices = {
@@ -111,8 +112,8 @@ test("real integration filters generated prompts and sends only pseudonymous pub
         case "shout": value = { kind: "shout", word: "vibes" }; break;
         case "text": value = { kind: "text", text: "Alice.* and Zoe\u0308 make the whole group laugh during dinner." }; break;
         case "debrief": value = { kind: "text", text: `PRIVATE_DEBRIEF_${i} Alice.* discussed a secret.` }; break;
-        case "rating": value = { kind: "rating", trait: "warmth", about: "self", value: 7 }; break;
-        case "ios": value = { kind: "ios", about: target, value: 5 }; break;
+        case "rating": value = { kind: "rating", trait: round.trait!, about: round.about!, value: 7 }; break;
+        case "ios": value = { kind: "ios", about: round.about!, value: 5 }; break;
         case "minigame": value = { kind: "minigame", score: 23 }; break;
         case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
         case "spotlight": value = { kind: "text", text: "Alice.* is enjoying this synthetic moment." }; break;
@@ -127,10 +128,11 @@ test("real integration filters generated prompts and sends only pseudonymous pub
   clients[0]!.emit("start");
   const views = await limit(Promise.all(finales), 10000);
   assert.deepEqual(errors, []);
-  assert.equal(rounds[0]!.promptText, candidate, "validated generated prompts augment the bank");
+  assert.ok(rounds.some((round) => round.promptText === candidate), "a validated generated prompt is selected into an eligible slot");
   assert.ok(rounds.every((round) => !round.promptText.includes("shoplift")), "hard-blocked model output never reaches a phone");
-  assert.equal(calls.filter((call) => call.url.includes("x.ai")).length, 4);
-  assert.equal(calls.filter((call) => call.url.includes("generativelanguage")).length, 2, "one public tag batch and one public finale narration");
+  assert.equal(calls.filter((call) => call.url.includes("x.ai")).length, 5, "four phase batches plus one Grok reveal request");
+  assert.equal(calls.filter((call) => call.url.includes("generativelanguage")).length, 1, "Gemini is analysis-only; no reveal request is sent");
+  assert.equal(grokPayloads.length, 1, "Grok receives the single validated narration request");
   assert.ok(observedTags && observedTags.public.length > 0 && observedTags.public.every((tags) => tags?.includes("contempt")), "completed public classification is available without affecting scores");
   assert.ok(observedTags.private.length > 0 && observedTags.private.every((tags) => tags === undefined), "private debriefs are never sent for classification");
   for (const { body } of calls) {

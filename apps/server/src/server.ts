@@ -20,15 +20,24 @@ export function lanAddresses(interfaces = networkInterfaces()): string[] {
   }
   return [...addresses].sort();
 }
+export function selectLanAddress(interfaces = networkInterfaces()): string | undefined {
+  const candidates = Object.entries(interfaces).flatMap(([name, entries]) => (entries ?? [])
+    .filter((entry) => entry.family === "IPv4" && !entry.internal && !entry.address.startsWith("127."))
+    .map((entry) => ({ name, address: entry.address })));
+  if (!candidates.length) return undefined;
+  const penalty = (name: string): number => /docker|veth|bridge|virbr|tun|tap|wireguard|tailscale|zerotier|vmnet|vbox|virtual/i.test(name) ? 2 :
+    /^(wlan|wlp|wifi|wi-fi|en|eno|enp|eth|ethernet)/i.test(name) ? 0 : 1;
+  return candidates.sort((a, b) => penalty(a.name) - penalty(b.name) || a.address.localeCompare(b.address))[0]!.address;
+}
 export function bootBanner(port: number, host: string, interfaces = networkInterfaces()): void {
-  const local = `http://localhost:${port}`, ips = lanAddresses(interfaces);
+  const local = `http://localhost:${port}`, ips = lanAddresses(interfaces), selected = selectLanAddress(interfaces);
   console.log(`\nReveal Game listening on ${host}:${port}`);
   console.log(`Local: ${local}`);
   if (ips.length) {
     for (const ip of ips) console.log(`LAN:   http://${ip}:${port}`);
     if (host === "127.0.0.1" || host === "localhost" || host === "::1") console.warn("HOST is loopback-only; LAN devices cannot reach this server.");
     console.log("Scan to join (same Wi-Fi / hotspot):");
-    qrcode.generate(`http://${ips[0]}:${port}`, { small: true });
+    qrcode.generate(`http://${selected ?? ips[0]}:${port}`, { small: true });
   } else console.warn("No LAN IPv4 interface found. Connect this host to Wi-Fi or a phone hotspot.");
 }
 function sameOrigin(origin: string | undefined, host: string | undefined, forwarded: string | string[] | undefined): boolean {

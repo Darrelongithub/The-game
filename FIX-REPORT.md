@@ -276,3 +276,61 @@ now 420s.
   unchanged by this round; no real phone has been tested here.
 - Mock-dev timing is clamped (spotlight 20s, verdict 30s with a 6s debate) so the
   demo stays watchable.
+
+---
+
+## R1–R20 remediation carry-forward — adapted to current `main`
+
+This section records the R1–R20 status after reconciling with the latest `main` (the ROUND 4 report above is historical). The merge adapts the remediation alongside main's reveal-ready gate and demo-room flow, preserving both sets of behavior rather than choosing one side wholesale. The merged contract, server, UI, and tests were revalidated together.
+
+### Remediation and regression status
+
+| Item | Adapted outcome / regression evidence |
+|---|---|
+| R1 | Entry validates 18+ profile and required consent; the private-card opt-out remains available. UI and server fixtures now submit the current profile contract. |
+| R2 | Rating and IOS subjects (and rating traits) are assigned by the server, personalized in the round view, validated on submit, and no longer left to client defaults. Protocol and UI regressions cover non-self assignments and locked intent. |
+| R3 | Dare performer/pair assignment and pass-with-reason flow remain enforced; regression covers solo performer rotation and both pair pass reasons. |
+| R4 | Public display joins through its dedicated role/event path; snapshots and finals exclude player secrets and per-player decks. Server display-role regression passes. |
+| R5 | Provider-bound text is pseudonymized; Unicode NFC/NFD alias variants are covered by server and provider regressions. |
+| R6 | Reconnect uses authenticated, rotating session credentials and nonce-bound lost-ack recovery; protocol and real SocketTransport regressions pass. |
+| R7 | Public prompt selection keeps host prompts first and generated prompts ahead of bank fallback only in eligible non-pick slots; regression passes. |
+| R8 | Engine confidence/claim rules preserve mutual nomination and measured-signal gates; exact-result and no-high-confidence-on-picks-only checks pass. |
+| R9 | `tease` is accepted as a prompt coding while remaining outside negative-score coding; prompt validation and deterministic scoring suites pass. |
+| R10 | Rating/IOS intent is explicit in the current profile/round contract; SSR, transport, and server protocol tests use the assigned values. |
+| R11 | Phase schedule retains four slots per heat and now provides two pick slots per heat; full-game, bot, and phase round-count regressions pass. |
+| R12 | LAN output reports all non-loopback IPv4 addresses and QR data; automated server regression passes. |
+| R13 | Room metadata is atomically persisted beside the JSONL log and validated/replayed on restart; two-restart deep-equality regression passes. |
+| R14 | Production finale polishing uses the Grok `reveal` lane; deterministic engine copy remains the fallback. Mocked one-call Grok regression passes. |
+| R15 | Generated prompts augment rather than replace bank coverage; host prompts retain precedence and generated prompts are prioritized for eligible slots. Regression passes. |
+| R16 | Lobby exposes the public-display link; SSR and component checks pass. |
+| R17 | Web entry remains lazy-loaded/static-exported; production bundle guard passes for player and display entrypoints. |
+| R18 | Zero is measured and absence is not; measured-component weights renormalize, debrief has no 0.5 fallback, and high-confidence claims require at least three independent measured signal types. Golden fixtures and engine regressions pass. |
+| R19 | Removed the narrator package’s Gemini HTTP/reveal helper and exports. Gemini remains analysis-only; `GEMINI_MODEL` uses the shared resolver for Gemini call sites. Grok reveal integration and a negative Gemini-reveal provider regression pass. Contract and spec wording now agree. |
+| R20 | Engine code remains deterministic and wall-clock independent. Monte Carlo is bounded by `MC_SIMULATIONS`; noise tests are summarized per night. Same-log results are deeply equal, including restart replay. The 11-player/1,320-pick performance guard passes. |
+
+### Validation on this branch
+
+- `npm ci`: passed; 0 audit vulnerabilities.
+- `npm run typecheck`: passed across server, web, engine, narrator, and prompts after the final source edits.
+- Server: **68/68** tests passed, including demo-mode, reveal-ready gate, full-game, restart replay, protocol, provider integration, account, and bot coverage.
+- Engine: **40/40** passed. Same-log results, digest and secrets are deeply equal. Latest 11-player fixture: **1,057.1 ms**, below the 2-second regression ceiling. Prior recorded baseline: **278.8 ms**; the current result is slower, though still within the guard.
+- Prompts: **104/104** passed. Narrator: **81/81** passed. Web: **39 SSR checks**, all UI/socket/mock/privacy regressions, and **1/1** transport regression passed.
+- `npm run selfcheck`: **36 checks passed**.
+- `SMOKE_FAST=1 npm run smoke:verified`: passed; phases, public finale equality, secret ownership/limits, duplicate persistence, active/finale resume, dare pass, deletion, and live moments verified with keys disabled.
+- `npm run smoke:demo`: passed against the live server — 44 round events, 24 reveals, 48 ready-gate snapshots, and an 11-slide finale.
+- `npm run build`: passed (Next static export). `npm run bundle:check`: player **145.2 KiB gzip / 150 KiB**; display **115.7 KiB / 120 KiB**.
+
+### Release disposition: **NO-GO / REQUIRES HUMAN**
+
+Automated coverage is green, but no real Android or iPhone device results have been recorded. Do not mark GO or treat merge authorization as release approval. Complete this 10-minute on-device script on both platforms and enter device model, OS/browser version, result, and any issue in this report:
+
+1. **0:00–1:00** — Open the hosted game on Android Chrome, then iPhone Safari. Confirm layout, 18+ profile and required consent gates; exercise the private-card opt-out.
+2. **1:00–3:00** — One phone creates a room and opens the public display; three additional phones join by code/link. Confirm the display has no player controls or private card content.
+3. **3:00–6:00** — Start the game. Submit pick, rating, IOS, text, and a dare pass with a reason. Confirm assigned rating/IOS intent cannot be changed and all phones advance without refresh.
+4. **6:00–8:00** — Background one phone, return, and verify authenticated reconnect restores the active round without duplicate submission. Rotate one device to portrait/landscape and check the display remains legible.
+5. **8:00–10:00** — Finish through the finale. Confirm all player phones show the same public finale, only each eligible owner sees their private deck, and delete-room removes the room from all clients.
+
+| Device | Model | OS + browser | Result / notes | Date |
+|---|---|---|---|---|
+| Android | _pending_ | _pending_ | **REQUIRES HUMAN** | _pending_ |
+| iPhone | _pending_ | _pending_ | **REQUIRES HUMAN** | _pending_ |

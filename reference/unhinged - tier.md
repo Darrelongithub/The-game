@@ -43,7 +43,7 @@ Format: `id | phase | kind | coding | asksTarget | measures`.
   "Who here could steal your partner in under an hour? Point at the threat."
 - u7 | spicy | ios | couple | peer | closeness map under spicy pressure
   "How close are you and {P4} really? Circles — and the room can see you thinking."
-- u8 | spicy | pick | friction | yes | pick cluster / consensus
+- u8 | spicy | pick | tease | yes | pick cluster / consensus
   "Who here has the most sexual tension with someone ELSE in this room? Point."
 - u9 | spicy | rating | friction | peer | directed perception
   "Rate how well {P5} hides their crushes, 1–10."
@@ -64,7 +64,7 @@ Format: `id | phase | kind | coding | asksTarget | measures`.
   probably already guessed?"
 - u15 | deep | rating | friction | peer | peer rating, finale-visible
   "Rate {P6}'s rizz 1–10. They will see this at the finale."
-- u16 | deep | pick | friction | yes | status / flirt-pattern
+- u16 | deep | pick | tease | yes | status / flirt-pattern
   "Who here flirts with everyone but would panic if it actually worked? Point."
 - u17 | deep | ios | couple | peer | closeness under pressure
   "Be honest: how close are you and {P7} ACTUALLY? Circles. No rounding down."

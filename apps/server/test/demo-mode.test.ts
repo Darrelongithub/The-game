@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { io, type Socket } from "socket.io-client";
 import type {
-  ClientToServerEvents, FinaleView, JoinReply, LogRecord, RevealView, RoomView, ServerToClientEvents,
+  ClientToServerEvents, FinaleView, JoinReply, LogRecord, RevealView, RoomView, RoundView, ServerToClientEvents,
 } from "../../../packages/shared/src/contracts.ts";
 import { computeSignals, computeResults, buildNightDigest, buildSecrets } from "../../../packages/engine/src/index.ts";
 import { createGameServer, type GameServer } from "../src/server.ts";
@@ -26,6 +26,7 @@ import { fallbackServices } from "../src/services.ts";
 
 type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
 const consent = { age: true, terms: true, revealOptIn: true };
+const profile = { age: 28, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" as const };
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const limit = <T>(promise: Promise<T>, ms = 15_000): Promise<T> => new Promise((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms);
@@ -71,11 +72,11 @@ async function harness(t: { after: (fn: () => Promise<void> | void) => void }, o
 const SEATS = ["Maya", "Kofi", "Zuri"];
 
 /** A legal answer for any round kind, so a scripted seat can be answered. */
-function valueFor(kind: string, other: string): any {
-  switch (kind) {
+function valueFor(round: RoundView, other: string): any {
+  switch (round.kind) {
     case "pick": case "verdict": return { kind: "pick", target: other };
     case "shout": return { kind: "shout", word: "static" };
-    case "rating": return { kind: "rating", trait: "honesty", about: "self", value: 6 };
+    case "rating": return { kind: "rating", trait: round.trait!, about: round.about!, value: 6 };
     case "ios": return { kind: "ios", about: other, value: 4 };
     case "minigame": return { kind: "minigame", score: 18 };
     case "dare": case "pair_dare": return { kind: "dare", status: "done" };
@@ -117,7 +118,7 @@ test("a demo room plays a whole night to a finale from one laptop", { timeout: 6
     if (round.youSubmitted || round.expectsAnswer === false) return;
     const value = round.kind === "shout" ? { kind: "shout" as const, word: "mood" }
       : round.kind === "text" || round.kind === "spotlight" || round.kind === "debrief" ? { kind: "text" as const, text: "Testing the whole game alone." }
-      : round.kind === "rating" ? { kind: "rating" as const, trait: "warmth" as const, about: "self" as const, value: 7 }
+      : round.kind === "rating" ? { kind: "rating" as const, trait: round.trait!, about: round.about!, value: 7 }
       : round.kind === "ios" ? { kind: "ios" as const, about: ids[0]!, value: 5 }
       : round.kind === "minigame" ? { kind: "minigame" as const, score: 24 }
       : round.kind === "dare" || round.kind === "pair_dare" ? { kind: "dare" as const, status: "done" as const }
@@ -163,12 +164,12 @@ test("demo_answer_as writes an ordinary record and the engine ignores the metada
     if (round.expectsAnswer === false) return;
     const allowed = (seat: string): boolean => !round.onlyPlayers || round.onlyPlayers.includes(seat);
     if (!round.youSubmitted && allowed(made.you!)) {
-      host.emit("submit", { roundId: round.roundId, clientUuid: `host:${round.roundId}`, value: valueFor(round.kind, ids[0]!) }, () => {});
+      host.emit("submit", { roundId: round.roundId, clientUuid: `host:${round.roundId}`, value: valueFor(round, ids[0]!) }, () => {});
     }
     for (const id of ids) {
       if (!allowed(id) || answered.has(`${round.roundId}:${id}`)) continue;
       answered.add(`${round.roundId}:${id}`);
-      host.emit("demo_answer_as", { playerId: id, roundId: round.roundId, clientUuid: `demo:${round.roundId}:${id}`, value: valueFor(round.kind, ids[1]!) });
+      host.emit("demo_answer_as", { playerId: id, roundId: round.roundId, clientUuid: `demo:${round.roundId}:${id}`, value: valueFor(round, ids[1]!) });
     }
   });
   // Two rounds are plenty: the metadata question is per-record, not per-night.
@@ -231,7 +232,7 @@ test("manual seats wait for the host; auto seats answer themselves", { timeout: 
   assert.equal(forRound.filter((record) => record.playerId === manual).length, 0, "a manual seat waits for the host");
   // ...and the host can answer it by hand, which is the whole point.
   host.emit("demo_answer_as", { playerId: manual, roundId, clientUuid: `manual:${roundId}`,
-    value: valueFor(opening.round!.kind, auto) });
+    value: valueFor(opening.round!, auto) });
   await wait(200);
   const after = readFileSync(join(dir, files[0]!), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) as LogRecord[];
   const manualRecord = after.find((record) => record.playerId === manual && record.roundId === roundId);
@@ -242,7 +243,7 @@ test("manual seats wait for the host; auto seats answer themselves", { timeout: 
 test("demo controls are demo-only and host-only", { timeout: 20_000 }, async (t) => {
   const { host, connect } = await harness(t);
   // An ordinary room refuses every demo control.
-  const real = await new Promise<JoinReply & { code?: string }>((resolve) => host.emit("create", { alias: "Host", consent }, resolve));
+  const real = await new Promise<JoinReply & { code?: string }>((resolve) => host.emit("create", { alias: "Host", consent, profile }, resolve));
   assert.equal(real.ok, true);
   assert.equal(real.state?.demo, undefined, "an ordinary room is not a demo room");
   const refused = event<{ code: string }>(host, "error");
@@ -263,7 +264,7 @@ test("demo controls are demo-only and host-only", { timeout: 20_000 }, async (t)
   const demo = await new Promise<JoinReply & { code?: string }>((resolve) => second.emit("create", { alias: "DemoHost", consent, demo: true }, resolve));
   assert.equal(demo.ok, true);
   const guest = await connect();
-  const joined = await new Promise<JoinReply>((resolve) => guest.emit("join", { roomCode: demo.code!, alias: "Guest", consent }, resolve));
+  const joined = await new Promise<JoinReply>((resolve) => guest.emit("join", { roomCode: demo.code!, alias: "Guest", consent, profile }, resolve));
   assert.equal(joined.ok, true);
   const guestSeat = await new Promise<{ ok: boolean; playerId?: string }>((resolve) => guest.emit("demo_add_player", { alias: "Proxy" }, resolve));
   assert.equal(guestSeat.ok, false, "only the host puppets seats");

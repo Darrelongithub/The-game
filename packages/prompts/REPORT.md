@@ -15,7 +15,7 @@ outside it was edited except one append to `NOTES/contract - requests.md`.
 | `src/bank/dare.json` | 15 non-unhinged prompts (dd1–dd10 seeds + dd11–dd15 originals, incl. pair_dare + debrief). |
 | `src/bank/unhinged.json` | u1–u27 verbatim from `reference/unhinged-tier.md` (SPICY_TIER only). |
 | `src/bank/index.ts` | Loader (JSON per phase), `SPICY_TIER`/env resolution, placeholder parsing, deterministic `selectFromBank` (kind spread, player-count + used-id aware). |
-| `src/text.ts` | Tokenizer, token-set Jaccard (0.5 = unknown), dedupe normaliser, `clamp01`. |
+| `src/text.ts` | Tokenizer, token-set Jaccard (blank inputs score zero; missing data is not midpoint-imputed), dedupe normaliser, `clamp01`. |
 | `src/filter.ts` | Schema + banned patterns + hard blocks + placeholder hygiene + dedupe + DATA-OR-DEAD. Every drop carries a `DropReason`. |
 | `src/guard.ts` | `CallGuard` — ONE per-room in-memory ledger for both lanes: total cap 8, purpose slots `generate 4 / tag 1 / analyze 1 / reveal 1`, `forget(room)`. |
 | `src/provider.ts` | Grok lane (OpenAI-compatible `/chat/completions`, Bearer, JSON mode with one retry without `response_format`), Gemini lane (classic `generateContent`, `SAFETY_OFF` → `BLOCK_NONE` + literal-`OFF` retry), 8 s `AbortController`, failure reasons, alias scrubbing. |

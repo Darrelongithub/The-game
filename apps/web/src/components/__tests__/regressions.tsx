@@ -44,18 +44,28 @@ async function main() {
   const pointer = async (el: Element, type: string) => { await act(async () => el.dispatchEvent(new w.PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'touch' }))) }
   const key = async (el: Element, type: string, k: string) => { await act(async () => el.dispatchEvent(new w.KeyboardEvent(type, { key: k, bubbles: true, cancelable: true }))) }
   const button = (host: HTMLElement, text: string) => [...host.querySelectorAll('button')].find((el) => el.textContent?.includes(text))!
+  const fillProfile = async (host: HTMLElement) => {
+    const setter = Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, 'value')!.set!
+    await act(async () => {
+      for (const [id, value] of [['profile-age', '30'], ['profile-partnersToDate', '2'], ['profile-longestMonths', '6']]) {
+        const input = host.querySelector<HTMLInputElement>(`#${id}`)!; setter.call(input, value); input.dispatchEvent(new w.Event('input', { bubbles: true }))
+      }
+      for (const checkbox of host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) checkbox.click()
+    })
+  }
   const players = [1, 2, 3, 4].map((i) => ({ id: `p${i}`, alias: `Person ${i}`, connected: true, isBot: false }))
   const round: RoundView = { roundId: 'r1', index: 1, phase: 'warmup', kind: 'pick', promptText: 'Pick someone here', closesAt: Date.now() + 60_000, youSubmitted: false }
   const view: RoomView = { code: 'AB2C', phase: 'warmup', hostId: 'p1', players, round, seq: 1 }
 
-  await check('entry has no consent checkboxes or notice, and preserves the private-card opt-out', async (root, host) => {
+  await check('entry requires age/profile consent and preserves the private-card opt-out', async (root, host) => {
     let sent: any
     await render(root, <JoinScreen hasSession={false} busy={false} error={null} onCreate={async (_alias, consent) => { sent = consent; return { ok: true } }} onJoin={async () => ({ ok: true })} />)
-    assert.equal(host.querySelectorAll('input[type="checkbox"]').length, 0)
-    assert.doesNotMatch(host.textContent ?? '', /18\+|house rules|agree to play respectfully|private cards|I opt in/i)
+    assert.equal(host.querySelectorAll('input[type="checkbox"]').length, 2)
+    assert.match(host.textContent ?? '', /18\+|house rules/i)
     const input = host.querySelector<HTMLInputElement>('#alias')!
     const setter = Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, 'value')!.set!
     await act(async () => { setter.call(input, 'Guest'); input.dispatchEvent(new w.Event('input', { bubbles: true })) })
+    await fillProfile(host)
     assert.equal(button(host, 'Create room').disabled, false)
     await click(button(host, 'Privacy options'))
     await click(button(host, 'Private cards: on'))
@@ -73,6 +83,7 @@ async function main() {
       const code = host.querySelector<HTMLInputElement>('#code')!; setter.call(code, 'AB-2C'); code.dispatchEvent(new w.Event('input', { bubbles: true }))
     })
     assert.equal(host.querySelector<HTMLInputElement>('#code')?.value, 'AB2C')
+    await fillProfile(host)
     await click(button(host, 'Join room'))
     assert.equal(joined.code, 'AB2C'); assert.equal(joined.consent.revealOptIn, true)
     w.history.replaceState({}, '', '/')
@@ -83,6 +94,7 @@ async function main() {
     const input = host.querySelector<HTMLInputElement>('#alias')!
     const setter = Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, 'value')!.set!
     await act(async () => { setter.call(input, 'Guest'); input.dispatchEvent(new w.Event('input', { bubbles: true })) })
+    await fillProfile(host)
     await click(button(host, 'Create room'))
     assert.match(host.textContent ?? '', /Offline/)
   })
@@ -157,48 +169,42 @@ async function main() {
     assert.equal(left, 1, 'Done leaves the current room on this phone')
   })
 
-  await check('rating and closeness defaults follow clear prompt wording', async (root, host) => {
-    const rating = { ...round, kind: 'rating' as const, promptText: "Rate Person 2's warmth, 1–10." }
+  await check('assigned rating and closeness targets are shown without dropdown overrides', async (root, host) => {
+    const rating = { ...round, kind: 'rating' as const, trait: 'warmth', about: 'p2', promptText: "Rate Person 2's warmth, 1–10." }
     await render(root, <PromptScreen round={rating} room={view} you="p1" onSubmit={async () => true} />)
-    let selects = host.querySelectorAll('select')
-    assert.equal(selects[0]?.value, 'warmth'); assert.equal(selects[1]?.value, 'p2')
-    const ios = { ...round, roundId: 'r2', kind: 'ios' as const, promptText: 'How close are you and Person 3, really? Circles.' }
+    assert.match(host.textContent ?? '', /Person 2.*warmth/s); assert.equal(host.querySelectorAll('select').length, 0)
+    const ios = { ...round, roundId: 'r2', kind: 'ios' as const, about: 'p3', promptText: 'How close are you and Person 3, really? Circles.' }
     await render(root, <PromptScreen round={ios} room={view} you="p1" onSubmit={async () => true} />)
-    selects = host.querySelectorAll('select'); assert.equal(selects[0]?.value, 'p3')
-    const listening = { ...round, roundId: 'r3', kind: 'rating' as const, promptText: 'Rate how well Person 3 actually listens, 1–10.' }
-    await render(root, <PromptScreen round={listening} room={view} you="p1" onSubmit={async () => true} />)
-    selects = host.querySelectorAll('select'); assert.equal(selects[0]?.value, 'warmth'); assert.equal(selects[1]?.value, 'p3')
-    const selfIos = { ...round, roundId: 'r4', kind: 'ios' as const, promptText: 'How close are you and Person 1, really? Circles.' }
+    assert.match(host.textContent ?? '', /Person 3/); assert.equal(host.querySelectorAll('select').length, 0)
+    const selfIos = { ...round, roundId: 'r4', kind: 'ios' as const, about: undefined, promptText: 'How close are you and Person 1, really? Circles.' }
     await render(root, <PromptScreen round={selfIos} room={view} you="p1" onSubmit={async () => true} />)
-    assert.match(host.querySelector('h1')?.textContent ?? '', /you and someone here/)
-    assert.equal(host.querySelector('select')?.value, '', 'cannot rate closeness to yourself')
+    assert.equal(host.querySelectorAll('button[aria-label^="Closeness "]').length, 0, 'server never assigns closeness to oneself')
     const specialRoom = { ...view, players: players.map((p) => ({ ...p, alias: p.id === 'p1' ? 'A.*' : p.id === 'p2' ? '[B]' : p.alias })) }
     const specialSelf = { ...selfIos, roundId: 'r-special', promptText: 'How close are you and A.*, really? Circles.' }
     await render(root, <PromptScreen round={specialSelf} room={specialRoom} you="p1" onSubmit={async () => true} />)
     assert.match(host.querySelector('h1')?.textContent ?? '', /you and someone here/, 'aliases are escaped in the self-reference pattern')
     const specialRating = { ...rating, roundId: 'r-special-rating', promptText: "Rate [B]'s warmth, 1–10." }
     await render(root, <PromptScreen round={specialRating} room={specialRoom} you="p1" onSubmit={async () => true} />)
-    assert.equal(host.querySelectorAll('select')[1]?.value, 'p2', 'aliases with regex characters still target the right player')
+    assert.equal(host.querySelectorAll('select').length, 0); assert.ok(host.textContent?.includes('[B]'), 'assigned target alias remains visible without being re-selected')
     const bankRating = { ...rating, roundId: 'r-bank-rating', promptText: 'Rate how good Person 2 is at keeping a secret, 1–10.\n\nEarlier, someone said: “chaos chaos chaos and Person 3”' }
     await render(root, <PromptScreen round={bankRating} room={view} you="p1" onSubmit={async () => true} />)
-    assert.equal(host.querySelectorAll('select')[0]?.value, 'loyalty', 'the bank measure supplies the trait')
-    assert.equal(host.querySelectorAll('select')[1]?.value, 'p2', 'the bank template supplies the named target')
+    assert.equal(host.querySelectorAll('select').length, 0, 'the server-assigned measure and target are not user-overridden')
+    assert.ok(host.textContent?.includes('warmth') && host.textContent?.includes('Person 2'))
     assert.match(host.querySelector('[data-testid="callback-note"]')?.textContent ?? '', /chaos chaos/)
-    const bankIos = { ...ios, roundId: 'r-bank-ios', promptText: 'Where do you actually want to be with Person 2 a year from now? Circles.' }
+    const bankIos = { ...ios, roundId: 'r-bank-ios', about: 'p2', promptText: 'Where do you actually want to be with Person 2 a year from now? Circles.' }
     await render(root, <PromptScreen round={bankIos} room={view} you="p1" onSubmit={async () => true} />)
-    assert.equal(host.querySelector('select')?.value, 'p2', 'closeness templates with "with" select the intended person')
-    const selfTrajectory = { ...bankIos, roundId: 'r-bank-ios-self', promptText: 'Where do you actually want to be with Person 1 a year from now? Circles.' }
+    assert.ok(host.textContent?.includes('Person 2')); assert.equal(host.querySelectorAll('select').length, 0)
+    const selfTrajectory = { ...bankIos, roundId: 'r-bank-ios-self', about: undefined, promptText: 'Where do you actually want to be with Person 1 a year from now? Circles.' }
     await render(root, <PromptScreen round={selfTrajectory} room={view} you="p1" onSubmit={async () => true} />)
     assert.match(host.querySelector('h1')?.textContent ?? '', /with someone here/)
-    assert.equal(host.querySelector('select')?.value, '', 'a player cannot be their own closeness target')
+    assert.equal(host.querySelectorAll('button[aria-label^="Closeness "]').length, 0)
     const friendTowardYou = { ...rating, roundId: 'r-friend', promptText: 'How honest is your friend with you?' }
     await render(root, <PromptScreen round={friendTowardYou} room={view} you="p1" onSubmit={async () => true} />)
-    assert.equal(host.querySelectorAll('select')[1]?.value, '', '"with you" does not silently mean a self-rating')
+    assert.ok(host.textContent?.includes('Person 2') && host.textContent?.includes('warmth'), 'server assignment, not vague wording, controls rating intent')
     const ambiguous = { ...round, roundId: 'r5', kind: 'rating' as const, promptText: 'Give a number from one to ten.' }
     await render(root, <PromptScreen round={ambiguous} room={view} you="p1" onSubmit={async () => true} />)
-    assert.equal(host.querySelectorAll('select')[0]?.value, '', 'unknown trait is not silently guessed')
-    assert.equal(host.querySelectorAll('select')[1]?.value, '', 'unknown target is not silently guessed')
-    assert.equal(button(host, 'Submit rating').disabled, true)
+    assert.equal(host.querySelectorAll('select').length, 0, 'missing server assignment never exposes a guessed control')
+    assert.equal(button(host, 'Submit rating'), undefined)
   })
 
   await check('a pair dare offers the required pass-with-reason escape', async (root, host) => {

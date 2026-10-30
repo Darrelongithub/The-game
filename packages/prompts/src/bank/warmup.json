@@ -25,7 +25,7 @@
     "id": "w3",
     "phase": "warmup",
     "kind": "text",
-    "text": "Most chaotic thing you did this year — and who here was the accomplice? One line.",
+    "text": "Most chaotic thing you did this year \u2014 and who here was the accomplice? One line.",
     "measures": [
       "chaos baseline"
     ],
@@ -40,14 +40,14 @@
     "measures": [
       "teasing baseline"
     ],
-    "coding": "friction",
+    "coding": "tease",
     "asksTarget": true
   },
   {
     "id": "w5",
     "phase": "warmup",
     "kind": "rating",
-    "text": "How warm are you, honestly? 1–10.",
+    "text": "How warm are you, honestly? 1\u201310.",
     "measures": [
       "trait:warmth",
       "self-image baseline",
@@ -94,7 +94,7 @@
     "id": "w9",
     "phase": "warmup",
     "kind": "rating",
-    "text": "Rate {P2}'s chaos level 1–10. They can take it.",
+    "text": "Rate {P2}'s chaos level 1\u201310. They can take it.",
     "measures": [
       "trait:chaos",
       "peer chaos read",
@@ -107,7 +107,7 @@
     "id": "w10",
     "phase": "warmup",
     "kind": "minigame",
-    "text": "Tap war: fastest fingers wins. Ready…",
+    "text": "Tap war: fastest fingers wins. Ready\u2026",
     "measures": [
       "tap-war champion"
     ],
@@ -142,7 +142,7 @@
     "id": "w13",
     "phase": "warmup",
     "kind": "rating",
-    "text": "Rate how good {P3} is at keeping a secret, 1–10.",
+    "text": "Rate how good {P3} is at keeping a secret, 1\u201310.",
     "measures": [
       "trait:loyalty",
       "peer loyalty read",

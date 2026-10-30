@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Consent,
+  ProfileAnswers,
   FinaleView,
   InterludeView,
   JoinReply,
@@ -39,10 +40,9 @@ export interface UseRoom {
   secrets: SecretDeckView | null;
   mustAnswer: boolean;
   /** lobby actions */
-  createRoom: (alias: string, consent: Consent, options?: { demo?: boolean }) => Promise<JoinReply & { code?: RoomCode }>;
-  /** "I'm ready for the pending reveal" (reveals wait for everyone) */
+  createRoom: (alias: string, consent: Consent, profile: ProfileAnswers, options?: { demo?: boolean }) => Promise<JoinReply & { code?: RoomCode }>;
+  /** "I'm ready for the pending reveal" */
   ready: () => void;
-  /** DEMO ROOMS (host only): puppeted seats played from this laptop */
   demo: boolean;
   demoAddPlayer: (alias: string) => Promise<{ ok: boolean; playerId?: PlayerId }>;
   demoRemovePlayer: (playerId: PlayerId) => void;
@@ -50,11 +50,9 @@ export interface UseRoom {
   demoAnswerAs: (playerId: PlayerId) => void;
   demoAllReady: () => void;
   demoSpeed: (scale: number) => void;
-  /** players still to press ready for the pending reveal; null when none is pending */
   awaitingReady: PlayerId[] | null;
-  /** this phone has already pressed ready for the pending reveal */
   youAreReady: boolean;
-  joinRoom: (code: RoomCode, alias: string, consent: Consent) => Promise<JoinReply>;
+  joinRoom: (code: RoomCode, alias: string, consent: Consent, profile: ProfileAnswers) => Promise<JoinReply>;
   start: () => void;
   addBot: () => void;
   skipRound: () => void;
@@ -197,11 +195,11 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
     setHasSession(false);
   }, []);
 
-  const createRoom = useCallback(async (alias: string, consent: Consent, options?: { demo?: boolean }) => {
+  const createRoom = useCallback(async (alias: string, consent: Consent, profile: ProfileAnswers, options?: { demo?: boolean }) => {
     const t = transportRef.current ?? await transportReady.current?.catch(() => null);
     if (!t) return { ok: false, error: "Not connected yet. Please retry." } satisfies JoinReply;
     setError(null);
-    const reply = await t.create(alias, consent, options);
+    const reply = await t.create(alias, consent, profile, options);
     if (reply.ok && reply.you) {
       setYou(reply.you);
       if (reply.state) setView(reply.state);
@@ -217,11 +215,11 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
     return reply;
   }, []);
 
-  const joinRoom = useCallback(async (roomCode: RoomCode, alias: string, consent: Consent) => {
+  const joinRoom = useCallback(async (roomCode: RoomCode, alias: string, consent: Consent, profile: ProfileAnswers) => {
     const t = transportRef.current ?? await transportReady.current?.catch(() => null);
     if (!t) return { ok: false, error: "Not connected yet. Please retry." } satisfies JoinReply;
     setError(null);
-    const reply = await t.join({ roomCode, alias, consent });
+    const reply = await t.join({ roomCode, alias, consent, profile });
     if (reply.ok && reply.you) {
       setYou(reply.you);
       if (reply.state) setView(reply.state);

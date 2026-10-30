@@ -10,6 +10,7 @@ import { fallbackServices, type GameServices } from "../src/services.ts";
 
 type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
 const consent = { age: true, terms: true, revealOptIn: true };
+const profile = { age: 28, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" as const };
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const deadline = <T>(promise: Promise<T>, ms = 8000): Promise<T> => new Promise((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms);
@@ -23,9 +24,9 @@ async function connected(base: string): Promise<Client> {
   s.on("state", (view) => { if (view.ready) s.emit("ready"); });
   const done = once<void>(s, "connect"); s.connect(); await deadline(done); return s;
 }
-const create = (s: Client, alias: string): Promise<JoinReply & { code?: string }> => new Promise((resolve) => s.emit("create", { alias, consent }, resolve));
+const create = (s: Client, alias: string): Promise<JoinReply & { code?: string }> => new Promise((resolve) => s.emit("create", { alias, consent, profile }, resolve));
 const joinRoom = (s: Client, code: string, alias: string, optIn = true, resume?: { playerId: string; secret: string }): Promise<JoinReply> =>
-  new Promise((resolve) => s.emit("join", { roomCode: code, alias, consent: { ...consent, revealOptIn: optIn }, ...(resume ? { resume } : {}) }, resolve));
+  new Promise((resolve) => s.emit("join", { roomCode: code, alias, consent: { ...consent, revealOptIn: optIn }, profile, ...(resume ? { resume } : {}) }, resolve));
 const ackSubmit = (s: Client, payload: { roundId: string; clientUuid: string; value: ResponseValue }): Promise<{ok: boolean; error?: string}> => new Promise((resolve) => s.emit("submit", payload, resolve));
 
 test("five real sockets complete all rounds; public finale is identical; private decks and reconnect are isolated", { timeout: 15000 }, async (t) => {
@@ -103,8 +104,8 @@ test("five real sockets complete all rounds; public finale is identical; private
         case "shout": value = { kind: "shout", word: i < 3 ? "chaos" : "vibes" }; break;
         case "text": value = { kind: "text", text: "Alice.* always turns a difficult evening into a funny story." }; break;
         case "debrief": value = { kind: "text", text: `PRIVATE_DEBRIEF_${i} this must not appear in public.` }; break;
-        case "rating": value = { kind: "rating", trait: "warmth", about: i % 2 ? target : "self", value: 7 }; break;
-        case "ios": value = { kind: "ios", about: target, value: 5 }; break;
+        case "rating": value = { kind: "rating", trait: round.trait!, about: round.about!, value: 7 }; break;
+        case "ios": value = { kind: "ios", about: round.about!, value: 5 }; break;
         case "minigame": value = { kind: "minigame", score: 20 + i }; break;
         case "dare": value = i === 0 ? { kind: "dare", status: "passed", reason: "Alice.* is watching." } : { kind: "dare", status: "done" }; break;
         case "pair_dare": value = { kind: "dare", status: "done" }; break;
@@ -140,11 +141,11 @@ test("five real sockets complete all rounds; public finale is identical; private
   assert.ok(captured.length >= 2);
   for (const payload of captured) assert.ok(!payload.includes("Alice.*"), "real alias must not reach a service");
   assert.ok(!captured.at(-1)!.includes("PRIVATE_DEBRIEF"), "private debriefs never reach public writer");
-  const files = readdirSync(dir); assert.equal(files.length, 1);
+  const files = readdirSync(dir).filter((name) => name.endsWith(".jsonl")); assert.equal(files.length, 1);
   const rawLog = readFileSync(join(dir, files[0]!), "utf8");
   assert.ok(!rawLog.includes("PRIVATE_SECRET"));
   const records: LogRecord[] = rawLog.trim().split("\n").map((line) => JSON.parse(line));
-  assert.equal(records.length, 96); // 61 question answers + 4 spotlights × 5 + 3 verdicts × 5
+  assert.equal(records.length, 103); // 68 question answers + 4 spotlights × 5 + 3 verdicts × 5
   assert.ok(records.every((r) => r.coding && r.latencyMs >= 0));
   assert.equal(records.filter((r) => r.roundId === records[0]!.roundId && r.playerId === ids[0]).length, 1, "retry persisted exactly once");
   assert.equal(records.filter((r) => r.roundKind === "debrief").length, 4);

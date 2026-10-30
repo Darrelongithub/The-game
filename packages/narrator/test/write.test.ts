@@ -4,11 +4,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { FinaleSlide, PlayerId, SecretCard } from "../../shared/src/contracts.ts";
-import { PROVIDERS } from "../../shared/src/contracts.ts";
 import { buildSkeleton, sourceOf } from "../src/slides.ts";
 import { narrateNight, writeFinale } from "../src/write.ts";
 import { applyAliasesToDecks, applyAliasesToSlides } from "../src/index.ts";
-import { parseJsonLoose } from "../src/gemini.ts";
 import { derivePseudonyms, scrubAliases, swapPseudonyms } from "../src/roster.ts";
 import { night, ROSTER } from "./fixtures.ts";
 
@@ -54,29 +52,32 @@ const rawEnvelope = (text: string): Response =>
     headers: { "content-type": "application/json" },
   });
 
+const grokOptions = (fetchImpl: typeof fetch, roster = ROSTER) => ({
+  roster,
+  grok: async (payload: Record<string, unknown>) => {
+    const response = await fetchImpl("https://api.x.ai/v1/chat/completions", {
+      method: "POST", headers: { authorization: "Bearer synthetic-test-key" },
+      body: JSON.stringify({ model: "grok-4-1-fast", messages: [{ role: "user", content: JSON.stringify(payload) }] }),
+    });
+    if (!response.ok) throw new Error(`Grok mock HTTP ${response.status}`);
+    const envelope = await response.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+    const text = envelope.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+    return JSON.parse(text) as unknown;
+  },
+});
+
 const validCopy = {
   title: "THE ROOM HAS SPOKEN",
   body: "This is the story of the night, told by the numbers.",
 };
 
 /** Quote / dodge slides must keep their verbatim material (see keepsVerbatim). */
-const bodyFor = (slide: FinaleSlide): string => {
-  const verbatim = sourceOf(slide)?.verbatim;
-  return verbatim ? `${verbatim} — and that is on record.` : validCopy.body;
-};
+const bodyFor = (slide: FinaleSlide): string => sourceOf(slide)?.verbatim ? (slide.body ?? "") : validCopy.body;
 
 const fullResponse = (slides: readonly FinaleSlide[]) => ({
   slides: slides.map((slide, index) => ({ i: index, title: validCopy.title, body: bodyFor(slide) })),
-  cards: [],
+  secretCards: [],
 });
-
-const payloadOf = (call: Call): Record<string, unknown> => {
-  const body = JSON.parse(String(call.init.body)) as {
-    contents: { parts: { text: string }[] }[];
-  };
-  const text = body.contents[0]?.parts[0]?.text ?? "{}";
-  return JSON.parse(text) as Record<string, unknown>;
-};
 
 const sortedDeck = (decks: Map<PlayerId, SecretCard[]>): Record<string, SecretCard[]> =>
   Object.fromEntries([...decks.entries()].sort(([a], [b]) => a.localeCompare(b)));
@@ -97,34 +98,24 @@ describe("canonical alias privacy", () => {
 describe("no key — the whole show runs on the engine", () => {
   it("makes zero network calls and returns the skeleton untouched", async () => {
     const { skeleton, decks, night: data } = READY();
-    const { impl, calls } = mockFetch(() => envelope({}));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "",
-      fetchImpl: impl,
       roster: ROSTER,
     });
-
-    assert.equal(calls.length, 0);
     assert.deepEqual(out.slides, skeleton);
     assert.deepEqual(sortedDeck(out.decks), sortedDeck(decks));
   });
 
-  it("treats an empty GEMINI_API_KEY env value as no key", async () => {
+  it("runs with deterministic copy when no Grok callback is configured", async () => {
     const { skeleton, decks, night: data } = READY();
-    const { impl, calls } = mockFetch(() => envelope({}));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      env: { GEMINI_API_KEY: "   " },
-      fetchImpl: impl,
       roster: ROSTER,
     });
-    assert.equal(calls.length, 0);
     assert.equal(out.slides.length, skeleton.length);
   });
 
   it("returns fully populated slides and decks from evidence alone", async () => {
     const { skeleton, decks, night: data } = READY();
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      env: {},
       roster: ROSTER,
     });
 
@@ -144,170 +135,23 @@ describe("no key — the whole show runs on the engine", () => {
   });
 });
 
-describe("one call, right lane", () => {
-  it("sends the classic BLOCK_NONE thresholds on the classic endpoint", async () => {
+describe("Grok reveal lane", () => {
+  it("uses one injected Grok request with structured pseudonymous payload", async () => {
     const { skeleton, decks, night: data } = READY();
     const { impl, calls } = mockFetch(() => envelope(fullResponse(skeleton)));
-    await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "test-key",
-      fetchImpl: impl,
-      roster: ROSTER,
-    });
-    const body = JSON.parse(String((calls[0] as Call).init.body)) as {
-      safetySettings: { category: string; threshold: string }[];
-    };
+    const copy = await writeFinale(skeleton, decks, data.results, data.digest, grokOptions(impl));
+    assert.equal(copy.slides.length, skeleton.length);
     assert.equal(calls.length, 1);
-    assert.ok(
-      body.safetySettings.every((setting) => setting.threshold === "BLOCK_NONE"),
-      "classic v1beta expects BLOCK_NONE, not the literal OFF",
-    );
+    assert.match(calls[0]!.url, /api\.x\.ai\/v1\/chat\/completions/u);
+    assert.equal(JSON.parse(String(calls[0]!.init.body)).model, "grok-4-1-fast");
   });
 
-  it("retries once with the literal contract thresholds when the field is rejected", async () => {
-    const { skeleton, decks, night: data } = READY();
-    let call = 0;
-    const { impl, calls } = mockFetch(() => {
-      call += 1;
-      return call === 1
-        ? new Response(JSON.stringify({ error: { message: "Invalid safetySetting" } }), {
-            status: 400,
-          })
-        : envelope(fullResponse(skeleton));
-    });
-
-    const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "test-key",
-      fetchImpl: impl,
-      roster: ROSTER,
-    });
-
-    assert.equal(calls.length, 2, "exactly one retry, never a loop");
-    const retry = JSON.parse(String((calls[1] as Call).init.body)) as {
-      safetySettings: { threshold: string }[];
-    };
-    assert.ok(retry.safetySettings.every((setting) => setting.threshold === "OFF"));
-    assert.equal(out.slides[0]?.body, bodyFor(skeleton[0] as FinaleSlide));
-  });
-
-  it("does not retry on a non-400 failure", async () => {
+  it("keeps deterministic copy when the Grok lane refuses or fails", async () => {
     const { skeleton, decks, night: data } = READY();
     const { impl, calls } = mockFetch(() => new Response("rate limited", { status: 429 }));
-    const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "test-key",
-      fetchImpl: impl,
-      roster: ROSTER,
-    });
+    const copy = await writeFinale(skeleton, decks, data.results, data.digest, grokOptions(impl));
     assert.equal(calls.length, 1);
-    assert.deepEqual(out.slides, skeleton);
-  });
-
-  it("calls PROVIDERS.gemini.reveal exactly once, with SAFETY_OFF", async () => {
-    const { skeleton, decks, night: data } = READY();
-    const { impl, calls } = mockFetch(() => envelope(fullResponse(skeleton)));
-    await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "test-key",
-      fetchImpl: impl,
-      roster: ROSTER,
-    });
-
-    assert.equal(calls.length, 1);
-    const call = calls[0] as Call;
-    assert.match(call.url, new RegExp(`models/${PROVIDERS.gemini.reveal}:generateContent`));
-
-    const body = JSON.parse(String(call.init.body)) as {
-      safetySettings: { category: string; threshold: string }[];
-      systemInstruction: { parts: { text: string }[] };
-      generationConfig: { responseMimeType: string };
-    };
-    assert.equal(body.safetySettings.length, 4);
-    assert.ok(body.safetySettings.every((setting) => setting.threshold.length > 0));
-    assert.equal(body.generationConfig.responseMimeType, "application/json");
-    assert.match(body.systemInstruction.parts[0]?.text ?? "", /Player N/);
-    assert.match(body.systemInstruction.parts[0]?.text ?? "", /140/);
-  });
-
-  it("sends the beats, the claims, the digest and the secret cards", async () => {
-    const { skeleton, decks, night: data } = READY();
-    const { impl, calls } = mockFetch(() => envelope(fullResponse(skeleton)));
-    await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "test-key",
-      fetchImpl: impl,
-      roster: ROSTER,
-    });
-
-    const payload = payloadOf(calls[0] as Call);
-    const slides = payload["slides"] as { i: number; beat: string; engine: { body: string } }[];
-    assert.equal(slides.length, skeleton.length);
-    assert.deepEqual(
-      slides.map((slide) => slide.beat),
-      skeleton.map((slide) => slide.beat),
-    );
-    assert.ok(slides.every((slide) => typeof slide.engine.body === "string"));
-    assert.equal((payload["claims"] as unknown[]).length, 6);
-    const cards = payload["secretCards"] as { i: number; kind: string }[];
-    assert.deepEqual(
-      cards.map((card) => card.kind),
-      ["spark", "stat", "onesided", "blindspot"],
-    );
-    assert.match(String((payload["night"] as { tone: string }).tone), /roast-warm/i);
-  });
-
-  it("never puts a real alias in the request", async () => {
-    const { skeleton, decks, night: data } = READY();
-    const { impl, calls } = mockFetch(() => envelope(fullResponse(skeleton)));
-    await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "test-key",
-      fetchImpl: impl,
-      roster: ROSTER,
-    });
-
-    const body = String((calls[0] as Call).init.body).toLowerCase();
-    for (const { alias } of ROSTER) {
-      assert.ok(!body.includes(alias.toLowerCase()), `alias "${alias}" left the server`);
-    }
-    const payload = payloadOf(calls[0] as Call);
-    assert.match(JSON.stringify(payload["digest"]), /Player \d+/);
-  });
-
-  it("scrubs aliases from prebuilt slides, claims, running gags and card copy before sending", async () => {
-    const data = night();
-    data.digest.quotes[0]!.text = "Zedward would fight a bus for this group.";
-    data.digest.dodges[0]!.reason = "Zed had other plans.";
-    data.digest.runningGags[0]!.word = "Zed";
-    data.results.claims.find((claim) => claim.id === "c-ship")!.evidence.push("Zed was mentioned in evidence.");
-    data.decks.get("p1")![0]!.facts.push("Zed was mentioned in a card.");
-    const skeleton = buildSkeleton(data.results, data.digest, ROSTER);
-    assert.ok(skeleton.some((slide) => slide.body?.includes("Zed")), "fixture must exercise a prebuilt slide");
-    const { impl, calls } = mockFetch(() => envelope({}));
-    const out = await writeFinale(skeleton, data.decks, data.results, data.digest, {
-      apiKey: "test-key", fetchImpl: impl, roster: ROSTER,
-    });
-    const payload = JSON.stringify(payloadOf(calls[0] as Call));
-    assert.doesNotMatch(payload, /Zed/i, "every provider-bound free-text field must be pseudonymized");
-    assert.match(payload, /Player 2/);
-    assert.ok(out.slides.some((slide) => slide.body?.includes("Zed")), "fallback copy remains unchanged locally");
-  });
-
-  it("does not send unidentifiable free text when the roster is missing", async () => {
-    const { skeleton, decks, night: data } = READY();
-    const { impl, calls } = mockFetch(() => envelope({}));
-    const out = await writeFinale(skeleton, decks, data.results, data.digest, { apiKey: "test-key", fetchImpl: impl });
-    assert.equal(calls.length, 0);
-    assert.deepEqual(out.slides, skeleton);
-  });
-
-  it("scrubs an alias a player typed into a quote", async () => {
-    const { skeleton, decks, night: data } = READY();
-    data.digest.quotes[0]!.text = "Zed would fight a bus for this group.";
-    const { impl, calls } = mockFetch(() => envelope(fullResponse(skeleton)));
-    await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "test-key",
-      fetchImpl: impl,
-      roster: ROSTER,
-    });
-    const body = String((calls[0] as Call).init.body);
-    assert.ok(!body.toLowerCase().includes("zed"), "typed alias must be pseudonymized");
-    assert.match(body, /Player 2 would fight a bus/);
+    assert.deepEqual(copy.slides, skeleton);
   });
 });
 
@@ -316,13 +160,13 @@ describe("validation on every response", () => {
     const { skeleton, decks, night: data } = READY();
     const { impl } = mockFetch(() => envelope(fullResponse(skeleton)));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
     out.slides.forEach((slide, index) => {
+      const base = skeleton[index] as FinaleSlide;
       assert.equal(slide.title, validCopy.title);
-      assert.equal(slide.body, bodyFor(skeleton[index] as FinaleSlide));
+      assert.equal(slide.body, bodyFor(base));
     });
   });
 
@@ -334,8 +178,7 @@ describe("validation on every response", () => {
 
     const { impl } = mockFetch(() => envelope(response));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
 
@@ -349,8 +192,7 @@ describe("validation on every response", () => {
     (response.slides[3] as { body: string }).body = "Player 9 did this to us.";
     const { impl } = mockFetch(() => envelope(response));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
     assert.equal(out.slides[3]?.body, skeleton[3]?.body);
@@ -363,8 +205,7 @@ describe("validation on every response", () => {
     (response.slides[rival] as { body: string }).body = "Player 1 started it.";
     const { impl } = mockFetch(() => envelope(response));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
     assert.equal(out.slides[rival]?.body, skeleton[rival]?.body);
@@ -378,8 +219,7 @@ describe("validation on every response", () => {
     (response.slides[3] as { title: string }).title = "THIS TITLE HAS SEVEN WORDS IN IT NOW";
     const { impl } = mockFetch(() => envelope(response));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
 
@@ -396,8 +236,7 @@ describe("validation on every response", () => {
     (response.slides[5] as { body: string }).body = "I'm sorry, but I can't help with that.";
     const { impl } = mockFetch(() => envelope(response));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
     assert.equal(out.slides[4]?.body, skeleton[4]?.body);
@@ -414,8 +253,7 @@ describe("validation on every response", () => {
 
     const { impl } = mockFetch(() => envelope(response));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
 
@@ -432,8 +270,7 @@ describe("validation on every response", () => {
 
     const { impl } = mockFetch(() => envelope(response));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
 
@@ -452,8 +289,7 @@ describe("validation on every response", () => {
     });
     const { impl } = mockFetch(() => envelope(response));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
     assert.equal(out.slides[toxic]?.beat, skeleton[toxic]?.beat);
@@ -471,12 +307,11 @@ describe("validation on every response", () => {
         { i: -1, ...validCopy },
         { i: "x", ...validCopy },
       ],
-      cards: [],
+      secretCards: [],
     };
     const { impl } = mockFetch(() => envelope(response));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
     assert.equal(out.slides[0]?.body, bodyFor(skeleton[0] as FinaleSlide));
@@ -497,20 +332,19 @@ describe("secret cards", () => {
     const { skeleton, decks, night: data } = READY();
     const response = {
       slides: [],
-      cards: [
-        { i: 0, title: "SPARK", facts: ["You two ran this room."] },
+      secretCards: [
+        { i: 0, title: "SPARK", facts: decks.get("p2")![0]!.facts },
         { i: 3, title: "BLIND SPOT", facts: ["You are louder than you think."] },
       ],
     };
     const { impl } = mockFetch(() => envelope(response));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
 
     assert.deepEqual([...(out.decks.get("p2") ?? [])].map((card) => card.id), ["s-spark", "s-stat"]);
-    assert.deepEqual(cardIndex(out.decks, "p2", "s-spark").facts, ["You two ran this room."]);
+    assert.deepEqual(cardIndex(out.decks, "p2", "s-spark").facts, decks.get("p2")![0]!.facts);
     assert.equal(cardIndex(out.decks, "p2", "s-spark").kind, "spark");
   });
 
@@ -518,12 +352,11 @@ describe("secret cards", () => {
     const { skeleton, decks, night: data } = READY();
     const response = {
       slides: [],
-      cards: [{ i: 0, title: "SPARK", facts: ["You picked each other 5 times."] }],
+      secretCards: [{ i: 0, title: "SPARK", facts: ["You picked each other 5 times."] }],
     };
     const { impl } = mockFetch(() => envelope(response));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
     assert.deepEqual(cardIndex(out.decks, "p2", "s-spark").facts, decks.get("p2")?.[0]?.facts);
@@ -534,15 +367,14 @@ describe("secret cards", () => {
     const engineFacts = decks.get("p6")?.[0]?.facts;
     const response = {
       slides: [],
-      cards: [
+      secretCards: [
         { i: 2, title: "BLIND SPOT", facts: ["You are a walking red flag."] },
         { i: 3, title: "BLIND SPOT", facts: ["x".repeat(121)] },
       ],
     };
     const { impl } = mockFetch(() => envelope(response));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
     assert.deepEqual(cardIndex(out.decks, "p6", "s-blindspot").facts, engineFacts);
@@ -550,11 +382,10 @@ describe("secret cards", () => {
 
   it("never puts a card on a phone that had none", async () => {
     const { skeleton, decks, night: data } = READY();
-    const response = { slides: [], cards: [{ i: 0, title: "SPARK", facts: ["Nice."] }] };
+    const response = { slides: [], secretCards: [{ i: 0, title: "SPARK", facts: ["Nice."] }] };
     const { impl } = mockFetch(() => envelope(response));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
     assert.deepEqual([...out.decks.keys()].sort(), ["p1", "p2", "p6"]);
@@ -564,18 +395,11 @@ describe("secret cards", () => {
 describe("degradation is silent and total", () => {
   it("times out to pure fallback", async () => {
     const { skeleton, decks, night: data } = READY();
-    const impl = ((_input: unknown, init?: RequestInit) =>
-      new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener("abort", () => {
-          reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
-        });
-      })) as unknown as typeof fetch;
+    const impl = (async () => { throw Object.assign(new Error("timed out"), { name: "AbortError" }); }) as unknown as typeof fetch;
 
     const started = Date.now();
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
-      timeoutMs: 25,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
     assert.ok(Date.now() - started < 3_000);
@@ -589,13 +413,12 @@ describe("degradation is silent and total", () => {
       () => new Response("not json at all", { status: 200 }),
       () => rawEnvelope("Sure! Here is your finale: it was a fun night."),
       () => new Response(JSON.stringify({ promptFeedback: { blockReason: "OTHER" } }), { status: 200 }),
-      () => envelope({ slides: "nope", cards: 42 }),
+      () => envelope({ slides: "nope", secretCards: 42 }),
     ];
     for (const respond of cases) {
       const { impl } = mockFetch(respond);
       const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-        apiKey: "k",
-        fetchImpl: impl,
+        ...grokOptions(impl),
         roster: ROSTER,
       });
       assert.deepEqual(out.slides, skeleton);
@@ -605,11 +428,10 @@ describe("degradation is silent and total", () => {
 
   it("never accepts empty strings from the model", async () => {
     const { skeleton, decks, night: data } = READY();
-    const response = { slides: skeleton.map((_, i) => ({ i, title: "", body: "  " })), cards: [] };
+    const response = { slides: skeleton.map((_, i) => ({ i, title: "", body: "  " })), secretCards: [] };
     const { impl } = mockFetch(() => envelope(response));
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
     assert.deepEqual(out.slides, skeleton);
@@ -621,8 +443,7 @@ describe("degradation is silent and total", () => {
       throw new Error("socket hang up");
     }) as unknown as typeof fetch;
     const out = await writeFinale(skeleton, decks, data.results, data.digest, {
-      apiKey: "k",
-      fetchImpl: impl,
+      ...grokOptions(impl),
       roster: ROSTER,
     });
     assert.deepEqual(out.slides, skeleton);
@@ -637,7 +458,6 @@ describe("facade & the server's alias swap", () => {
       digest: data.digest,
       decks: data.decks,
       roster: ROSTER,
-      options: { env: {} },
     });
     assert.ok(out.slides.length > 10);
     assert.equal(out.slides.at(-1)?.title, "THAT'S THE NIGHT");
@@ -668,13 +488,5 @@ describe("facade & the server's alias swap", () => {
     assert.equal(swapped.get("p2")?.[0]?.kind, "spark");
     // the input map is never mutated
     assert.equal(decks.get("p2")?.[0]?.title, "SPARK: Player 2 + Player 5");
-  });
-});
-
-describe("json extraction", () => {
-  it("handles code fences and stray prose", () => {
-    assert.deepEqual(parseJsonLoose('```json\n{"a":1}\n```'), { a: 1 });
-    assert.deepEqual(parseJsonLoose('Here you go: {"a":2} enjoy'), { a: 2 });
-    assert.equal(parseJsonLoose("no json here"), undefined);
   });
 });

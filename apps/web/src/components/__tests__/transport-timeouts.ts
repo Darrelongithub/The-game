@@ -4,6 +4,8 @@ import { createServer } from 'node:http'
 import { Server } from 'socket.io'
 import { SocketTransport } from '../../lib/socketTransport.ts'
 
+const profile = { age: 28, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" as const }
+
 async function main() {
   const http = createServer()
   const io = new Server(http, { transports: ['polling', 'websocket'] })
@@ -31,7 +33,7 @@ async function main() {
   const doc = new EventTarget() as EventTarget & { visibilityState: string }; doc.visibilityState = 'visible'; (globalThis as any).document = doc
   const transport = new (SocketTransport as any)(100) as SocketTransport
   try {
-    assert.ok((await transport.create('Guest', { age: true, terms: true, revealOptIn: false })).ok)
+    assert.ok((await transport.create('Guest', { age: true, terms: true, revealOptIn: false }, profile)).ok)
     const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('submit did not time out')), 700))
     const result = await Promise.race([transport.submit({ roundId: 'r1', clientUuid: 'u1', value: { kind: 'pick', target: 'p2' } }), timeout])
     assert.equal(result.ok, false)
@@ -49,11 +51,11 @@ async function main() {
     assert.ok(submissions.at(-1).clientUuid, 'dare passes get an idempotency key')
 
     transport.forgetSession()
-    const lostCreate = await transport.create('NoAck', { age: true, terms: true, revealOptIn: false })
+    const lostCreate = await transport.create('NoAck', { age: true, terms: true, revealOptIn: false }, profile)
     assert.equal(lostCreate.ok, false); assert.match(lostCreate.error ?? '', /did not answer/i)
     await new Promise((resolve) => setTimeout(resolve, 40))
     assert.ok(disconnects >= 1, 'an unacknowledged create detaches its unknown seat')
-    assert.ok((await transport.create('Guest', { age: true, terms: true, revealOptIn: false })).ok, 'creating can be retried')
+    assert.ok((await transport.create('Guest', { age: true, terms: true, revealOptIn: false }, profile)).ok, 'creating can be retried')
 
     transport.forgetSession()
     const lostJoin = await transport.join({ roomCode: 'AB2C', alias: 'NoAck', consent: { age: true, terms: true, revealOptIn: false } })

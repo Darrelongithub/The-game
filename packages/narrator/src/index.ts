@@ -29,7 +29,7 @@ export {
 } from "./slides.ts";
 export type { SkeletonSource } from "./slides.ts";
 
-export { writeFinale, narrateNight } from "./write.ts";
+export { writeFinale, narrateNight, SYSTEM_PROMPT } from "./write.ts";
 export type { WriteOptions, FinaleCopy } from "./write.ts";
 
 export {
@@ -63,16 +63,6 @@ export {
   toRoster,
 } from "./roster.ts";
 export type { Pseudonyms, RosterEntry, RosterInput } from "./roster.ts";
-
-export {
-  callGemini,
-  geminiSafetySettings,
-  parseJsonLoose,
-  readGeminiKey,
-  GEMINI_API_BASE,
-  DEFAULT_TIMEOUT_MS,
-} from "./gemini.ts";
-export type { GeminiRequest, GeminiResult, SafetyThresholdMode } from "./gemini.ts";
 
 import type { FinaleSlide, PlayerId, SecretCard } from "../../shared/src/contracts.ts";
 import { swapPseudonyms, type RosterEntry } from "./roster.ts";

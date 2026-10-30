@@ -192,19 +192,18 @@ pair_score(i,j) = 0.30*pickOverlap + 0.20*mutualPick + 0.20*debriefSim
     sexual acts, minors, real-person sexual content, non-consent are
     hard-blocked — the unhinged tier lives inside that. No safety knobs
     exist; the deterministic filter is the guardrail.
-  - **Gemini = analysis + narration** (`GEMINI_API_KEY`, higher tier):
-    `gemini-3.5-flash-lite` tags all texts (ONE batch call per night);
-    `gemini-3.1-pro-preview` judges debrief-pair similarity (ONE batch
-    call) and writes the finale + secret card copy (ONE call). `SAFETY_OFF`
-    attached — it must analyze spicy text without refusing. Gemini NEVER
-    generates game prompts (it soft-refuses them).
+  - **Gemini = analysis only** (`GEMINI_API_KEY`, higher tier):
+    `GEMINI_MODEL` resolves once for Gemini calls; it tags public text and
+    judges paired debrief similarity in bounded batches. Gemini is never used
+    to write the finale or secret cards. `SAFETY_OFF` applies to analysis.
+    Gemini NEVER generates game prompts (it soft-refuses them).
 - **Lane independence:** each lane checks only its own key and degrades to
-  code silently. No XAI key → bank-only generation. No Gemini key → lexicon
-  tags + Jaccard similarity + template finale. Neither → full game, zero
-  internet needed after install.
+  code silently. No XAI key → bank-only generation and deterministic finale.
+  No Gemini key → lexicon tags + Jaccard similarity. Neither → full game,
+  zero internet needed after install.
 - **Batching (the call budget):** generation = ONE call per phase (~15
   candidates per call, JSON array) in the lobby background — never in the
-  gameplay loop; tag = ONE call; debrief = ONE call; reveal+secrets = ONE
+  gameplay loop; tag = ONE call; debrief = ONE call; Grok reveal+secrets = ONE
   call. ≈7 calls worst case, cap 8.
 - **Generation:** the deterministic filter (schema, dedupe vs
   bank+usedIds+within-batch, banned patterns, 20–160 chars, valid

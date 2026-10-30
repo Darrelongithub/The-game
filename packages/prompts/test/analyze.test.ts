@@ -72,7 +72,7 @@ test("tagBatch: ONE gemini call, taxonomy-validated, invalid rows ignored", asyn
   const tags = await tagBatch(["something plain", "something mean", "something else"], { room: "r1", provider });
 
   assert.equal(mock.calls.length, 1);
-  assert.match(mock.calls[0]!.url, /gemini-3\.5-flash-lite/);
+  assert.match(mock.calls[0]!.url, /gemini-3\.1-pro-preview/);
   assert.deepEqual(tags[0], ["admiration"]);
   assert.deepEqual(tags[1], ["contempt"], "unknown taxonomy tag must be ignored");
   assert.deepEqual(tags[2], ["neutral"], "an empty tag list falls back to the code result");
@@ -97,10 +97,10 @@ test("tagBatch never sends aliases", async () => {
   assert.match(mock.calls[0]!.raw, /someone in the room/);
 });
 
-test("debriefSimilarity: token-Jaccard with 0.5 = unknown", () => {
+test("debriefSimilarity: token-Jaccard blank data has no midpoint", () => {
   assert.equal(debriefSimilarity("we talked about the wedding", "we talked about the wedding"), 1);
   assert.equal(debriefSimilarity("completely different topic entirely", "salt and pepper shakers"), 0);
-  assert.equal(debriefSimilarity("", ""), 0.5);
+  assert.equal(debriefSimilarity("", ""), 0);
   assert.equal(debriefSimilarity("we talked about the wedding", ""), 0);
   const partial = debriefSimilarity("we talked about your sister and the wedding", "we talked about the wedding");
   assert.ok(partial > 0 && partial < 1, `expected a partial score, got ${partial}`);
@@ -114,7 +114,7 @@ test("no Gemini key → debriefBatch uses Jaccard and makes zero calls", async (
   assert.equal(mock.calls.length, 0);
 });
 
-test("debriefBatch: ONE higher-tier call, clamps and validates every score", async () => {
+test("debriefBatch: ONE analysis-model call, clamps and validates every score", async () => {
   const payload = JSON.stringify([
     { i: 0, score: 1.7 },
     { i: 1, score: -3 },

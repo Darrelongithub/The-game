@@ -49,7 +49,7 @@ export function buildSecrets(
 
   // ---------- spark: one card for EACH of the two (both must be revealOptIn) ----------
   for (const claim of results.claims) {
-    if (claim.type !== "spark" || claim.subjects.length !== 2) continue;
+    if (claim.confidence === "low" || claim.type !== "spark" || claim.subjects.length !== 2) continue;
     const [x, y] = claim.subjects as [PlayerId, PlayerId];
     if (!optIn.has(x) || !optIn.has(y)) continue;
     for (const [holder, other] of [[x, y], [y, x]] as [PlayerId, PlayerId][]) {
@@ -62,7 +62,7 @@ export function buildSecrets(
 
   // ---------- onesided: the PICKER's phone only (picker must be revealOptIn) ----------
   for (const claim of results.claims) {
-    if (claim.type !== "onesided" || claim.subjects.length !== 2) continue;
+    if (claim.confidence === "low" || claim.type !== "onesided" || claim.subjects.length !== 2) continue;
     const [picker, target] = claim.subjects as [PlayerId, PlayerId];
     if (!optIn.has(picker)) continue;
     add(picker, card(`secret-onesided-${picker}-${target}`, "onesided", "A one-way signal", [
@@ -137,6 +137,29 @@ export function buildSecrets(
           `Not a headline tonight — just a pattern worth knowing.`,
         ]));
       }
+    }
+  }
+
+  // ---------- profile-derived notes: shared stated intent, never romantic inference ----------
+  // Only the least-sensitive profile axis (tonight's intent) is compared. Both
+  // people must explicitly opt in to reveal cards; private crush and dating
+  // history answers are never used or exposed by inference.
+  for (let i = 0; i < meta.players.length; i++) {
+    const a = meta.players[i]!;
+    for (let j = i + 1; j < meta.players.length; j++) {
+      const b = meta.players[j]!;
+      if (!optIn.has(a.id) || !optIn.has(b.id)) continue;
+      const intent = meta.profiles?.[a.id]?.tonight;
+      if (!intent || intent !== meta.profiles?.[b.id]?.tonight) continue;
+      const label = ({ chaos: "a little chaos", vibes: "good vibes", feelings: "real feelings", mission: "a shared mission" } as const)[intent];
+      add(a.id, card(`secret-profile-intent-${a.id}-${b.id}`, "roomnote", "A shared vibe", [
+        `You and ${pseudoOf(meta, b.id)} both came looking for ${label}.`,
+        `A shared intention is a conversation starter, not proof of compatibility.`,
+      ]));
+      add(b.id, card(`secret-profile-intent-${b.id}-${a.id}`, "roomnote", "A shared vibe", [
+        `You and ${pseudoOf(meta, a.id)} both came looking for ${label}.`,
+        `A shared intention is a conversation starter, not proof of compatibility.`,
+      ]));
     }
   }
 

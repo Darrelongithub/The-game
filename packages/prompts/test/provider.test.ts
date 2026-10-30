@@ -126,7 +126,7 @@ test("gemini lane: classic generateContent, SAFETY_OFF mapped to BLOCK_NONE, JSO
   });
   assert.equal(result.ok, true);
   const call = mock.calls[0]!;
-  assert.match(call.url, /\/models\/gemini-3\.5-flash-lite:generateContent\?key=gem-test$/);
+  assert.match(call.url, /\/models\/gemini-3\.1-pro-preview:generateContent\?key=gem-test$/);
   assert.equal(call.headers.authorization, undefined, "Gemini uses ?key=, not a bearer header");
   assert.equal(call.body.generationConfig !== undefined, true);
   const config = call.body.generationConfig as Record<string, unknown>;
@@ -234,6 +234,8 @@ test("pseudonyms only: aliases are scrubbed out of every outgoing payload", asyn
   assert.equal(containsAlias(raw, ALIASES), false, "a real alias left the server");
   assert.match(raw, /someone in the room/);
   assert.equal(redactAliases("Mo and mo again", ALIASES), "someone in the room and someone in the room again");
+  assert.equal(redactAliases("Zoe\u0308 is here", ["Zoë"]), "someone in the room is here", "NFD aliases are redacted after canonical Unicode normalization");
+  assert.equal(containsAlias("Zoe\u0308 is here", ["Zoë"]), true);
 });
 
 test("parseJsonLoose handles fences, prose and garbage; extractText reads both APIs", () => {
@@ -252,4 +254,20 @@ test("parseJsonLoose handles fences, prose and garbage; extractText reads both A
 test("geminiSafetySettings maps OFF → BLOCK_NONE only for the classic endpoint", () => {
   assert.ok(geminiSafetySettings("classic").every((s) => s.threshold === "BLOCK_NONE"));
   assert.ok(geminiSafetySettings("literal").every((s) => s.threshold === "OFF"));
+});
+
+test("GEMINI_MODEL overrides both Gemini analysis call sites through one resolver", () => {
+  const provider = new Provider({ env: { GEMINI_API_KEY: "key", GEMINI_MODEL: "gemini-overridden" } });
+  assert.equal(provider.modelFor("gemini", "tag"), "gemini-overridden");
+  assert.equal(provider.modelFor("gemini", "analyze"), "gemini-overridden");
+  assert.throws(() => provider.modelFor("gemini", "reveal"), /disabled/);
+});
+
+test("Gemini reveal purpose is rejected without making a network request", async () => {
+  const mock = mockFetch(() => { throw new Error("must not send Gemini reveal"); });
+  const provider = makeProvider({ geminiApiKey: "key", fetchImpl: mock.fetchImpl });
+  const result = await provider.gemini({ room: "finale-room", purpose: "reveal", model: "gemini-test", user: "narrate" });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "disabled");
+  assert.equal(mock.calls.length, 0);
 });

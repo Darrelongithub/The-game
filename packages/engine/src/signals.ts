@@ -35,16 +35,13 @@ export interface PairWeights {
 
 /** Weighted pair_score from raw components (spec §5 formula). */
 export function pairScoreOf(
-  s: Pick<PairSignal, "pickOverlap" | "mutualPick" | "debriefSim" | "iosMean" | "traitAgreement">,
+  s: Pick<PairSignal, "pickOverlap" | "mutualPick" | "debriefSim" | "iosMean" | "traitAgreement" | "componentsUsed">,
   weights: PairWeights = DEFAULT_WEIGHTS,
 ): number {
-  return clamp01(
-    weights.pickOverlap * s.pickOverlap +
-      weights.mutualPick * s.mutualPick +
-      weights.debriefSim * s.debriefSim +
-      weights.iosMean * s.iosMean +
-      weights.traitAgreement * s.traitAgreement,
-  );
+  const used = s.componentsUsed;
+  const denominator = used.reduce((sum, key) => sum + weights[key], 0);
+  if (denominator <= 0) return 0;
+  return clamp01(used.reduce((sum, key) => sum + weights[key] * s[key], 0) / denominator);
 }
 
 /** One direction of trait agreement: self-ratings of `of` vs peer ratings of `of` written by `by`. */
@@ -105,7 +102,7 @@ export function computeSignals(allRecords: LogRecord[], meta: RoomMeta): PairSig
       const friendEvidence = pooledPairRate(picks, a, b, (c) => c === "friendship");
       const negativeMutual = pooledPairRate(picks, a, b, (c) => NEGATIVE_CODINGS.has(c));
 
-      const debriefSim = debriefSims.get(pairKey(a, b)) ?? 0.5;
+      const debriefSim = debriefSims.get(pairKey(a, b)) ?? 0;
 
       // Each direction contributes at most half: (ios(a→b) + ios(b→a)) / 14.
       // Missing responses contribute zero, rather than doubling one person's vote.
@@ -128,12 +125,19 @@ export function computeSignals(allRecords: LogRecord[], meta: RoomMeta): PairSig
         iosMean: clamp01(iosMean),
         traitAgreement: clamp01(traitAgreement),
       };
+      const componentsUsed: PairSignal["componentsUsed"] = [];
+      if (eligible > 0) componentsUsed.push("pickOverlap");
+      if (picks.some((p) => (p.picker === a || p.picker === b) && POSITIVE_CODINGS.has(p.coding))) componentsUsed.push("mutualPick");
+      if (debriefSims.has(pairKey(a, b))) componentsUsed.push("debriefSim");
+      if (iab !== undefined || iba !== undefined) componentsUsed.push("iosMean");
+      if (dab !== undefined || dba !== undefined) componentsUsed.push("traitAgreement");
       out.push({
         room: meta.roomId,
         a,
         b,
         ...components,
-        pairScore: pairScoreOf(components, DEFAULT_WEIGHTS),
+        componentsUsed,
+        pairScore: pairScoreOf({ ...components, componentsUsed }, DEFAULT_WEIGHTS),
         coupleEvidence: clamp01(coupleEvidence),
         friendEvidence: clamp01(friendEvidence),
         negativeMutual: clamp01(negativeMutual),

@@ -48,20 +48,20 @@ export function tokenSet(text: string): Set<string> {
 }
 
 /**
- * Token-set Jaccard, 0..1. Two blank texts are "unknown" → 0.5 (spec §5:
- * "0.5 = unknown"), one blank → 0.
+ * Token-set Jaccard, 0..1. Blank inputs return zero; callers track missing
+ * data separately rather than encoding it as an invented midpoint.
  */
 export function jaccard(a: string, b: string): number {
   const textA = typeof a === "string" ? a : "";
   const textB = typeof b === "string" ? b : "";
   const setA = tokenSet(textA);
   const setB = tokenSet(textB);
-  if (setA.size === 0 && setB.size === 0) return 0.5;
+  if (setA.size === 0 && setB.size === 0) return 0;
   if (setA.size === 0 || setB.size === 0) return 0;
   let inter = 0;
   for (const token of setA) if (setB.has(token)) inter += 1;
   const union = setA.size + setB.size - inter;
-  if (union === 0) return 0.5;
+  if (union === 0) return 0;
   return clamp01(inter / union);
 }
 

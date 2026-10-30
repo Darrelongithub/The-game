@@ -5,6 +5,7 @@
 // same log always produces deep-equal Results.
 import {
   CONFIDENCE_RULES,
+  SPARK_MIN_MUTUAL,
   DEFAULT_WEIGHTS,
   MC_SIMULATIONS,
   TOXIC_WEIGHTS,
@@ -50,11 +51,11 @@ function pairSupportCount(s: PairSignal, pickEvidence: number): number {
   // Pick-derived supports must clear half STRICTLY: with only a handful of
   // rounds in a night, an exactly-half rate (2 of 4, 3 of 6, 5 of 10) is
   // chance-sized, not a signal.
-  if (s.pickOverlap > T.support.pickOverlap) n++;
-  if (pickEvidence > T.support.mutualPick) n++;
-  if (s.debriefSim > T.support.debriefSim) n++;
-  if (s.iosMean >= T.support.iosMean) n++;
-  if (s.traitAgreement >= T.support.traitAgreement) n++;
+  if (s.componentsUsed.includes("pickOverlap") && s.pickOverlap > T.support.pickOverlap) n++;
+  if (s.componentsUsed.includes("mutualPick") && pickEvidence > T.support.mutualPick) n++;
+  if (s.componentsUsed.includes("debriefSim") && s.debriefSim > T.support.debriefSim) n++;
+  if (s.componentsUsed.includes("iosMean") && s.iosMean >= T.support.iosMean) n++;
+  if (s.componentsUsed.includes("traitAgreement") && s.traitAgreement >= T.support.traitAgreement) n++;
   return n;
 }
 
@@ -100,7 +101,7 @@ export function computeResults(
     if (found) return found;
     const blank = {
       room: meta.roomId, a, b,
-      pickOverlap: 0, mutualPick: 0, debriefSim: 0.5, iosMean: 0, traitAgreement: 0,
+      pickOverlap: 0, mutualPick: 0, debriefSim: 0, iosMean: 0, traitAgreement: 0, componentsUsed: [],
       coupleEvidence: 0, friendEvidence: 0, negativeMutual: 0,
     };
     return { ...blank, pairScore: pairScoreOf(blank, weights) };
@@ -120,7 +121,7 @@ export function computeResults(
     for (const [roundId, round] of byRound) {
       if (round.coding === "neutral") continue; // consensus needs a coded prompt
       const of = round.votes.size;
-      if (of < T.consensusMinVoters) continue;
+      if (of === 0) continue;
       const counts = new Map<PlayerId, number>();
       for (const target of round.votes.values()) counts.set(target, (counts.get(target) ?? 0) + 1);
       let topTarget: PlayerId | undefined;
@@ -133,14 +134,14 @@ export function computeResults(
       }
       if (topTarget === undefined) continue;
       const share = topVotes / of;
-      if (share < CONFIDENCE_RULES.high.consensusShare) continue;
+      if (of >= T.consensusMinVoters ? share < CONFIDENCE_RULES.high.consensusShare : share < 1) continue;
       consensusTargetByCoding.add(`${round.coding}\u0000${topTarget}`);
       consensusCandidates.push({ roundId, coding: round.coding, target: topTarget, votes: topVotes, of, share });
     }
     // Confidence: one 70% round is a single signal type (med). It only
-    // earns high when the room repeats the same verdict — the same target
-    // on the same coding clearing 70% in a second round — which a chance
-    // room essentially never does.
+    // earns high only after three independent repeated verdicts — the same
+    // target on the same coding clearing the threshold in three rounds.
+    // The n=4 Monte Carlo regression keeps random-night false highs below 2%.
     const verdictCounts = new Map<string, number>();
     for (const c of consensusCandidates) {
       const k = `${c.coding}\u0000${c.target}`;
@@ -152,7 +153,7 @@ export function computeResults(
         type: "consensus",
         subjects: [c.target],
         audience: "public",
-        confidence: (verdictCounts.get(`${c.coding}\u0000${c.target}`) ?? 0) >= 2 ? "high" : "med",
+        confidence: c.of >= T.consensusMinVoters && (verdictCounts.get(`${c.coding}\u0000${c.target}`) ?? 0) >= 3 ? "high" : "med",
         evidence: [`On a ${c.coding}-coded prompt, the room kept choosing ${pseudoOf(meta, c.target)}.`],
         numbers: { votes: c.votes, of: c.of, share: c.share },
       });
@@ -221,7 +222,7 @@ export function computeResults(
     if (!optIn.has(a) || !optIn.has(b)) continue;
     const ab = directedPicks(picks, a, b, (c) => c === "couple");
     const ba = directedPicks(picks, b, a, (c) => c === "couple");
-    if (ab.hits < 1 || ba.hits < 1) continue;
+    if (ab.hits < SPARK_MIN_MUTUAL || ba.hits < SPARK_MIN_MUTUAL) continue;
     const s = signalFor(a, b);
     sparkClaims.push({
       id: `spark-${a}-${b}`,
@@ -249,7 +250,7 @@ export function computeResults(
         if (s.pairScore < T.rivalPairScoreMid.min || s.pairScore > T.rivalPairScoreMid.max) continue;
         const ab = directedPicks(picks, a, b, (c) => NEGATIVE_CODINGS.has(c));
         const ba = directedPicks(picks, b, a, (c) => NEGATIVE_CODINGS.has(c));
-        if (ab.hits < 1 || ba.hits < 1) continue; // rivalry must be mutual
+        if (ab.hits < SPARK_MIN_MUTUAL || ba.hits < SPARK_MIN_MUTUAL) continue; // rivalry must be mutual
         const rivalryRate = pooledPairRate(picks, a, b, (c) => c === "rivalry");
         const score = s.negativeMutual + rivalryRate;
         if (score <= bestScore) continue; // ties keep the lexicographically first pair

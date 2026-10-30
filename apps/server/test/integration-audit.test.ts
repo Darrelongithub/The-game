@@ -11,6 +11,7 @@ import { createGameServer } from "../src/server.ts";
 
 type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
 const consent = { age: true, terms: true, revealOptIn: true };
+const profile = { age: 28, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" as const };
 const limit = <T>(promise: Promise<T>, ms = 6000): Promise<T> => new Promise((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms);
   promise.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
@@ -38,7 +39,7 @@ test("production defaults use the full bank and deterministic engine in a comple
     if (oldGemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = oldGemini;
   });
   const connected = event<void>(host, "connect"); host.connect(); await limit(connected);
-  const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent }, resolve));
+  const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent, profile }, resolve));
   for (let i = 0; i < 3; i++) host.emit("add_bot");
   const first = event<RoundView>(host, "round"), done = event<FinaleView>(host, "finale");
   const seen = new Set<string>(), shown: RoundView[] = [];
@@ -51,8 +52,8 @@ test("production defaults use the full bank and deterministic engine in a comple
       case "pick": value = { kind: "pick", target: "p2" }; break;
       case "shout": value = { kind: "shout", word: "vibes" }; break;
       case "text": case "debrief": value = { kind: "text", text: "We enjoyed talking together tonight." }; break;
-      case "rating": value = { kind: "rating", trait: "warmth", about: "self", value: 7 }; break;
-      case "ios": value = { kind: "ios", about: "p2", value: 5 }; break;
+      case "rating": value = { kind: "rating", trait: round.trait!, about: round.about!, value: 7 }; break;
+      case "ios": value = { kind: "ios", about: round.about!, value: 5 }; break;
       case "minigame": value = { kind: "minigame", score: 23 }; break;
       case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
       case "spotlight": value = { kind: "text", text: "A playful caption for the room." }; break;
@@ -102,7 +103,7 @@ test("host custom prompts use the complete hard-block guard", async (t) => {
   host.on("state", (view) => { if (view.ready) host.emit("ready"); });
   t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const connected = event<void>(host, "connect"); host.connect(); await limit(connected);
-  await new Promise((resolve) => host.emit("create", { alias: "Host", consent }, resolve));
+  await new Promise((resolve) => host.emit("create", { alias: "Host", consent, profile }, resolve));
   const error = event<{ code: string }>(host, "error");
   host.emit("custom_prompts", { lines: ["Who here would shoplift for the group?"] });
   assert.equal((await limit(error, 700)).code, "INVALID_PROMPTS");
@@ -118,7 +119,7 @@ test("custom prompts cannot silently wrap an out-of-roster placeholder onto anot
   host.on("state", (view) => { if (view.ready) host.emit("ready"); });
   t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const connected = event<void>(host, "connect"); host.connect(); await limit(connected);
-  await new Promise((resolve) => host.emit("create", { alias: "Host", consent }, resolve));
+  await new Promise((resolve) => host.emit("create", { alias: "Host", consent, profile }, resolve));
   host.emit("custom_prompts", { lines: ["Who here would trust {P11} with their diary?"] });
   for (let i = 0; i < 3; i++) host.emit("add_bot");
   const first = event<RoundView>(host, "round"); host.emit("start");

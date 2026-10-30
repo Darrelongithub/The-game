@@ -1,5 +1,5 @@
 import { randomBytes, randomInt, timingSafeEqual, createHash } from "node:crypto";
-import { appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Server, Socket } from "socket.io";
 import {
@@ -8,7 +8,7 @@ import {
   ROOM_CODE_LENGTH, ROUNDS_PER_PHASE, ROUND_TIMERS_MS, SECRET_DECK_MAX, SPOTLIGHT_ANSWER_MAX,
   SPOTLIGHT_REVEAL_MS, TRAITS, VERDICT_DISCUSS_MS, VERDICT_REVEAL_MS, pseudonym,
   type ClientToServerEvents, type Consent, type FinaleSlide, type FinaleView, type InterludeView,
-  type Claim, type Hypothesis, type JoinReply, type LogRecord, type NightDigest, type Phase, type PlayerId, type Prompt, type PromptCoding,
+  type Claim, type Hypothesis, type JoinReply, type LogRecord, type NightDigest, type Phase, type PlayerId, type Prompt, type PromptCoding, type ProfileAnswers,
   type ResponseValue, type RevealView, type RoomMeta, type RoomView, type RoundKind,
   type RoundView, type SecretCard, type SecretDeckView, type ServerToClientEvents,
 } from "../../../packages/shared/src/contracts.ts";
@@ -18,30 +18,29 @@ import { integratedServices } from "./integratedServices.ts";
 import { DECOYS, SPOTLIGHT_IDLE_LINE, liveKindInPhase, livePrompt, liveSeeds, type LiveSeed } from "../../../packages/prompts/src/bank/live/index.ts";
 import { checkBanned, checkHardBlocked } from "../../../packages/prompts/src/filter.ts";
 import { bankForPhase, maxPlaceholderIndex } from "../../../packages/prompts/src/bank/index.ts";
-import { replaceCanonicalAliases } from "../../../packages/narrator/src/roster.ts";
+import { pseudonymizeText as pseudonymizeAliasText, restoreAliases } from "./pseudonyms.ts";
 import { accountSubjectKey, type AccountStore, type StoredHypothesis } from "./accounts.ts";
 import {
   assertNoHypothesisLeak, carryOver, emptyDirectorState, planRound, recordSelection, updateHypotheses,
   type DirectorState,
 } from "../../../packages/engine/src/director.ts";
 
-type SocketData = { roomCode?: string; playerId?: string };
+type SocketData = { roomCode?: string; playerId?: string; display?: boolean };
+const displayChannel = (code: string): string => `display:${code}`;
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 type GameIO = Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 type Stage = "lobby" | "round" | "ready" | "reveal" | "interlude" | "finale-building" | "finale" | "deleted";
 interface Player {
-  id: string; alias: string; consent: Consent; secret: string; isBot: boolean; connected: boolean; socketId?: string;
+  id: string; alias: string; consent: Consent; profile: ProfileAnswers; secret: string; isBot: boolean; connected: boolean; socketId?: string;
   /** A pending versioned resume is bound to a client-generated secret nonce. */
   resumeRetry?: { secret: string; socketId: string; nonce?: string };
   /** ROUND 4: bound account (never emitted). */
   accountId?: string;
-  /** ROUND 4 demo room: a seat the host puppets from their own laptop. It has
-   *  no socket, never appears in `secrets`, and answers through `demo_answer_as`
-   *  (manual) or the ordinary scheduler (auto). */
+  /** Demo seat controlled by the host. */
   puppet?: { mode: "auto" | "manual" };
 }
 interface Definition {
-  prompt: Prompt; phase: Phase; kind: RoundKind; text: string; onlyPlayers?: string[];
+  prompt: Prompt; phase: Phase; kind: RoundKind; text: string; onlyPlayers?: string[]; performer?: string;
   /** spotlight: the player the room is watching. Their round view is a cover. */
   subjectId?: string;
   /** spotlight: the cover question this subject sees instead of the real one. */
@@ -63,14 +62,17 @@ interface Definition {
 interface PhasePlan { phase: HeatPhase; slots: RoundKind[]; live: RoundKind[] }
 interface LiveRound extends Definition {
   id: string; index: number; startedAt: number; closesAt: number; responses: Map<string, ResponseValue>;
+  targets?: Map<string, string>; trait?: typeof TRAITS[number]; pairPassed?: boolean;
   /** verdict: the secret simultaneous pick opens here (discussion before it). */
   voteOpensAt?: number;
 }
 interface SeenSubmit { roundId: string; fingerprint: string; }
 interface TimedEvent<T> { value: T; endsAt: number; }
+interface PersistedRoom { version: 1; id: string; code: string; createdAt: number; lastActivity: number; hostId: string; nextPlayer: number; players: Omit<Player, "connected" | "socketId" | "resumeRetry">[]; }
+const metadataFile = (file: string): string => file.replace(/\.jsonl$/u, ".meta.json");
 interface Room {
   id: string; code: string; createdAt: number; lastActivity: number; file: string; hostId: string;
-  players: Player[]; phase: Phase; stage: Stage; seq: number; nextPlayer: number; roundIndex: number;
+  players: Player[]; phase: Phase; stage: Stage; seq: number; nextPlayer: number; roundIndex: number; dareCount: number;
   provider: PromptProvider; prepared: boolean; usedIds: Set<string>; custom: Prompt[]; log: LogRecord[];
   currentHeat?: HeatPhase; queue: Definition[]; round: LiveRound | null; pair?: [string, string];
   interactions: Map<string, number>; seen: Map<string, SeenSubmit>; votes: Set<string>;
@@ -132,6 +134,11 @@ export interface GameOptions {
     decks(roomCode: string, roomId: string, players: string[], decks: ReadonlyMap<string, SecretDeckView>, results: import("../../../packages/shared/src/contracts.ts").Results): void;
   };
 }
+export function choosePhaseCandidate(candidates: readonly Prompt[], desiredKind: RoundKind, preferGenerated = false): Prompt | undefined {
+  return candidates.find(p => p.source === "host") ??
+    (preferGenerated ? candidates.find(p => p.source === "grok") : undefined) ??
+    candidates.find(p => p.kind === desiredKind) ?? candidates[0];
+}
 const HOUR = 60 * 60 * 1000;
 const PAIR_KEY = (a: string, b: string): string => [a, b].sort().join("\u0000");
 const secret = (): string => randomBytes(32).toString("base64url");
@@ -149,6 +156,12 @@ function resumeProof(value: string): { token: string; nonce?: string } | null {
 }
 const validConsent = (v: unknown): v is Consent => !!v && typeof v === "object" &&
   (v as Consent).age === true && (v as Consent).terms === true && typeof (v as Consent).revealOptIn === "boolean";
+const validProfile = (v: unknown): v is ProfileAnswers => {
+  if (!v || typeof v !== "object") return false;
+  const p = v as ProfileAnswers;
+  return Number.isInteger(p.age) && p.age >= 18 && p.age <= 120 && ["single", "dating", "committed", "married", "complicated"].includes(p.relationship) && Number.isInteger(p.partnersToDate) && p.partnersToDate >= 0 && p.partnersToDate <= 200 && Number.isInteger(p.longestMonths) && p.longestMonths >= 0 && p.longestMonths <= 1200 && typeof p.crushingHere === "boolean" && ["chaos", "vibes", "feelings", "mission"].includes(p.tonight);
+};
+const neutralProfile: ProfileAnswers = { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" };
 const validAlias = (v: unknown): v is string => typeof v === "string" && isAlias(v) && !/[\u0000-\u001f\u007f]/u.test(v);
 const emptyDigest = (): NightDigest => ({ quotes: [], stats: {}, runningGags: [], pickTeasers: [], dodges: [], selfVsRoom: [] });
 const seedRng = (id: string): (() => number) => {
@@ -157,10 +170,10 @@ const seedRng = (id: string): (() => number) => {
 };
 /** Replace aliases in arbitrary free text before a service can see the data. */
 function pseudonymizeText(text: string, players: Player[]): string {
-  return replaceCanonicalAliases(text, players.map((p, i) => ({ alias: p.alias, pseudo: pseudonym(i) })));
+  return pseudonymizeAliasText(text, players);
 }
 function displayText(text: string, players: Player[]): string {
-  return text.replace(/\bPlayer (1[01]|[1-9])\b/g, (match, n: string) => players[Number(n) - 1]?.alias ?? match);
+  return restoreAliases(text, players);
 }
 /** Strip uncontracted properties before logging or handing an answer to any service. */
 function canonicalValue(value: ResponseValue): ResponseValue {
@@ -191,7 +204,7 @@ function asSafePrompt(x: unknown, phase: HeatPhase): x is Prompt {
     ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare"].includes(p.kind) &&
     typeof p.text === "string" && p.text.trim().length > 0 && p.text.length <= 160 && validPlaceholders(p.text) &&
     Array.isArray(p.measures) && p.measures.length > 0 && p.measures.every((m) => typeof m === "string" && m.length > 0) &&
-    ["couple", "friendship", "trust", "friction", "rivalry", "status", "neutral"].includes(p.coding) && typeof p.asksTarget === "boolean";
+    ["couple", "friendship", "trust", "friction", "tease", "rivalry", "status", "neutral"].includes(p.coding) && typeof p.asksTarget === "boolean";
 }
 
 export class RoomManager {
@@ -203,6 +216,7 @@ export class RoomManager {
     this.services = options.services ?? integratedServices;
     this.now = options.now ?? Date.now;
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
+    this.restore();
     this.purge();
     this.sweepTimer = setInterval(() => this.purge(), HOUR);
     this.sweepTimer.unref();
@@ -224,6 +238,40 @@ export class RoomManager {
     room.ready.clear(); room.pendingReveal = undefined; room.readyClosesAt = undefined;
     room.hypotheses.length = 0; room.priors.length = 0; room.director = emptyDirectorState(); room.plan = undefined; room.testedHypothesisId = undefined;
     room.provider = new BankPromptProvider();
+  }
+  private persistRoom(room: Room): void {
+    const file = metadataFile(room.file), temporary = `${file}.tmp`;
+    const state: PersistedRoom = { version: 1, id: room.id, code: room.code, createdAt: room.createdAt, lastActivity: room.lastActivity,
+      hostId: room.hostId, nextPlayer: room.nextPlayer,
+      players: room.players.map(({ connected: _connected, socketId: _socketId, resumeRetry: _retry, ...player }) => player) };
+    try { writeFileSync(temporary, JSON.stringify(state), { encoding: "utf8", mode: 0o600 }); renameSync(temporary, file); }
+    catch { try { unlinkSync(temporary); } catch { /* ignore */ } }
+  }
+  private restore(): void {
+    let entries;
+    try { entries = readdirSync(this.options.dataDir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (!entry.isFile() || !/^\d{13}-[0-9a-f]{32}\.jsonl$/u.test(entry.name)) continue;
+      const file = join(this.options.dataDir, entry.name), metaFile = metadataFile(file);
+      try {
+        const state = JSON.parse(readFileSync(metaFile, "utf8")) as PersistedRoom;
+        if (state.version !== 1 || typeof state.id !== "string" || !isRoomCode(state.code) || !Array.isArray(state.players) || this.rooms.has(state.code)) continue;
+        const players: Player[] = state.players.map((p) => ({ ...p, connected: false })).filter((p) => validAlias(p.alias) && validConsent(p.consent) && validProfile(p.profile) && typeof p.id === "string" && typeof p.secret === "string" && typeof p.isBot === "boolean");
+        if (players.length !== state.players.length || players.length === 0 || !players.some(p => p.id === state.hostId)) continue;
+        const records = readFileSync(file, "utf8").split(/\r?\n/u).filter(Boolean).flatMap((line) => {
+          try { const value = JSON.parse(line) as LogRecord; return value && value.roomId === state.id && typeof value.roundId === "string" && players.some(p => p.id === value.playerId) && validSubmit(value.value, value.playerId) ? [value] : []; }
+          catch { return []; }
+        });
+        const createdAt = Number.isFinite(state.createdAt) ? state.createdAt : Number(entry.name.slice(0, 13));
+        const lastActivity = Math.max(Number.isFinite(state.lastActivity) ? state.lastActivity : createdAt, ...records.map(r => r.at));
+        const provider = this.services.createPromptProvider({ roomId: state.id });
+        const room: Room = { id: state.id, code: state.code, createdAt, lastActivity, file, hostId: state.hostId, players,
+          phase: "lobby", stage: "lobby", seq: records.length + 1, nextPlayer: Math.max(Number(state.nextPlayer) || 2, players.length + 1), roundIndex: records.reduce((max, r) => Math.max(max, Number(r.roundId.match(/(\d+)$/u)?.[1] ?? 0)), 0), dareCount: records.filter(r => r.roundKind === "dare").length,
+          provider, prepared: false, usedIds: new Set(records.map(r => r.promptId)), custom: [], log: records, queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(state.id), botTimers: new Set(), hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), demo: false, demoSpeed: 1 };
+        this.rooms.set(room.code, room);
+        if (records.length > 0) void this.finale(room);
+      } catch { /* Invalid metadata or partial logs are ignored. */ }
+    }
   }
   private code(): string {
     for (let tries = 0; tries < 10000; tries++) {
@@ -305,6 +353,14 @@ export class RoomManager {
       // Present ONLY while a reveal is pending — who has pressed ready for it.
       ...(room.stage === "ready" ? { ready: room.players.filter((p) => room.ready.has(p.id)).map((p) => p.id) } : {}) };
   }
+  private displayView(room: Room): RoomView {
+    const view = this.view(room, "");
+    if (view.round) {
+      const { about: _about, trait: _trait, performer: _performer, submitted: _submitted, onlyPlayers: _onlyPlayers, ...publicRound } = view.round;
+      view.round = publicRound;
+    }
+    return view;
+  }
   /**
    * The ONLY place a round is rendered for a phone, which makes it the only
    * place the spotlight secret has to be kept.
@@ -320,6 +376,9 @@ export class RoomManager {
     return { roundId: round.id, index: round.index, phase: round.phase, kind: round.kind, promptText,
       closesAt: round.closesAt, youSubmitted: round.responses.has(playerId),
       ...(round.onlyPlayers ? { onlyPlayers: [...round.onlyPlayers] } : {}),
+      ...(round.targets?.has(playerId) ? { about: round.targets.get(playerId) } : {}),
+      ...(round.kind === "rating" && round.trait ? { trait: round.trait } : {}),
+      ...(round.performer ? { performer: round.performer } : {}), submitted: [...round.responses.keys()],
       ...(round.voteOpensAt !== undefined ? { voteOpensAt: round.voteOpensAt } : {}),
       ...(cover && round.idle ? { expectsAnswer: false } : {}) };
   }
@@ -338,7 +397,10 @@ export class RoomManager {
       if (socket) fn(socket, p);
     }
   }
-  private states(room: Room): void { this.eachSocket(room, (s, p) => s.emit("state", this.guard(this.view(room, p.id)))); }
+  private states(room: Room): void {
+    this.eachSocket(room, (s, p) => s.emit("state", this.guard(this.view(room, p.id))));
+    this.io.to(displayChannel(room.code)).emit("state", this.guard(this.displayView(room)));
+  }
   private changed(room: Room): void { room.seq++; this.states(room); }
   private replay(room: Room, socket: GameSocket, player: Player): void {
     if (room.round) socket.emit("round", this.guard(this.roundView(room.round, player.id)));
@@ -351,27 +413,42 @@ export class RoomManager {
     }
   }
   private bind(socket: GameSocket): void {
+    socket.on("display_join", (input, reply) => {
+      const ack = typeof reply === "function" ? reply : () => {};
+      if (!input || !isRoomCode(input.roomCode)) return ack({ ok: false, error: "Invalid room code." });
+      const room = this.liveRoom(input.roomCode);
+      if (!room || room.stage === "deleted") return ack({ ok: false, error: "Room not found." });
+      socket.data = { roomCode: room.code, display: true };
+      void socket.join(displayChannel(room.code));
+      const state = this.guard(this.displayView(room));
+      ack({ ok: true, state });
+      socket.emit("state", state);
+      if (room.round) socket.emit("round", this.guard(this.displayView(room).round!));
+      if (room.reveal) socket.emit("reveal", this.guard({ ...room.reveal.value, holdMs: Math.max(0, room.reveal.endsAt - this.now()) }));
+      if (room.interlude) socket.emit("interlude", this.guard({ ...room.interlude.value, holdMs: Math.max(0, room.interlude.endsAt - this.now()) }));
+      if (room.finale) socket.emit("finale", this.guard(room.finale));
+    });
     socket.on("create", (input, reply) => {
       const ack = typeof reply === "function" ? reply : () => {};
       if (socket.data.playerId) return ack({ ok: false, error: "Already joined a room." });
-      if (!input || !validAlias(input.alias) || !validConsent(input.consent)) return ack({ ok: false, error: "Enter a 2–14 character alias and accept the 18+ and terms consent." });
+      if (!input || !validAlias(input.alias) || !validConsent(input.consent) || (!validProfile(input.profile) && input.demo !== true)) return ack({ ok: false, error: "Enter a valid alias, complete the 18+ profile, and accept the required consent." });
       const code = this.code(), now = this.now(), id = randomBytes(16).toString("hex");
       const file = join(this.options.dataDir, `${now}-${id}.jsonl`);
       try { writeFileSync(file, "", { flag: "wx", mode: 0o600 }); } catch { return ack({ ok: false, error: "Unable to create room storage." }); }
-      const player: Player = { id: "p1", alias: input.alias.trim(), consent: { ...input.consent }, secret: secret(), isBot: false, connected: true, socketId: socket.id };
+      const player: Player = { id: "p1", alias: input.alias.trim(), consent: { ...input.consent }, profile: validProfile(input.profile) ? input.profile : neutralProfile, secret: secret(), isBot: false, connected: true, socketId: socket.id };
       let provider: PromptProvider;
       try { provider = this.services.createPromptProvider({ roomId: id }); } catch { provider = new BankPromptProvider(); }
-      const room: Room = { id, code, createdAt: now, lastActivity: now, file, hostId: player.id, players: [player], phase: "lobby", stage: "lobby", seq: 1, nextPlayer: 2, roundIndex: 0,
+      const demo = (input as { demo?: unknown }).demo === true;
+      const room: Room = { id, code, createdAt: now, lastActivity: now, file, hostId: player.id, players: [player], phase: "lobby", stage: "lobby", seq: 1, nextPlayer: 2, roundIndex: 0, dareCount: 0,
         provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set(),
-        hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(),
-        demo: (input as { demo?: unknown }).demo === true, demoSpeed: 1 };
-      this.rooms.set(code, room); socket.data = { roomCode: code, playerId: player.id }; void socket.join(code);
+        hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), demo, demoSpeed: 1 };
+      this.rooms.set(code, room); this.persistRoom(room); socket.data = { roomCode: code, playerId: player.id }; void socket.join(code);
       ack({ ok: true, code, you: player.id, secret: player.secret, state: this.view(room, player.id) });
       this.states(room);
     });
     socket.on("join", (input, reply) => {
       const ack: (r: JoinReply) => void = typeof reply === "function" ? reply : () => {};
-      if (!input || !isRoomCode(input.roomCode) || !validAlias(input.alias) || !validConsent(input.consent)) return ack({ ok: false, error: "Invalid room code, alias, or consent." });
+      if (!input || !isRoomCode(input.roomCode) || !validAlias(input.alias) || !validConsent(input.consent) || (!input.resume && (input as { demo?: unknown }).demo !== true && !validProfile(input.profile))) return ack({ ok: false, error: "Invalid room code, alias, profile, or consent." });
       const room = this.liveRoom(input.roomCode);
       if (!room || room.stage === "deleted") return ack({ ok: false, error: "Room not found." });
       if (socket.data.playerId && (socket.data.roomCode !== room.code || socket.data.playerId !== input.resume?.playerId)) return ack({ ok: false, error: "Already joined a room." });
@@ -408,11 +485,11 @@ export class RoomManager {
         if (room.stage !== "lobby") return ack({ ok: false, error: "The game has already started." });
         if (room.players.length >= MAX_PLAYERS) return ack({ ok: false, error: "Room is full." });
         if (room.players.some((p) => p.alias.toLocaleLowerCase() === input.alias.trim().toLocaleLowerCase())) return ack({ ok: false, error: "That alias is already in use." });
-        player = { id: `p${room.nextPlayer++}`, alias: input.alias.trim(), consent: { ...input.consent }, secret: secret(), isBot: false, connected: true, socketId: socket.id };
+        player = { id: `p${room.nextPlayer++}`, alias: input.alias.trim(), consent: { ...input.consent }, profile: input.profile!, secret: secret(), isBot: false, connected: true, socketId: socket.id };
         room.players.push(player);
       }
       room.lastActivity = this.now(); socket.data = { roomCode: room.code, playerId: player.id }; void socket.join(room.code);
-      room.seq++;
+      room.seq++; this.persistRoom(room);
       ack({ ok: true, you: player.id, secret: player.secret, state: this.view(room, player.id) });
       this.states(room); this.replay(room, socket, player); this.prepare(room);
     });
@@ -443,8 +520,8 @@ export class RoomManager {
       if (room.stage !== "lobby") return this.err(socket, "BAD_PHASE", "Bots can only be added in the lobby.");
       if (room.players.length >= MAX_PLAYERS) return this.err(socket, "PLAYER_COUNT", "Room is full.");
       let n = 1; while (room.players.some((p) => p.alias.toLocaleLowerCase() === `🤖 Bot ${n}`.toLocaleLowerCase())) n++;
-      room.players.push({ id: `p${room.nextPlayer++}`, alias: `🤖 Bot ${n}`, consent: { age: true, terms: true, revealOptIn: true }, secret: "", isBot: true, connected: true });
-      this.changed(room); this.prepare(room);
+      room.players.push({ id: `p${room.nextPlayer++}`, alias: `🤖 Bot ${n}`, consent: { age: true, terms: true, revealOptIn: true }, profile: { ...neutralProfile }, secret: "", isBot: true, connected: true });
+      this.persistRoom(room); this.changed(room); this.prepare(room);
     });
     socket.on("custom_prompts", (input) => {
       const found = this.host(socket); if (!found) return;
@@ -514,7 +591,7 @@ export class RoomManager {
       if (room.players.some((p) => p.alias.toLocaleLowerCase() === alias.toLocaleLowerCase())) {
         this.err(socket, "INVALID_ALIAS", "That name is already in the room."); return ack({ ok: false });
       }
-      const player: Player = { id: `p${room.nextPlayer++}`, alias, consent: { age: true, terms: true, revealOptIn: true },
+      const player: Player = { id: `p${room.nextPlayer++}`, alias, consent: { age: true, terms: true, revealOptIn: true }, profile: neutralProfile,
         secret: "", isBot: false, connected: true, puppet: { mode: "auto" } };
       room.players.push(player);
       this.changed(room); this.prepare(room);
@@ -602,6 +679,7 @@ export class RoomManager {
     if (room.prepared || room.stage !== "lobby" || room.players.length < floor || !room.provider.prepare) return;
     room.prepared = true;
     try {
+      room.provider.setAliases?.(room.players.map((player) => player.alias));
       void Promise.resolve(room.provider.prepare({ playerCount: room.players.length, usedIds: [...room.usedIds], digest: emptyDigest() })).catch(() => { /* Bank remains available. */ });
     } catch { /* Bank remains available. */ }
   }
@@ -621,9 +699,9 @@ export class RoomManager {
   private phaseSlots(phase: HeatPhase): RoundKind[] {
     // One public text answer in warmup gives later chapters real material for
     // callbacks. Every input kind and three coded picks still appear nightly.
-    const desired: RoundKind[] = phase === "warmup" ? ["pick", "shout", "text"]
-      : phase === "spicy" ? ["pick", "rating", "ios"]
-      : phase === "deep" ? ["text", "minigame", "pick"]
+    const desired: RoundKind[] = phase === "warmup" ? ["pick", "pick", "shout", "text"]
+      : phase === "spicy" ? ["pick", "pick", "rating", "ios"]
+      : phase === "deep" ? ["text", "minigame", "pick", "pick"]
       : [...Array<RoundKind>(DARE_ROUNDS).fill("dare"), "pair_dare"];
     return phase === "dare" ? desired : desired.slice(0, ROUNDS_PER_PHASE);
   }
@@ -652,6 +730,9 @@ export class RoomManager {
    */
   private directedDefinition(room: Room, phase: HeatPhase, kind: RoundKind): Definition | undefined {
     let pool = this.candidatePool(room, phase).filter(this.permittedIn(phase, kind));
+    // Generated Grok material fills flexible slots ahead of bank copy; the
+    // explicit pick slots below retain their evidence-density coding floor.
+    if (kind !== "pick") pool = [...pool].sort((a, b) => (a.source === "grok" ? -1 : 0) - (b.source === "grok" ? -1 : 0));
     // Host custom prompts are tonight's bank and always get their turn first
     // (spec §6) — they are ordinary "classic" rounds, not directed probes.
     const host = pool.find((p) => p.source === "host");
@@ -659,14 +740,14 @@ export class RoomManager {
       room.director = recordSelection(room.director, { subjects: [], dimension: host.coding, promptId: host.id });
       return { prompt: host, phase, kind: host.kind, text: host.text };
     }
-    // Evidence variety is a HARD requirement the director must not eat: with
-    // only three pick slots a night, a pick slot stays on the phase's claim
-    // coding (warmup friction · spicy couple · deep friendship) so negative,
-    // romantic and friendship claims all get material even with no provider at
-    // all. The director still chooses the PAIR (test/explore) inside that
-    // coding, and every other slot is free.
+    // Evidence variety is a HARD requirement the director must not eat: each
+    // heat's pick slots stay on phase-appropriate claim codings. Warmup gets
+    // friendship, spicy gets couple plus rivalry, and deep gets friendship.
+    // The director still chooses the PAIR (test/explore) inside that coding.
     if (kind === "pick" && phase !== "dare") {
-      const pickCoding: PromptCoding = phase === "warmup" ? "friction" : phase === "spicy" ? "couple" : "friendship";
+      const remainingPicks = room.plan?.phase === phase ? room.plan.slots.filter((slot) => slot === "pick").length : 0;
+      const pickCoding: PromptCoding = phase === "warmup" ? "friendship"
+        : phase === "spicy" ? (remainingPicks === 1 ? "couple" : "rivalry") : "friendship";
       const preferred = pool.filter((p) => p.kind === "pick" && p.coding === pickCoding && !room.usedIds.has(p.id));
       // Generated prompts come first in the pool, so a validated provider
       // candidate is preferred to a repeat of the bank.
@@ -805,6 +886,11 @@ export class RoomManager {
     }
     this.clearTimers(room); room.reveal = undefined; room.interlude = undefined; room.stage = "round";
     if (definition.kind === "pair_dare") { room.pair = this.pair(room); definition.onlyPlayers = [...room.pair]; }
+    if (definition.kind === "dare") {
+      const roster = room.players.map(p => p.id);
+      definition.performer = roster[room.dareCount % roster.length]!; room.dareCount++;
+      definition.onlyPlayers = [definition.performer];
+    }
     // Mark the spotlight rotation only when the moment actually starts: a
     // heat-down or host skip that drops the queue must not burn a player's turn.
     if (definition.kind === "spotlight" && definition.subjectId) {
@@ -817,12 +903,20 @@ export class RoomManager {
     // A director-chosen round binds its probed subjects into the first slots.
     const question = definition.kind === "spotlight" && definition.subjectId
       ? definition.text.replace(/\{S\}/g, () => room.players.find((p) => p.id === definition.subjectId)?.alias ?? "someone")
-      : this.replacePlaceholders(room, definition.text, definition.subjects ?? definition.onlyPlayers);
+      : definition.kind === "pair_dare"
+        ? `You two: ${this.replacePlaceholders(room, definition.text, definition.onlyPlayers)}`
+        : this.replacePlaceholders(room, definition.text, definition.kind === "dare" && definition.performer ? [definition.performer] : definition.subjects ?? definition.onlyPlayers);
     const round: LiveRound = { ...definition, text: this.withCallback(room, definition, question), id: `${room.id}-${++room.roundIndex}`, index: room.roundIndex, startedAt,
       closesAt: startedAt + lengthMs, responses: new Map(),
       ...(definition.kind === "verdict" ? { voteOpensAt: startedAt + Math.min(this.scale(room, this.options.verdictDiscussMs ?? VERDICT_DISCUSS_MS), lengthMs) } : {}) };
+    if (round.kind === "rating" || round.kind === "ios") {
+      const eligible = room.players.map(p => p.id);
+      round.targets = new Map(eligible.map(id => { const others = eligible.filter(x => x !== id); return [id, others[Math.max(0, room.roundIndex - 1) % others.length]!] as const; }));
+      if (round.kind === "rating") round.trait = TRAITS[(room.roundIndex - 1) % TRAITS.length]!;
+    }
     room.round = round; room.usedIds.add(definition.prompt.id); this.changed(room);
     this.eachSocket(room, (socket, player) => socket.emit("round", this.guard(this.roundView(round, player.id))));
+    this.io.to(displayChannel(room.code)).emit("round", this.guard(this.displayView(room).round!));
     this.schedule(room, round.closesAt - startedAt + this.scale(room, this.options.graceMs ?? GRACE_MS), () => this.finishRound(room));
     for (const player of room.players) if ((player.isBot || player.puppet?.mode === "auto") && (!round.onlyPlayers || round.onlyPlayers.includes(player.id))) this.scheduleBot(room, player, round);
     this.maybeComplete(room);
@@ -846,11 +940,8 @@ export class RoomManager {
         case "pick": value = { kind: "pick", target: other }; break;
         case "text": case "debrief": value = { kind: "text", text: ["I appreciate the way someone here shows up for me.", "We talked about a time the group surprised us.", "Someone in this room always makes me laugh."][rand(3)]! }; break;
         case "shout": value = { kind: "shout", word: ["chaos", "vibes", "legend"][rand(3)]! }; break;
-        case "rating": {
-          const about = rand(2) ? "self" : other;
-          value = { kind: "rating", trait: TRAITS[rand(TRAITS.length)]!, about, value: about === "self" ? 5 + rand(4) : 1 + rand(10) }; break;
-        }
-        case "ios": value = { kind: "ios", about: other, value: 1 + rand(7) }; break;
+        case "rating": value = { kind: "rating", trait: round.trait ?? TRAITS[rand(TRAITS.length)]!, about: round.targets?.get(player.id) ?? other, value: 1 + rand(10) }; break;
+        case "ios": value = { kind: "ios", about: round.targets?.get(player.id) ?? other, value: 1 + rand(7) }; break;
         case "minigame": value = { kind: "minigame", score: 10 + rand(51) }; break;
         case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
         // Live moments. A bot cannot know whether it is the spotlight subject
@@ -896,15 +987,20 @@ export class RoomManager {
     if (value.kind === "shout" && /\s/u.test(value.word.trim())) return { ok: false, error: "Shout must be one word." };
     const target = value.kind === "pick" ? value.target : value.kind === "ios" ? value.about : value.kind === "rating" && value.about !== "self" ? value.about : undefined;
     if (target !== undefined && !room.players.some((p) => p.id === target)) return { ok: false, error: "Unknown target." };
+    if ((round.kind === "rating" || round.kind === "ios") && value.kind === round.kind) {
+      if (value.about !== round.targets?.get(player.id)) return { ok: false, error: "Answer must use your assigned subject." };
+      if (value.kind === "rating" && value.trait !== round.trait) return { ok: false, error: "Answer must use the assigned trait." };
+    }
+    if (round.kind === "pair_dare" && round.pairPassed && value.kind === "dare" && value.status !== "passed") return { ok: false, error: "Your partner passed; submit your own reason to close the pair dare." };
     const at = this.now();
     // The spotlight subject's answer answers the COVER round, not the moment.
     // Flagging it here means no downstream consumer can score it by accident.
     const decoy = round.kind === "spotlight" && round.subjectId === player.id;
     const record: LogRecord = { roomId: room.id, roundId: round.id, playerId: player.id, roundKind: round.kind, promptId: round.prompt.id, coding: round.prompt.coding,
-      value, at, latencyMs: Math.max(0, at - round.startedAt), ...(decoy ? { decoy: true } : {}), ...(impersonatedBy ? { impersonatedBy } : {}) };
+      value, at, latencyMs: Math.max(0, at - round.startedAt), ...(decoy ? { decoy: true } : {}), ...(round.kind === "dare" && round.performer ? { performerId: round.performer } : round.kind === "pair_dare" ? { performerId: player.id } : {}), ...(impersonatedBy ? { impersonatedBy } : {}) };
     try { appendFileSync(room.file, `${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 }); }
     catch { return { ok: false, error: "Unable to save the answer." }; }
-    room.log.push(record); room.seen.set(key, { roundId: r.roundId, fingerprint }); round.responses.set(player.id, value); room.lastActivity = at;
+    room.log.push(record); room.seen.set(key, { roundId: r.roundId, fingerprint }); round.responses.set(player.id, value); if (round.kind === "pair_dare" && value.kind === "dare" && value.status === "passed") round.pairPassed = true; room.lastActivity = at; this.persistRoom(room);
     this.options.audit?.persisted(room.code, room.file, { roundId: r.roundId, playerId: player.id, clientUuid: r.clientUuid });
     if (target) { const k = PAIR_KEY(player.id, target); room.interactions.set(k, (room.interactions.get(k) ?? 0) + 1); }
     this.changed(room);
@@ -946,7 +1042,7 @@ export class RoomManager {
         const alias = room.players.find((p) => p.id === id)?.alias ?? "Player";
         if (value.kind === "text") items.push({ alias, text: value.text });
         if (value.kind === "dare") items.push({ alias, text: value.status === "done" ? "Done" : `Passed: ${value.reason}` });
-        if (value.kind === "pick") items.push({ alias, text: `Chose ${room.players.find((p) => p.id === value.target)?.alias ?? "someone"}` });
+        if (value.kind === "pick") items.push({ alias, text: "Submitted a pick." });
       }
     }
     const alias = (id: string | undefined): string => room.players.find((p) => p.id === id)?.alias ?? "Player";
@@ -1015,6 +1111,7 @@ export class RoomManager {
     room.reveal = { value: reveal, endsAt: this.now() + reveal.holdMs };
     this.changed(room);
     this.io.to(room.code).emit("reveal", this.guard(reveal));
+    this.io.to(displayChannel(room.code)).emit("reveal", this.guard(reveal));
     this.schedule(room, reveal.holdMs, () => this.afterReveal(room));
   }
   /** Timer scale: 1 everywhere except a demo room, where the host can speed up. */
@@ -1041,7 +1138,7 @@ export class RoomManager {
     const view: InterludeView = { headline: cooled ? "Cooling things down" : next === "finale" ? "The room has spoken" : `Next: ${next}`, sub: cooled ? "The room chose a gentler level." : "Take a breath before the next chapter.", ...(teaser ? { teaser } : {}), holdMs };
     room.interlude = { value: view, endsAt: this.now() + holdMs };
     // Store the transition independently of the label exposed to clients.
-    this.transitions.set(room.id, next); this.changed(room); this.io.to(room.code).emit("interlude", this.guard(view));
+    this.transitions.set(room.id, next); this.changed(room); this.io.to(room.code).emit("interlude", this.guard(view)); this.io.to(displayChannel(room.code)).emit("interlude", this.guard(view));
     this.schedule(room, holdMs, () => this.afterInterlude(room));
   }
   private readonly transitions = new Map<string, HeatPhase | "debrief" | "finale">();
@@ -1146,7 +1243,7 @@ export class RoomManager {
     for (const [accountId, priors] of perAccount) accounts.setPriors(accountId, priors.slice(0, 20));
   }
   private meta(room: Room): RoomMeta {
-    return { roomId: room.id, players: room.players.map((p, i) => ({ id: p.id, alias: pseudonym(i) })), revealOptIn: room.players.filter((p) => p.consent.revealOptIn).map((p) => p.id) };
+    return { roomId: room.id, players: room.players.map((p, i) => ({ id: p.id, alias: pseudonym(i) })), revealOptIn: room.players.filter((p) => p.consent.revealOptIn).map((p) => p.id), profiles: Object.fromEntries(room.players.map(p => [p.id, p.profile])) };
   }
   private redactedLog(room: Room): LogRecord[] { return room.log.map((r) => ({ ...r, value: redactValue(r.value, room.players) })); }
   private async finale(room: Room): Promise<void> {
@@ -1270,12 +1367,14 @@ export class RoomManager {
     }
     room.finale = { slides, summary }; room.stage = "finale"; this.changed(room);
     this.io.to(room.code).emit("finale", this.guard(room.finale)); // public, identical on every socket
+    this.io.to(displayChannel(room.code)).emit("finale", this.guard(room.finale));
     this.eachSocket(room, (socket, player) => { const deck = room.decks.get(player.id); if (deck) socket.emit("secrets", this.guard(deck)); });
   }
   private deleteRoom(room: Room): boolean {
     try { unlinkSync(room.file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false; }
+    try { unlinkSync(metadataFile(room.file)); } catch { /* Metadata may not exist for legacy rooms. */ }
     room.stage = "deleted"; room.phase = "closed"; this.transitions.delete(room.id); this.rooms.delete(room.code);
-    this.io.to(room.code).emit("deleted");
+    this.io.to(room.code).emit("deleted"); this.io.to(displayChannel(room.code)).emit("deleted");
     this.eachSocket(room, (socket) => { socket.data = {}; void socket.leave(room.code); });
     this.clearRoomMemory(room);
     return true;
@@ -1292,7 +1391,7 @@ export class RoomManager {
         const file = join(this.options.dataDir, entry.name); if (live.has(file)) continue;
         try {
           const modified = statSync(file).mtimeMs;
-          if (now - Number(match[1]) >= RETENTION_HOURS * HOUR || now - modified >= IDLE_TTL_HOURS * HOUR) unlinkSync(file);
+          if (now - Number(match[1]) >= RETENTION_HOURS * HOUR || now - modified >= IDLE_TTL_HOURS * HOUR) { unlinkSync(file); try { unlinkSync(metadataFile(file)); } catch { /* Legacy log without metadata. */ } }
         } catch { /* Retry next sweep; never delete unrelated files. */ }
       }
     } catch { /* Retry next sweep. */ }

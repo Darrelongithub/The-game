@@ -30,6 +30,7 @@ import { fallbackServices, type GameServices } from "../src/services.ts";
 
 type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
 const consent = { age: true, terms: true, revealOptIn: true };
+const profile = { age: 28, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" as const };
 const DECOY_TEXTS = new Set(DECOYS.map((d) => d.text));
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -57,8 +58,8 @@ async function setup(t: TestContext, options: ServerOptions = {}) {
   };
   return { server, connect, dir };
 }
-const create = (client: Client, alias = "Host"): Promise<JoinReply & { code?: string }> => new Promise((resolve) => client.emit("create", { alias, consent }, resolve));
-const joinRoom = (client: Client, code: string, alias: string): Promise<JoinReply> => new Promise((resolve) => client.emit("join", { roomCode: code, alias, consent }, resolve));
+const create = (client: Client, alias = "Host"): Promise<JoinReply & { code?: string }> => new Promise((resolve) => client.emit("create", { alias, consent, profile }, resolve));
+const joinRoom = (client: Client, code: string, alias: string): Promise<JoinReply> => new Promise((resolve) => client.emit("join", { roomCode: code, alias, consent, profile }, resolve));
 const submitValue = (client: Client, roundId: string, value: ResponseValue, clientUuid: string): Promise<{ ok: boolean; error?: string }> =>
   new Promise((resolve) => client.emit("submit", { roundId, value, clientUuid }, resolve));
 
@@ -104,8 +105,8 @@ test("spotlight: rotation holds, the subject never sees the question, decoys nev
         case "pick": value = { kind: "pick", target: ids.find((id) => id !== myId)! }; break;
         case "text": case "debrief": case "spotlight": value = { kind: "text", text: i === 0 ? "Brian keeps this table honest." : "Watching the room from the corner." }; break;
         case "shout": value = { kind: "shout", word: "chaos" }; break;
-        case "rating": value = { kind: "rating", trait: "warmth", about: "self", value: 7 }; break;
-        case "ios": value = { kind: "ios", about: ids.find((id) => id !== myId)!, value: 5 }; break;
+        case "rating": value = { kind: "rating", trait: round.trait!, about: round.about!, value: 7 }; break;
+        case "ios": value = { kind: "ios", about: round.about!, value: 5 }; break;
         case "minigame": value = { kind: "minigame", score: 20 + i }; break;
         case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
         case "verdict": value = { kind: "pick", target: ids[(i + 1) % ids.length]! }; break;
@@ -231,8 +232,8 @@ test("verdict: phones down during the debate, votes stay secret until the reveal
         case "pick": value = { kind: "pick", target: ids.find((id) => id !== myId)! }; break;
         case "text": case "debrief": case "spotlight": value = { kind: "text", text: "Someone here is quietly running this room." }; break;
         case "shout": value = { kind: "shout", word: "verdict" }; break;
-        case "rating": value = { kind: "rating", trait: "warmth", about: "self", value: 6 }; break;
-        case "ios": value = { kind: "ios", about: ids.find((id) => id !== myId)!, value: 4 }; break;
+        case "rating": value = { kind: "rating", trait: round.trait!, about: round.about!, value: 6 }; break;
+        case "ios": value = { kind: "ios", about: round.about!, value: 4 }; break;
         case "minigame": value = { kind: "minigame", score: 17 }; break;
         default: value = { kind: "dare", status: "done" }; break;
       }
@@ -288,8 +289,8 @@ test("bots answer both live kinds without help", { timeout: 20000 }, async (t) =
     const value: ResponseValue = round.kind === "pick" || round.kind === "verdict" ? { kind: "pick", target: "p2" }
       : round.kind === "text" || round.kind === "debrief" || round.kind === "spotlight" ? { kind: "text", text: "Bot but honest." }
       : round.kind === "shout" ? { kind: "shout", word: "bots" }
-      : round.kind === "rating" ? { kind: "rating", trait: "warmth", about: "self", value: 5 }
-      : round.kind === "ios" ? { kind: "ios", about: "p2", value: 3 }
+      : round.kind === "rating" ? { kind: "rating", trait: round.trait!, about: round.about!, value: 5 }
+      : round.kind === "ios" ? { kind: "ios", about: round.about!, value: 3 }
       : round.kind === "minigame" ? { kind: "minigame", score: 12 }
       : { kind: "dare", status: "done" };
     void submitValue(host, round.roundId, value, `host-${round.roundId}`);
@@ -381,8 +382,8 @@ test("round data round-trips through the JSONL log with the decoy flag intact", 
     const value: ResponseValue = round.kind === "pick" || round.kind === "verdict" ? { kind: "pick", target: ids[(i + 1) % ids.length]! }
       : round.kind === "text" || round.kind === "debrief" || round.kind === "spotlight" ? { kind: "text", text: "Answer from seat " + i }
       : round.kind === "shout" ? { kind: "shout", word: "live" }
-      : round.kind === "rating" ? { kind: "rating", trait: "chaos", about: "self", value: 4 }
-      : round.kind === "ios" ? { kind: "ios", about: ids[(i + 1) % ids.length]!, value: 2 }
+      : round.kind === "rating" ? { kind: "rating", trait: round.trait!, about: round.about!, value: 4 }
+      : round.kind === "ios" ? { kind: "ios", about: round.about!, value: 2 }
       : round.kind === "minigame" ? { kind: "minigame", score: 9 }
       : { kind: "dare", status: "done" };
     void submitValue(client, round.roundId, value, `log-${round.roundId}-${i}`);

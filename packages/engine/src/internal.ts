@@ -3,6 +3,7 @@
 // network, no Date.now(), no unseeded randomness anywhere in this package.
 import {
   CONFIDENCE_RULES,
+  CONSENSUS_MIN_PICKERS,
   JOKER_GUARD,
   MIN_PLAYERS,
   pseudonym,
@@ -31,7 +32,7 @@ export const ENGINE_TUNING = {
     pickOverlap: 0.5,
     mutualPick: 0.5,
     evidence: 0.5,
-    debriefSim: 0.5, // strictly greater than this (0.5 itself means "unknown")
+    debriefSim: 0.6, // a measured similarity must clear this evidence bar
     iosMean: 0.65,
     traitAgreement: 0.8, // uniform-random ratings average ~0.633; 0.8 means mean |self-peer| <= 1.8
   },
@@ -45,7 +46,7 @@ export const ENGINE_TUNING = {
   blindspotMinRaters: 2,
   blindspotSecretMinGap: 1,
   onesided: { minRate: 0.5, maxReverseRate: 0.25, minGap: 0.5, minPositivePicks: 2 },
-  consensusMinVoters: 3,
+  consensusMinVoters: CONSENSUS_MIN_PICKERS,
 } as const;
 
 export const POSITIVE_CODINGS: ReadonlySet<PromptCoding> = new Set(["couple", "friendship"]);
@@ -270,15 +271,15 @@ export function buildIosIndex(log: readonly LogRecord[]): Map<PlayerId, Map<Play
 export const tokenize = (text: string): Set<string> =>
   new Set(text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length > 0));
 
-/** Jaccard over lowercase alphanumeric token sets. Both empty → 0.5 (unknown). */
+/** Jaccard over lowercase alphanumeric token sets. Both empty score 0; missing pairs are omitted upstream. */
 export function tokenJaccard(a: string, b: string): number {
   const sa = tokenize(a);
   const sb = tokenize(b);
-  if (sa.size === 0 && sb.size === 0) return 0.5;
+  if (sa.size === 0 && sb.size === 0) return 0;
   let inter = 0;
   for (const t of sa) if (sb.has(t)) inter++;
   const union = sa.size + sb.size - inter;
-  return union === 0 ? 0.5 : inter / union;
+  return union === 0 ? 0 : inter / union;
 }
 
 /**
