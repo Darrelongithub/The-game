@@ -77,7 +77,7 @@ test("mock Grok lobby work is nonblocking, per-room budgeted, and falls back on 
 test("integrated no-key server completes a game on the production adapters", { timeout: 12000 }, async t => {
   const dataDir = mkdtempSync(join(tmpdir(), "reveal-integrated-"));
   const services = offline();
-  const server = createGameServer({ dataDir, services, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2 });
+  const server = createGameServer({ dataDir, services, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, verdictDiscussMs: 0, roundTimers: { spotlight: 300, verdict: 300 } });
   const port = await server.listen(0, "127.0.0.1", false);
   const socket = io(`http://127.0.0.1:${port}`, { reconnection: false });
   t.after(async () => { socket.disconnect(); await server.close(); rmSync(dataDir, { recursive: true, force: true }); });
@@ -100,6 +100,8 @@ test("integrated no-key server completes a game on the production adapters", { t
       case "ios": value = { kind: "ios", about: "p2", value: 5 }; break;
       case "minigame": value = { kind: "minigame", score: 20 }; break;
       case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
+      case "spotlight": value = { kind: "text", text: "Watching the room right now." }; break;
+      case "verdict": value = { kind: "pick", target: "p2" }; break;
     }
     socket.emit("submit", { roundId: round.roundId, clientUuid: `integrated-${round.roundId}`, value }, () => {});
   });

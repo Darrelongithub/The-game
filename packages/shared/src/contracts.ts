@@ -24,7 +24,13 @@ export const HEAT_ORDER = ["warmup", "spicy", "deep", "dare"] as const;
 
 export type RoundKind =
 | "pick" | "text" | "shout" | "rating" | "ios"
-| "minigame" | "dare" | "pair_dare" | "debrief";
+| "minigame" | "dare" | "pair_dare" | "debrief"
+// Live moments (ROUND 3). Both are group-theatre rounds, not more questions:
+//   spotlight — everyone EXCEPT one subject answers a question about the live
+//               moment; the subject gets a DECOY round and never sees it.
+//   verdict   — open discussion for VERDICT_DISCUSS_MS, then a simultaneous
+//               secret pick; the reveal is a Group Announcement mini-finale.
+| "spotlight" | "verdict";
 
 export type PromptCoding =
 | "couple" | "friendship" | "trust" | "friction" | "rivalry" | "status" | "neutral";
@@ -64,6 +70,12 @@ export interface LogRecord {
     value: ResponseValue;
     at: number;                  // epoch ms
     latencyMs: number;           // round open → submit. Night-Digest fuel.
+    /** Spotlight decoy answer: the subject's throwaway reply to the cover
+     *  round. EXCLUDED from every signal, score and claim (data-or-dead does
+     *  not apply — it answers nothing). It is digest gold only: it pairs with
+     *  the captions ("While the room captioned X, X wrote: …") and lands last
+     *  in the caption-wall reveal. */
+    decoy?: boolean;
 }
 
 export interface RoomMeta {
@@ -144,6 +156,12 @@ export interface RoundView {
     closesAt: number;            // epoch ms
     youSubmitted: boolean;
     onlyPlayers?: PlayerId[];    // pair_dare/debrief rounds; everyone else watches
+    /** verdict rounds: open discussion until this epoch ms, then the secret
+     *  simultaneous pick opens (closesAt = voteOpensAt + VERDICT_VOTE_MS). */
+    voteOpensAt?: number;
+    /** false for the spotlight subject's IDLE cover screen — the phone waits
+     *  the round out without offering an input. Absent means "answer me". */
+    expectsAnswer?: boolean;
 }
 
 export interface RoomView {    // PUBLIC — contains nothing private
@@ -168,6 +186,19 @@ export interface RevealView {
     summary: string;
     items?: RevealItem[];        // text answers, shout winner, dare outcomes…
     holdMs: number;
+    /** Present for live moments so the phone can render the specialised
+     *  reveal instead of the generic list. */
+    kind?: RoundKind;
+    /** spotlight: the alias being watched — the caption wall's header. The
+     *  question itself is NEVER part of the reveal payload. */
+    subject?: string;
+    /** spotlight: the subject's decoy answer. It lands LAST and biggest. */
+    punchline?: string;
+    /** verdict: the Group Announcement mini-finale (anonymous bars, count-up,
+     *  then the room's answer lands). Numbers are counts only. */
+    slide?: FinaleSlide;
+    /** verdict: couple-coded prompts get confetti on the land beat. */
+    celebrate?: boolean;
 }
 
 export type SlideBeat = "tease" | "escalate" | "land";
@@ -273,9 +304,23 @@ export const JOKER_GUARD = { sameTargetShare: 0.70, downweight: 0.5 } as const;
 
 export const MC_SIMULATIONS = 4000;   // seeded PRNG → deterministic
 
+/** verdict: seconds of open debate ("PHONES DOWN. ARGUE IT OUT.") */
+export const VERDICT_DISCUSS_MS = 90_000;
+/** verdict: simultaneous secret pick window after the debate */
+export const VERDICT_VOTE_MS = 15_000;
+/** spotlight: a short caption, not an essay */
+export const SPOTLIGHT_ANSWER_MAX = 80;
+/** spotlight: how long the caption wall holds (stack, then the punchline) */
+export const SPOTLIGHT_REVEAL_MS = 8_000;
+/** verdict: the room's answer lands, then the phase moves on */
+export const VERDICT_REVEAL_MS = 6_000;
+
 export const ROUND_TIMERS_MS: Record<RoundKind, number> = {
     pick: 45_000, text: 90_000, shout: 15_000, rating: 40_000, ios: 40_000,
     minigame: 12_000, dare: 300_000, pair_dare: 330_000, debrief: 60_000,
+    // Live moments. Spotlight = 25s of captioning. Verdict = 90s of arguing
+    // with phones face-down, then 15s of secret simultaneous picking.
+    spotlight: 25_000, verdict: VERDICT_DISCUSS_MS + VERDICT_VOTE_MS,
 };
 
 export const REVEAL_HOLD_MS = 4200;

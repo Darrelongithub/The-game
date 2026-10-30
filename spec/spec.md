@@ -56,9 +56,45 @@ unlocks (§7) — only if they have cards.
 | dare | 300s | done, or passed + REQUIRED reason ≤140 |
 | pair_dare | 330s | two players leave together, questioned separately after |
 | debrief | 60s | private text from each pair member, compared at the finale |
+| spotlight | 25s | short text ≤80 about the LIVE moment (the subject gets a cover) |
+| verdict | 105s | 90s of open debate (`voteOpensAt`) then a simultaneous secret pick |
 
 `pair_dare` and `debrief` rounds carry `onlyPlayers` — everyone else gets a
 spectator screen ("They're talking…"). Each response records `latencyMs`.
+
+### 3a. Live moments — spotlight & verdict
+
+Not more questions: MOMENTS that put the room's eyes on one person, or make
+everyone argue. **~1 spotlight per phase from warmup on; ~1 verdict per phase
+from spicy on.** Both close their phase (the room ends on a moment, not a
+question); together they are the phase's mini-finale.
+
+- **spotlight — "everyone look at X."** The server picks a subject (rotation:
+  each player spotlighted at most once a night, never back-to-back). Everyone
+  except the subject answers a name-cluster or caption question about the live
+  moment (bank `live/spotlight.json`, `{S}` = subject alias).
+  - **The subject never sees the question.** Their round view is a COVER: a
+    random decoy from `live/decoys.json` ("What did you eat today?"), or an
+    idle screen ("Nothing for you right now. Soak it in." — `expectsAnswer:
+    false`), re-drawn every spotlight so a repeat subject cannot pattern-match.
+    The real prompt never rides `round`, `state`, `reveal` or any other emit to
+    that socket, and the reveal payload carries captions only.
+  - Their answer is logged with `decoy: true`. **Decoys never score** — no
+    signal, no claim, no secret: they answer nothing. They are digest gold
+    (see §15) and the punchline of the reveal.
+  - **Reveal** (~8s hold): a RAPID CAPTION WALL — the room's one-liners stack
+    live in big type under the subject's alias, and the subject's own decoy
+    answer lands LAST, biggest.
+- **verdict — "discuss it, then decide."** The prompt lands on every phone with
+  "PHONES DOWN. ARGUE IT OUT." and a 90-second countdown (`voteOpensAt` = round
+  start + 90s). Then 15 seconds of SIMULTANEOUS SECRET pick (normal pick grid,
+  self excluded, no early votes: "Phones down. Argue it out first.").
+  - **Reveal** (~6s hold): anonymous vote bars fill one per vote, numbers count
+    up, then the room's answer LANDS full-screen with haptics — the
+    Group Announcement component, i.e. the round's mini-finale. Confetti only
+    for couple-coded verdicts (`celebrate`).
+  - Verdict picks are normal coded picks and feed consensus / one-sided / pick
+    overlap. Post-deliberation conformity is the room's choice, not a bug.
 
 ## 4. Signals (engine inputs)
 Directed picks, self+peer trait ratings, IOS, shout words, minigame scores, dare
@@ -266,3 +302,15 @@ words (running gags), minigame champions, pick clusters, self-vs-room gaps.
 (3) finale digest slides — Quote of the Night, Dodge Report, Speed Runner,
 contradictions ("Self-rated honesty 9/10. Passed on the honesty dare. Twice.").
 Every joke must trace to digest/claims data — the narrator never invents.
+
+**Live moments are digest fuel (ROUND 3).**
+- **Caption walls** are quote material: every spotlight caption is a normal
+  text answer and competes for Quote of the Night.
+- **Decoy pairing** is the best line of the night: the digest leads its quotes
+  with *"While the room captioned {S}, {S} wrote: '<decoy answer>'"* — the
+  subject answered a throwaway cover question while the room described them.
+- **Name clusters** are ONE teaser per spotlight round — *"6 of 7 wrote the same
+  name for {S}"*. Fires only on ≥3 matching answers AND a strict majority, so
+  2 of 7 is silence. A cluster is **never** a formal engine claim: live
+  observation is fun, not evidence. Ambiguous captions that name two players
+  count for neither.

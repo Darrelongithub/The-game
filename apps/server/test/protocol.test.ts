@@ -38,7 +38,7 @@ const submit = (client: Client, roundId: string, value: ResponseValue, clientUui
 const expectError = async (client: Client, action: () => void, code: string): Promise<void> => { const promise = event<{code:string}>(client, "error"); action(); assert.equal((await limit(promise)).code, code); };
 
 test("validation, host controls, maximum seats, custom prompts and submit idempotency", async (t) => {
-  const { connect, dir } = await setup(t, { botDelayMs: [10000, 10000], roundTimers: { pick: 10000, shout: 10000, minigame: 10000, text: 10000 }, graceMs: 1000, revealHoldMs: 10000, interludeHoldMs: 10000 });
+  const { connect, dir } = await setup(t, { botDelayMs: [10000, 10000], roundTimers: { pick: 10000, shout: 10000, minigame: 10000, text: 10000, spotlight: 10000, verdict: 10000 }, verdictDiscussMs: 0, graceMs: 1000, revealHoldMs: 10000, interludeHoldMs: 10000 });
   const host = await connect(), guest = await connect(), extra = await connect();
   const underage: JoinReply = await new Promise((resolve) => host.emit("create", { alias: "Host", consent: { ...consent, age: false } }, resolve));
   assert.equal(underage.ok, false);
@@ -87,7 +87,7 @@ test("validation, host controls, maximum seats, custom prompts and submit idempo
 });
 
 test("timer honors grace, skip advances, and reconnect restores the personalized submitted snapshot", async (t) => {
-  const { connect } = await setup(t, { roundTimers: { pick: 90, shout: 5000 }, graceMs: 90, revealHoldMs: 5000, interludeHoldMs: 5000 });
+  const { connect } = await setup(t, { roundTimers: { pick: 90, shout: 5000, spotlight: 90, verdict: 90 }, verdictDiscussMs: 0, graceMs: 90, revealHoldMs: 5000, interludeHoldMs: 5000 });
   const clients = await Promise.all([connect(), connect(), connect(), connect()]);
   const made = await create(clients[0]!); const replies = [made];
   for (let i = 1; i < clients.length; i++) replies.push(await joinRoom(clients[i]!, made.code!, `Guest${i}`));
@@ -120,7 +120,7 @@ test("timer honors grace, skip advances, and reconnect restores the personalized
 });
 
 test("majority heat-down lowers exactly one level; repeated votes do not count twice", async (t) => {
-  const { connect } = await setup(t, { roundTimers: { pick: 10000, shout: 10000, minigame: 10000 }, graceMs: 1000, revealHoldMs: 10000, interludeHoldMs: 10000 });
+  const { connect } = await setup(t, { roundTimers: { pick: 10000, shout: 10000, minigame: 10000, spotlight: 10000, verdict: 10000 }, verdictDiscussMs: 0, graceMs: 1000, revealHoldMs: 10000, interludeHoldMs: 10000 });
   const clients = await Promise.all(Array.from({length:5}, () => connect()));
   const made = await create(clients[0]!);
   for (let i = 1; i < clients.length; i++) assert.ok((await joinRoom(clients[i]!, made.code!, `Guest${i}`)).ok);

@@ -3,6 +3,7 @@ import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { io, type Socket } from 'socket.io-client';
+import { DECOYS, SPOTLIGHT_IDLE_LINE } from '../packages/prompts/src/bank/live/index.ts';
 import {
   MAX_PLAYERS, MIN_PLAYERS, SECRET_DECK_MAX,
   type ClientToServerEvents, type ServerToClientEvents, type RoomView,
@@ -34,6 +35,11 @@ const phases = new Set<Phase>(['lobby']);
 const pending = new Set<Promise<void>>();
 const errors: string[] = [];
 let code = '';
+// ROUND 3 live moments: the night must actually run both kinds.
+const liveKinds = new Set<string>();
+// A cover is counted once per spotlight round: the server re-sends the round on
+// every state change, and the same phone can legitimately see it twice.
+const coverRounds = new Set<string>();
 let reconnectStarted = false;
 let reconnectDone = false;
 let duplicate: { roundId: string; playerId: string; clientUuid: string } | undefined;
@@ -73,6 +79,11 @@ function install(bot: Bot, socket: GameSocket): void {
   socket.on('state', state => { bot.state = state; phases.add(state.phase); });
   socket.on('round', round => {
     phases.add(round.phase);
+    if (round.kind === 'spotlight' || round.kind === 'verdict') liveKinds.add(round.kind);
+    // A spotlight cover screen is either the idle line or a decoy question —
+    // never the question the rest of the room is answering.
+    const cover = round.kind === 'spotlight' && (round.expectsAnswer === false || round.promptText === SPOTLIGHT_IDLE_LINE || DECOYS.some(decoy => decoy.text === round.promptText));
+    if (cover) coverRounds.add(round.roundId);
     if (stopping || bot.seenRounds.has(round.roundId)) return;
     bot.seenRounds.add(round.roundId);
     track(answer(bot, round));
@@ -122,6 +133,10 @@ function valueFor(bot: Bot, round: RoundView): ResponseValue {
     case 'ios': return { kind: 'ios', about: target.id, value: 5 };
     case 'minigame': return { kind: 'minigame', score: 30 + index };
     case 'dare': case 'pair_dare': return { kind: 'dare', status: 'done' };
+    // Live moments (ROUND 3): a spotlight caption is a short text, a verdict is
+    // a normal pick — the server opens the pick window only after the debate.
+    case 'spotlight': return { kind: 'text', text: `Caption from ${bot.alias}.` };
+    case 'verdict': return { kind: 'pick', target: target.id };
   }
 }
 async function answer(bot: Bot, round: RoundView): Promise<void> {
@@ -139,6 +154,11 @@ async function answer(bot: Bot, round: RoundView): Promise<void> {
   // the others finish. Remaining players have staggered human-ish delays.
   await sleep(index === 2 ? 100 : index === 0 ? 250 : 900 + index * 150);
   if (stopping) return;
+  // Verdict rounds are phones-down first: wait for the secret pick window.
+  if (round.voteOpensAt && round.voteOpensAt > Date.now()) {
+    await waitFor(() => Date.now() >= round.voteOpensAt!, 'verdict vote window', Math.max(timeoutMs, round.voteOpensAt - Date.now() + 10000));
+    if (stopping) return;
+  }
   if (index === 1 && round.kind === 'dare' && !passDone) {
     passDone = true;
     bot.socket.emit('dare_pass', { roundId: round.roundId, reason: 'My mother is watching.' });
@@ -213,6 +233,9 @@ async function main(): Promise<void> {
   for (const phase of ['lobby', 'warmup', 'spicy', 'deep', 'dare', 'debrief', 'finale'] as const) {
     check(phases.has(phase), `phase not reached: ${phase}`);
   }
+  check(liveKinds.has('spotlight'), 'no spotlight live moment was played');
+  check(liveKinds.has('verdict'), 'no verdict live moment was played');
+  check(coverRounds.size > 0, 'no spotlight subject ever received a cover screen');
   check(reconnectDone, 'active disconnect/rejoin was not exercised');
   check(passDone, 'dodger never passed a dare');
   check(speedDone, 'speed demon did not submit in under one second');
@@ -241,7 +264,8 @@ async function main(): Promise<void> {
     check(!afterDelete.ok, 'deleted room accepted a resumed player');
   } finally { probe.disconnect(); }
   stopping = true;
-  console.log('PASS: phases, finale equality, secret ownership and deck limits, duplicate persistence, active and finale resume, dare pass, deletion');
+  console.log(`PASS: phases, finale equality, secret ownership and deck limits, duplicate persistence, active and finale resume, dare pass, deletion`);
+  console.log(`PASS (ROUND 3): live moments played — spotlight + verdict; ${coverRounds.size} cover screen(s) seen on subject phones`);
 }
 main().catch(async error => {
   console.error(`SMOKE FAILED: ${error instanceof Error ? error.message : String(error)}`);

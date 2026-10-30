@@ -73,13 +73,15 @@ function pairEvidenceLines(meta: RoomMeta, s: PairSignal): string[] {
 
 export function computeResults(
   signals: PairSignal[],
-  log: LogRecord[],
+  allRecords: LogRecord[],
   meta: RoomMeta,
   config: PairWeights = DEFAULT_WEIGHTS,
   tagOf: (recordId: string) => string[] = () => [],
   onJokerWeights?: (weights: ReadonlyMap<PlayerId, number>) => void,
 ): Results {
   assertScorableMeta(meta);
+  // Decoy answers (spotlight cover rounds) are not evidence about anyone.
+  const log = allRecords.filter((rec) => rec.decoy !== true);
   const weights: PairWeights = { ...DEFAULT_WEIGHTS, ...config };
   const ids = playerIdsSorted(meta);
   const idsInOrder = playerIdsInOrder(meta);

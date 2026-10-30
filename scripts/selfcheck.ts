@@ -7,7 +7,7 @@ import {
 } from "../packages/shared/src/validate.ts";
 import {
     ROUND_TIMERS_MS, TRAITS, HEAT_ORDER, SECRET_DECK_MAX, SECRET_HOLD_MS,
-    MAX_PROVIDER_CALLS_PER_NIGHT, type RoundKind,
+    MAX_PROVIDER_CALLS_PER_NIGHT, VERDICT_DISCUSS_MS, VERDICT_VOTE_MS, type RoundKind,
 } from "../packages/shared/src/contracts.ts";
 
 let pass = 0, fail = 0;
@@ -59,8 +59,10 @@ ok("ios about yourself rejected", !targetsOther({ kind: "ios", about: "p1", valu
 ok("validSubmit combo", validSubmit({ kind: "pick", target: "p2" }, "p1") && !validSubmit({ kind: "pick", target: "p1" }, "p1"));
 
 // contracts invariants
-const kinds: RoundKind[] = ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare", "debrief"];
-ok("timers cover all 9 round kinds", kinds.every((k) => typeof ROUND_TIMERS_MS[k] === "number" && ROUND_TIMERS_MS[k] > 0));
+const kinds: RoundKind[] = ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare", "debrief", "spotlight", "verdict"];
+ok("timers cover all 11 round kinds", kinds.length === 11 && kinds.every((k) => typeof ROUND_TIMERS_MS[k] === "number" && ROUND_TIMERS_MS[k] > 0));
+ok("live-moment timers match the spec", ROUND_TIMERS_MS.spotlight === 25_000 && ROUND_TIMERS_MS.verdict === 105_000 &&
+  VERDICT_DISCUSS_MS + VERDICT_VOTE_MS === ROUND_TIMERS_MS.verdict);
 ok("6 traits defined", TRAITS.length === 6);
 ok("4 heat phases in order", HEAT_ORDER.length === 4 && HEAT_ORDER[0] === "warmup" && HEAT_ORDER[3] === "dare");
 ok("secret deck config sane", SECRET_DECK_MAX >= 3 && SECRET_DECK_MAX <= 8 && SECRET_HOLD_MS >= 200 && SECRET_HOLD_MS <= 1000);

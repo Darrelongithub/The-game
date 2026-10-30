@@ -9,6 +9,19 @@ export { computeSignals, pairScoreOf, type PairWeights } from "./signals.ts";
 export { computeResults } from "./results.ts";
 export { buildNightDigest } from "./digest.ts";
 export { buildSecrets } from "./secrets.ts";
+// Live moments (ROUND 3): name clustering + decoy pairing. Never a Claim.
+export {
+  clusterNames,
+  decoyPairings,
+  decoyQuote,
+  detectNamedPlayers,
+  nameClusterTeaser,
+  normalizeName,
+  type DecoyPairing,
+  type NameCandidate,
+  type NameCluster,
+  type NameClusterResult,
+} from "./live.ts";
 
 // Exposed for tuning, tests and Agent Z's hand-verification:
 export { maximumWeightMatching, constrainedMatching, type Matching } from "./matching.ts";
