@@ -289,6 +289,12 @@ export class RoomManager {
     if (found && found.room.hostId !== found.player.id) { this.err(socket, "HOST_ONLY", "Only the host can do that."); return undefined; }
     return found;
   }
+  /** Demo events are accepted in demo rooms only (and say so when they are not). */
+  private demoOnly(socket: GameSocket, room: Room): boolean {
+    if (room.demo) return true;
+    this.err(socket, "DEMO_ONLY", "That control only exists in a demo room.");
+    return false;
+  }
   private view(room: Room, playerId: string): RoomView {
     return { code: room.code, phase: room.phase, hostId: room.hostId,
       players: room.players.map(({ id, alias, connected, isBot }) => ({ id, alias, connected, isBot })),
@@ -423,7 +429,12 @@ export class RoomManager {
       const found = this.host(socket); if (!found) return;
       const { room } = found;
       if (room.stage !== "lobby") return this.err(socket, "BAD_PHASE", "The game has already started.");
-      if (!playerCountOk(room.players.length)) return this.err(socket, "PLAYER_COUNT", `Start requires ${MIN_PLAYERS}–${MAX_PLAYERS} players.`);
+      // DEMO ROOMS (ROUND 4): the host plays every seat from one laptop, so the
+      // ordinary 4–11 seat rule does not apply — but a night needs at least two
+      // seats for the engine to have anything to compare.
+      if (room.demo ? room.players.length < 2 : !playerCountOk(room.players.length)) {
+        return this.err(socket, "PLAYER_COUNT", room.demo ? "Add at least one more demo seat to start." : `Start requires ${MIN_PLAYERS}–${MAX_PLAYERS} players.`);
+      }
       this.prepare(room); this.loadPriors(room); this.enterHeat(room, "warmup");
     });
     socket.on("add_bot", () => {
@@ -484,6 +495,88 @@ export class RoomManager {
       room.votes.add(player.id);
       this.checkVotes(room);
     });
+    // -----------------------------------------------------------------------
+    // DEMO ROOMS (ROUND 4) — host only, demo rooms only, puppeted seats only.
+    // The host plays the whole game alone on one laptop: every extra seat is a
+    // puppet that answers itself ("auto") or waits for the host ("manual").
+    // The engine cannot tell the difference: puppet answers are ordinary
+    // LogRecords (plus `impersonatedBy` metadata it ignores).
+    // -----------------------------------------------------------------------
+    socket.on("demo_add_player", (input, reply) => {
+      const ack: (r: { ok: boolean; playerId?: PlayerId }) => void = typeof reply === "function" ? reply : () => {};
+      const found = this.host(socket); if (!found) return ack({ ok: false });
+      const { room } = found;
+      if (!this.demoOnly(socket, room)) return ack({ ok: false });
+      if (room.stage !== "lobby") { this.err(socket, "BAD_PHASE", "Demo seats are added in the lobby."); return ack({ ok: false }); }
+      if (room.players.length >= MAX_PLAYERS) { this.err(socket, "PLAYER_COUNT", "Room is full."); return ack({ ok: false }); }
+      const alias = typeof input?.alias === "string" ? input.alias.trim() : "";
+      if (!validAlias(alias)) { this.err(socket, "INVALID_ALIAS", "Give the demo seat a 2–14 character name."); return ack({ ok: false }); }
+      if (room.players.some((p) => p.alias.toLocaleLowerCase() === alias.toLocaleLowerCase())) {
+        this.err(socket, "INVALID_ALIAS", "That name is already in the room."); return ack({ ok: false });
+      }
+      const player: Player = { id: `p${room.nextPlayer++}`, alias, consent: { age: true, terms: true, revealOptIn: true },
+        secret: "", isBot: false, connected: true, puppet: { mode: "auto" } };
+      room.players.push(player);
+      this.changed(room); this.prepare(room);
+      ack({ ok: true, playerId: player.id });
+    });
+    socket.on("demo_remove_player", (input) => {
+      const found = this.host(socket); if (!found) return;
+      const { room } = found;
+      if (!this.demoOnly(socket, room)) return;
+      if (room.stage !== "lobby") return this.err(socket, "BAD_PHASE", "Demo seats are removed in the lobby.");
+      const target = room.players.find((p) => p.id === input?.playerId && p.puppet);
+      if (!target) return this.err(socket, "NOT_A_PUPPET", "Only a demo seat can be removed.");
+      room.players.splice(room.players.indexOf(target), 1);
+      this.changed(room); this.prepare(room);
+    });
+    socket.on("demo_set_bot_mode", (input) => {
+      const found = this.host(socket); if (!found) return;
+      const { room } = found;
+      if (!this.demoOnly(socket, room)) return;
+      const target = room.players.find((p) => p.id === input?.playerId && p.puppet);
+      if (!target) return this.err(socket, "NOT_A_PUPPET", "Only a demo seat has a bot mode.");
+      if (input.mode !== "auto" && input.mode !== "manual") return this.err(socket, "INVALID_MODE", "Mode must be auto or manual.");
+      target.puppet = { mode: input.mode };
+      // An auto seat readies itself; switching one to auto mid-gate can release it.
+      if (room.stage === "ready") {
+        if (input.mode === "auto") room.ready.add(target.id);
+        else room.ready.delete(target.id);
+        this.changed(room);
+        if (this.everyoneReady(room)) this.showReveal(room);
+        return;
+      }
+      this.changed(room);
+    });
+    socket.on("demo_answer_as", (input) => {
+      const found = this.host(socket); if (!found) return;
+      const { room } = found;
+      if (!this.demoOnly(socket, room)) return;
+      const target = room.players.find((p) => p.id === input?.playerId && p.puppet);
+      if (!target) return this.err(socket, "NOT_A_PUPPET", "Only a demo seat can be answered for.");
+      const result = this.submit(room, target, input, found.player.id);
+      if (!result.ok) this.err(socket, "DEMO_SUBMIT", result.error ?? "That answer was not accepted.");
+    });
+    socket.on("demo_all_ready", () => {
+      const found = this.host(socket); if (!found) return;
+      const { room } = found;
+      if (!this.demoOnly(socket, room)) return;
+      if (room.stage !== "ready") return; // nothing pending: harmless no-op
+      for (const player of room.players) room.ready.add(player.id);
+      this.changed(room);
+      this.showReveal(room);
+    });
+    socket.on("demo_speed", (input) => {
+      const found = this.host(socket); if (!found) return;
+      const { room } = found;
+      if (!this.demoOnly(socket, room)) return;
+      const scale = typeof input?.scale === "number" && Number.isFinite(input.scale) ? input.scale : NaN;
+      if (!(scale >= 0.1 && scale <= 1)) return this.err(socket, "INVALID_SPEED", "Speed must be between 0.1 and 1.");
+      // Applied to timers scheduled from now on; a round already in flight keeps
+      // its closing time so nobody loses time to a mid-round change.
+      room.demoSpeed = scale;
+      this.changed(room);
+    });
     socket.on("delete_room", () => {
       const found = this.identify(socket); if (!found) return;
       if (!this.deleteRoom(found.room)) this.err(socket, "DELETE_FAILED", "Could not remove room storage; try again.");
@@ -503,7 +596,10 @@ export class RoomManager {
     });
   }
   private prepare(room: Room): void {
-    if (room.prepared || room.stage !== "lobby" || room.players.length < MIN_PLAYERS || !room.provider.prepare) return;
+    // A demo room may hold fewer seats than a real room and still wants the
+    // same prompt variety, so only the real 4-seat floor blocks preparation.
+    const floor = room.demo ? 2 : MIN_PLAYERS;
+    if (room.prepared || room.stage !== "lobby" || room.players.length < floor || !room.provider.prepare) return;
     room.prepared = true;
     try {
       void Promise.resolve(room.provider.prepare({ playerCount: room.players.length, usedIds: [...room.usedIds], digest: emptyDigest() })).catch(() => { /* Bank remains available. */ });
@@ -728,7 +824,7 @@ export class RoomManager {
     room.round = round; room.usedIds.add(definition.prompt.id); this.changed(room);
     this.eachSocket(room, (socket, player) => socket.emit("round", this.guard(this.roundView(round, player.id))));
     this.schedule(room, round.closesAt - startedAt + this.scale(room, this.options.graceMs ?? GRACE_MS), () => this.finishRound(room));
-    for (const player of room.players) if (player.isBot && (!round.onlyPlayers || round.onlyPlayers.includes(player.id))) this.scheduleBot(room, player, round);
+    for (const player of room.players) if ((player.isBot || player.puppet?.mode === "auto") && (!round.onlyPlayers || round.onlyPlayers.includes(player.id))) this.scheduleBot(room, player, round);
     this.maybeComplete(room);
   }
   private scheduleBot(room: Room, player: Player, round: LiveRound, delayMs?: number): void {
@@ -767,7 +863,13 @@ export class RoomManager {
     }, Math.max(0, delay));
     timer.unref(); room.botTimers.add(timer);
   }
-  private submit(room: Room, player: Player, request: unknown): { ok: boolean; error?: string } {
+  /**
+   * `impersonatedBy` is demo-room METADATA ONLY: the host puppeted this seat.
+   * It is written to the room log and then ignored by every consumer — the
+   * engine, the digest, the narrator and the claims never read it, so a demo
+   * night scores exactly like the same answers from real phones (parity).
+   */
+  private submit(room: Room, player: Player, request: unknown, impersonatedBy?: PlayerId): { ok: boolean; error?: string } {
     if (!request || typeof request !== "object") return { ok: false, error: "Invalid submission." };
     const r = request as { roundId?: unknown; clientUuid?: unknown; value?: unknown };
     if (typeof r.roundId !== "string" || typeof r.clientUuid !== "string" || !r.clientUuid.trim() || r.clientUuid.length > 128) return { ok: false, error: "Invalid submission id." };
@@ -799,7 +901,7 @@ export class RoomManager {
     // Flagging it here means no downstream consumer can score it by accident.
     const decoy = round.kind === "spotlight" && round.subjectId === player.id;
     const record: LogRecord = { roomId: room.id, roundId: round.id, playerId: player.id, roundKind: round.kind, promptId: round.prompt.id, coding: round.prompt.coding,
-      value, at, latencyMs: Math.max(0, at - round.startedAt), ...(decoy ? { decoy: true } : {}) };
+      value, at, latencyMs: Math.max(0, at - round.startedAt), ...(decoy ? { decoy: true } : {}), ...(impersonatedBy ? { impersonatedBy } : {}) };
     try { appendFileSync(room.file, `${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 }); }
     catch { return { ok: false, error: "Unable to save the answer." }; }
     room.log.push(record); room.seen.set(key, { roundId: r.roundId, fingerprint }); round.responses.set(player.id, value); room.lastActivity = at;
