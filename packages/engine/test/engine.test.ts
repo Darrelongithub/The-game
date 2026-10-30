@@ -206,6 +206,27 @@ test("n=4 random-night consensus high-confidence false positives stay below 2%",
   assert.ok(falsePositiveNights / nights <= 0.02, `${falsePositiveNights}/${nights} random nights had a high-confidence consensus claim`);
 });
 
+test("profile-derived shared-intent notes stay private and require both reveal opt-ins", () => {
+  const meta = { ...meta5("profile-intents"), profiles: {
+    p1: { age: 29, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: true, tonight: "vibes" as const },
+    p2: { age: 33, relationship: "committed" as const, partnersToDate: 4, longestMonths: 24, crushingHere: false, tonight: "vibes" as const },
+    p3: { age: 30, relationship: "single" as const, partnersToDate: 0, longestMonths: 0, crushingHere: false, tonight: "chaos" as const },
+    p4: { age: 34, relationship: "dating" as const, partnersToDate: 1, longestMonths: 4, crushingHere: false, tonight: "mission" as const },
+    p5: { age: 31, relationship: "single" as const, partnersToDate: 3, longestMonths: 12, crushingHere: false, tonight: "feelings" as const },
+  } };
+  const results = computeResults([], [], meta);
+  const decks = buildSecrets(results, buildNightDigest([], meta), meta);
+  const a = decks.get("p1")?.find(c => c.id === "secret-profile-intent-p1-p2");
+  const b = decks.get("p2")?.find(c => c.id === "secret-profile-intent-p2-p1");
+  assert.ok(a && b, "both consenting players receive the matched-intent note");
+  assert.ok(a.facts.join(" ").includes("not proof of compatibility"));
+  assert.ok(!JSON.stringify([...decks.values()]).includes("crushingHere"));
+  assert.ok(!JSON.stringify([...decks.values()]).includes("committed"));
+  const oneOptOut = { ...meta, revealOptIn: ["p1", "p3"] };
+  const privateOnly = buildSecrets(computeResults([], [], oneOptOut), buildNightDigest([], oneOptOut), oneOptOut);
+  assert.ok(![...privateOnly.values()].flat().some(c => c.id.includes("profile-intent-p1-p2")));
+});
+
 // ---------- (c) player-count bounds ----------
 test("(c) n=4 works, n<4 throws", () => {
   const meta4: typeof RANDOM_META = {
