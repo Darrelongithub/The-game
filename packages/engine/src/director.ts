@@ -178,7 +178,9 @@ export interface PlanInput {
 }
 
 const placeholders = (text: string): number => (text.match(/\{P(?:1[01]|[1-9])\}/gu) ?? []).length;
-const probeable = (h: Hypothesis): boolean => h.status === "open" || h.status === "supported";
+/** Only OPEN (mid-band) suspicions are worth probing: "supported" is already
+ *  strong enough that asking again would telegraph the interest. */
+const probeable = (h: Hypothesis): boolean => h.status === "open";
 
 /** Deterministic split of the mix. `ROUND_MIX` is config: retune by replay. */
 export function pickMode(seed: number): DirectedMode {

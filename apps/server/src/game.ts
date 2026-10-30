@@ -8,7 +8,7 @@ import {
   ROOM_CODE_LENGTH, ROUNDS_PER_PHASE, ROUND_TIMERS_MS, SECRET_DECK_MAX, SPOTLIGHT_ANSWER_MAX,
   SPOTLIGHT_REVEAL_MS, TRAITS, VERDICT_DISCUSS_MS, VERDICT_REVEAL_MS, VERDICT_VOTE_MS, pseudonym,
   type ClientToServerEvents, type Consent, type FinaleSlide, type FinaleView, type InterludeView,
-  type JoinReply, type LogRecord, type NightDigest, type Phase, type PlayerId, type Prompt,
+  type Claim, type Hypothesis, type JoinReply, type LogRecord, type NightDigest, type Phase, type PlayerId, type Prompt,
   type ResponseValue, type RevealView, type RoomMeta, type RoomView, type RoundKind,
   type RoundView, type SecretCard, type SecretDeckView, type ServerToClientEvents,
 } from "../../../packages/shared/src/contracts.ts";
@@ -16,7 +16,11 @@ import { isAlias, isRoomCode, playerCountOk, validSubmit } from "../../../packag
 import { BankPromptProvider, fallbackServices, type GameServices, type HeatPhase, type PromptProvider } from "./services.ts";
 import { DECOYS, SPOTLIGHT_IDLE_LINE, liveKindInPhase, livePrompt, liveSeeds, type LiveSeed } from "../../../packages/prompts/src/bank/live/index.ts";
 import { checkBanned, checkHardBlocked } from "../../../packages/prompts/src/filter.ts";
-import type { AccountStore } from "./accounts.ts";
+import { accountSubjectKey, type AccountStore, type StoredHypothesis } from "./accounts.ts";
+import {
+  assertNoHypothesisLeak, carryOver, emptyDirectorState, planRound, recordSelection, updateHypotheses,
+  type DirectorState,
+} from "../../../packages/engine/src/director.ts";
 
 type SocketData = { roomCode?: string; playerId?: string };
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
@@ -35,7 +39,15 @@ interface Definition {
   cluster?: "name" | "text";
   /** verdict: couple-coded verdicts celebrate on the land beat. */
   couple?: boolean;
+  /**
+   * ROUND 4: the subjects this round was DIRECTOR-chosen to probe, bound into
+   * the first `{P1}`/`{P2}` slots so the prompt is about those people. The
+   * round view still shows ordinary text — nothing points at a suspicion.
+   */
+  subjects?: string[];
 }
+/** Heat-phase dealing state: round slots first, then the live moments. */
+interface PhasePlan { phase: HeatPhase; slots: RoundKind[]; live: RoundKind[] }
 interface LiveRound extends Definition {
   id: string; index: number; startedAt: number; closesAt: number; responses: Map<string, ResponseValue>;
   /** verdict: the secret simultaneous pick opens here (discussion before it). */
@@ -53,6 +65,17 @@ interface Room {
   spotlighted: Set<string>; lastSubject?: string;
   pendingHeatDown?: HeatPhase; reveal?: TimedEvent<RevealView>; interlude?: TimedEvent<InterludeView>;
   finale?: FinaleView; decks: Map<string, SecretDeckView>; rng: () => number;
+  /**
+   * ROUND 4 — THE DIRECTOR'S MEMORY. INTERNAL: hypotheses, priors, the
+   * coverage matrix and graduated claims live here and NOWHERE else. They are
+   * never emitted, never written to the room log, never in a RoomView, and
+   * never recapped at the finale. Players see only the rounds they caused.
+   */
+  hypotheses: Hypothesis[]; priors: Hypothesis[]; director: DirectorState; graduated: Claim[];
+  /** the phase being dealt, one round at a time (so every round re-plans) */
+  plan?: PhasePlan;
+  /** hypothesis the round in flight was built to test (cleared each round) */
+  testedHypothesisId?: string;
   timer?: ReturnType<typeof setTimeout>; botTimers: Set<ReturnType<typeof setTimeout>>;
 }
 export interface GameOptions {
@@ -70,9 +93,17 @@ export interface GameOptions {
   interludeHoldMs?: number;
   botDelayMs?: [number, number];
   writerTimeoutMs?: number;
+  /** Test seam: turn the hypothesis-leak guard off (never in production). */
+  assertInvisible?: boolean;
   /** In-process test observer only; never configured by the production entry point. */
   audit?: {
     persisted(roomCode: string, file: string, request: { roundId: string; playerId: string; clientUuid: string }): void;
+    /**
+     * INTERNAL test observer: what the director CHOSE (never what a player
+     * sees). Used to assert the anti-telegraph cap and cross-night probing
+     * without exposing any of it on the wire.
+     */
+    directed?(roomCode: string, round: { mode: string; dimension: string; subjects: string[]; promptId: string; hypothesisId?: string }): void;
     decks(roomCode: string, roomId: string, players: string[], decks: ReadonlyMap<string, SecretDeckView>, results: import("../../../packages/shared/src/contracts.ts").Results): void;
   };
 }
@@ -160,6 +191,7 @@ export class RoomManager {
     room.players.forEach((p) => { p.secret = ""; p.alias = ""; }); room.players.length = 0;
     room.round = null; room.queue = []; room.custom = []; room.pair = undefined; room.reveal = undefined; room.interlude = undefined; room.finale = undefined;
     room.currentHeat = undefined; room.pendingHeatDown = undefined; room.spotlighted.clear(); room.lastSubject = undefined;
+    room.hypotheses.length = 0; room.priors.length = 0; room.graduated.length = 0; room.director = emptyDirectorState(); room.plan = undefined; room.testedHypothesisId = undefined;
     room.provider.dispose?.(); room.provider = new BankPromptProvider();
   }
   private code(): string {
@@ -232,22 +264,31 @@ export class RoomManager {
       ...(round.voteOpensAt !== undefined ? { voteOpensAt: round.voteOpensAt } : {}),
       ...(cover && round.idle ? { expectsAnswer: false } : {}) };
   }
+  /**
+   * INVISIBILITY GUARD. Every client-facing payload passes through here, so a
+   * future edit that starts shipping a hypothesis fails loudly instead of
+   * quietly showing players the game's private suspicions.
+   */
+  private guard<T>(payload: T): T {
+    if (this.options.assertInvisible !== false) assertNoHypothesisLeak(payload);
+    return payload;
+  }
   private eachSocket(room: Room, fn: (socket: GameSocket, player: Player) => void): void {
     for (const p of room.players) if (!p.isBot && p.connected && p.socketId) {
       const socket = this.io.sockets.sockets.get(p.socketId);
       if (socket) fn(socket, p);
     }
   }
-  private states(room: Room): void { this.eachSocket(room, (s, p) => s.emit("state", this.view(room, p.id))); }
+  private states(room: Room): void { this.eachSocket(room, (s, p) => s.emit("state", this.guard(this.view(room, p.id)))); }
   private changed(room: Room): void { room.seq++; this.states(room); }
   private replay(room: Room, socket: GameSocket, player: Player): void {
-    if (room.round) socket.emit("round", this.roundView(room.round, player.id));
-    if (room.reveal) socket.emit("reveal", { ...room.reveal.value, holdMs: Math.max(0, room.reveal.endsAt - this.now()) });
-    if (room.interlude) socket.emit("interlude", { ...room.interlude.value, holdMs: Math.max(0, room.interlude.endsAt - this.now()) });
+    if (room.round) socket.emit("round", this.guard(this.roundView(room.round, player.id)));
+    if (room.reveal) socket.emit("reveal", this.guard({ ...room.reveal.value, holdMs: Math.max(0, room.reveal.endsAt - this.now()) }));
+    if (room.interlude) socket.emit("interlude", this.guard({ ...room.interlude.value, holdMs: Math.max(0, room.interlude.endsAt - this.now()) }));
     if (room.finale) {
-      socket.emit("finale", room.finale);
+      socket.emit("finale", this.guard(room.finale));
       const deck = room.decks.get(player.id);
-      if (deck) socket.emit("secrets", deck); // exactly this authenticated socket
+      if (deck) socket.emit("secrets", this.guard(deck)); // exactly this authenticated socket
     }
   }
   private bind(socket: GameSocket): void {
@@ -262,7 +303,8 @@ export class RoomManager {
       let provider: PromptProvider;
       try { provider = this.services.createPromptProvider(id); } catch { provider = new BankPromptProvider(); }
       const room: Room = { id, code, createdAt: now, lastActivity: now, file, hostId: player.id, players: [player], phase: "lobby", stage: "lobby", seq: 1, nextPlayer: 2, roundIndex: 0,
-        provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set() };
+        provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set(),
+        hypotheses: [], priors: [], director: emptyDirectorState(), graduated: [] };
       this.rooms.set(code, room); socket.data = { roomCode: code, playerId: player.id }; void socket.join(code);
       ack({ ok: true, code, you: player.id, secret: player.secret, state: this.view(room, player.id) });
       this.states(room);
@@ -301,7 +343,7 @@ export class RoomManager {
       const { room } = found;
       if (room.stage !== "lobby") return this.err(socket, "BAD_PHASE", "The game has already started.");
       if (!playerCountOk(room.players.length)) return this.err(socket, "PLAYER_COUNT", `Start requires ${MIN_PLAYERS}–${MAX_PLAYERS} players.`);
-      this.prepare(room); this.enterHeat(room, "warmup");
+      this.prepare(room); this.loadPriors(room); this.enterHeat(room, "warmup");
     });
     socket.on("add_bot", () => {
       const found = this.host(socket); if (!found) return;
@@ -389,29 +431,78 @@ export class RoomManager {
       if (room.stage === "round") this.finishRound(room); else this.afterReveal(room);
     }
   }
-  private phasePrompts(room: Room, phase: HeatPhase): Definition[] {
+  /** Round kinds a heat phase deals, in order (spec §3). */
+  private phaseSlots(phase: HeatPhase): RoundKind[] {
+    const desired: RoundKind[] = phase === "warmup" ? ["pick", "shout", "minigame"]
+      : phase === "spicy" ? ["pick", "rating", "ios"]
+      : phase === "deep" ? ["text", "rating", "pick"]
+      : [...Array<RoundKind>(DARE_ROUNDS).fill("dare"), "pair_dare"];
+    return phase === "dare" ? desired : desired.slice(0, ROUNDS_PER_PHASE);
+  }
+  /** Everything recruitable in a phase: host lines, provider output, the bank. */
+  private candidatePool(room: Room, phase: HeatPhase): Prompt[] {
     let provided: Prompt[] = [];
     try { const result = room.provider.forPhase(phase, 100, room.usedIds); if (Array.isArray(result)) provided = result; } catch { /* fallback */ }
     const fallback = new BankPromptProvider().forPhase(phase, 100, new Set());
-    const pool = [...room.custom.filter((p) => p.phase === phase && !room.usedIds.has(p.id)), ...provided, ...fallback].filter((p) => asSafePrompt(p, phase));
-    const desired: RoundKind[] = phase === "warmup" ? ["pick", "shout", "minigame"] : phase === "spicy" ? ["pick", "rating", "ios"] : phase === "deep" ? ["text", "rating", "pick"] : [...Array<RoundKind>(DARE_ROUNDS).fill("dare"), "pair_dare"];
-    const slots = phase === "dare" ? desired : desired.slice(0, ROUNDS_PER_PHASE);
-    const chosen = new Set<string>();
-    const rounds = slots.map((kind) => {
-      const permitted = (p: Prompt): boolean => phase === "dare" ? p.kind === kind : !["dare", "pair_dare", "debrief"].includes(p.kind);
-      const candidates = pool.filter((p) => permitted(p) && !chosen.has(p.id));
-      const prompt = candidates.find((p) => p.source === "host" && !room.usedIds.has(p.id)) ??
-        candidates.find((p) => p.kind === kind && !room.usedIds.has(p.id)) ?? candidates.find((p) => !room.usedIds.has(p.id)) ??
-        candidates.find((p) => p.kind === kind) ?? candidates[0] ?? fallback.find((p) => p.kind === kind)!;
-      chosen.add(prompt.id);
-      return { prompt, phase, kind: prompt.kind, text: prompt.text };
+    return [...room.custom.filter((p) => p.phase === phase && !room.usedIds.has(p.id)), ...provided, ...fallback].filter((p) => asSafePrompt(p, phase));
+  }
+  private permittedIn(phase: HeatPhase, kind: RoundKind): (p: Prompt) => boolean {
+    return phase === "dare" ? (p: Prompt): boolean => p.kind === kind : (p: Prompt): boolean => !["dare", "pair_dare", "debrief"].includes(p.kind);
+  }
+  /**
+   * ROUND 4 — THE DIRECTOR DEALS ONE ROUND AT A TIME.
+   *
+   * Every heat round is chosen by the deterministic selector: 50% probing an
+   * open hypothesis, 30% filling the least-covered pair × dimension cell, 20%
+   * classic. The chosen prompt is an ordinary one; the director only decides
+   * WHICH ordinary prompt comes next and which people its `{P1}`/`{P2}` slots
+   * bind to. Nothing about the choice reaches a client.
+   */
+  private directedDefinition(room: Room, phase: HeatPhase, kind: RoundKind): Definition | undefined {
+    const pool = this.candidatePool(room, phase).filter(this.permittedIn(phase, kind));
+    // Host custom prompts are tonight's bank and always get their turn first
+    // (spec §6) — they are ordinary "classic" rounds, not directed probes.
+    const host = pool.find((p) => p.source === "host");
+    if (host) {
+      room.director = recordSelection(room.director, { subjects: [], dimension: host.coding, promptId: host.id });
+      return { prompt: host, phase, kind: host.kind, text: host.text };
+    }
+    const planned = planRound({
+      hypotheses: room.hypotheses,
+      state: room.director,
+      candidates: pool,
+      // Seeded by the round index: replaying a log replays the choices.
+      seed: room.roundIndex + 1,
+      kind,
+      meta: this.meta(room),
     });
-    // LIVE MOMENTS (spec §3): ~1 spotlight per phase from warmup on, ~1 verdict
-    // per phase from spicy on. Both close the phase: the room ends on a moment
-    // (eyes on one person, then the room's own verdict) instead of a question.
-    const spotlight = this.spotlightDefinition(room, phase);
-    const verdict = this.verdictDefinition(room, phase);
-    return [...rounds, ...(spotlight ? [spotlight] : []), ...(verdict ? [verdict] : [])];
+    if (!planned) return undefined;
+    room.director = planned.state;
+    room.testedHypothesisId = planned.hypothesisId;
+    this.options.audit?.directed?.(room.code, {
+      mode: planned.mode, dimension: planned.dimension, subjects: [...planned.subjects], promptId: planned.prompt.id,
+      ...(planned.hypothesisId ? { hypothesisId: planned.hypothesisId } : {}),
+    });
+    return {
+      prompt: planned.prompt, phase, kind: planned.prompt.kind, text: planned.prompt.text,
+      ...(planned.subjects.length > 0 ? { subjects: [...planned.subjects] } : {}),
+    };
+  }
+  /** Deal the next round of the phase; undefined means the phase is over. */
+  private planNext(room: Room): Definition | undefined {
+    const plan = room.plan;
+    if (!plan) return undefined;
+    while (plan.slots.length > 0) {
+      const kind = plan.slots.shift()!;
+      const definition = this.directedDefinition(room, plan.phase, kind);
+      if (definition) return definition;
+    }
+    while (plan.live.length > 0) {
+      const moment = plan.live.shift()!;
+      const definition = moment === "spotlight" ? this.spotlightDefinition(room, plan.phase) : this.verdictDefinition(room, plan.phase);
+      if (definition) return definition;
+    }
+    return undefined;
   }
   /**
    * Pick tonight's subject and cover. Rotation is per night: every player is
@@ -442,7 +533,17 @@ export class RoomManager {
   }
   private enterHeat(room: Room, phase: HeatPhase): void {
     this.clearTimers(room); room.phase = phase; room.currentHeat = phase; room.votes.clear(); room.pendingHeatDown = undefined;
-    room.queue = this.phasePrompts(room, phase); room.pair = undefined; room.interlude = undefined;
+    room.queue = []; room.pair = undefined; room.interlude = undefined;
+    // LIVE MOMENTS (spec §3): ~1 spotlight per phase from warmup on, ~1 verdict
+    // per phase from spicy on. Both close the phase.
+    room.plan = {
+      phase,
+      slots: this.phaseSlots(phase),
+      live: [
+        ...(liveKindInPhase("spotlight", phase) ? (["spotlight"] as RoundKind[]) : []),
+        ...(liveKindInPhase("verdict", phase) ? (["verdict"] as RoundKind[]) : []),
+      ],
+    };
     this.nextRound(room);
   }
   private pair(room: Room): [string, string] {
@@ -464,7 +565,7 @@ export class RoomManager {
   }
   private nextRound(room: Room): void {
     if (room.stage === "deleted") return;
-    const definition = room.queue.shift();
+    const definition = room.queue.shift() ?? this.planNext(room);
     if (!definition) {
       if (room.phase === "debrief") return this.beginInterlude(room, "finale");
       if (room.currentHeat === "dare") return room.pair ? this.beginInterlude(room, "debrief") : this.beginInterlude(room, "finale");
@@ -483,12 +584,12 @@ export class RoomManager {
     // `{S}` is the subject's alias — substituted for display only, exactly like `{P1}`.
     const text = definition.kind === "spotlight" && definition.subjectId
       ? definition.text.replace(/\{S\}/g, room.players.find((p) => p.id === definition.subjectId)?.alias ?? "someone")
-      : this.replacePlaceholders(room, definition.text, definition.onlyPlayers);
+      : this.replacePlaceholders(room, definition.text, definition.subjects ?? definition.onlyPlayers);
     const round: LiveRound = { ...definition, text, id: `${room.id}-${++room.roundIndex}`, index: room.roundIndex, startedAt,
       closesAt: startedAt + lengthMs, responses: new Map(),
       ...(definition.kind === "verdict" ? { voteOpensAt: startedAt + Math.min(this.options.verdictDiscussMs ?? VERDICT_DISCUSS_MS, lengthMs) } : {}) };
     room.round = round; room.usedIds.add(definition.prompt.id); this.changed(room);
-    this.eachSocket(room, (socket, player) => socket.emit("round", this.roundView(round, player.id)));
+    this.eachSocket(room, (socket, player) => socket.emit("round", this.guard(this.roundView(round, player.id))));
     this.schedule(room, round.closesAt - startedAt + (this.options.graceMs ?? GRACE_MS), () => this.finishRound(room));
     for (const player of room.players) if (player.isBot && (!round.onlyPlayers || round.onlyPlayers.includes(player.id))) this.scheduleBot(room, player, round);
     this.maybeComplete(room);
@@ -568,7 +669,7 @@ export class RoomManager {
     this.options.audit?.persisted(room.code, room.file, { roundId: r.roundId, playerId: player.id, clientUuid: r.clientUuid });
     if (target) { const k = PAIR_KEY(player.id, target); room.interactions.set(k, (room.interactions.get(k) ?? 0) + 1); }
     this.changed(room);
-    if (!player.isBot && player.socketId) this.io.sockets.sockets.get(player.socketId)?.emit("round", this.roundView(round, player.id));
+    if (!player.isBot && player.socketId) this.io.sockets.sockets.get(player.socketId)?.emit("round", this.guard(this.roundView(round, player.id)));
     this.maybeComplete(room);
     return { ok: true };
   }
@@ -582,6 +683,9 @@ export class RoomManager {
   private finishRound(room: Room): void {
     const round = room.round; if (room.stage !== "round" || !round) return;
     this.clearTimers(room); room.round = null; room.stage = "reveal";
+    // ROUND 4: the engine re-reads the room after EVERY round. Pure deterministic
+    // code decides what it suspects; nothing here is emitted.
+    this.refreshHypotheses(room, round.id);
     const items: NonNullable<RevealView["items"]> = [];
     if (round.kind === "shout") {
       const counts = new Map<string, { word: string; count: number }>();
@@ -616,7 +720,7 @@ export class RoomManager {
       const reveal: RevealView = { roundId: round.id, kind: "spotlight", summary: `Live on ${subjectAlias}`,
         ...(items.length ? { items } : {}), subject: subjectAlias, ...(punchline ? { punchline } : {}), holdMs };
       room.reveal = { value: reveal, endsAt: this.now() + holdMs }; this.changed(room);
-      this.io.to(room.code).emit("reveal", reveal);
+      this.io.to(room.code).emit("reveal", this.guard(reveal));
       this.schedule(room, holdMs, () => this.afterReveal(room));
       return;
     }
@@ -637,7 +741,7 @@ export class RoomManager {
         summary: winner ? `The room decided: ${alias(winner[0])}` : "Nobody voted. The room argued for nothing.",
         ...(slide ? { slide } : {}), celebrate: round.couple ?? round.prompt.coding === "couple", holdMs };
       room.reveal = { value: reveal, endsAt: this.now() + holdMs }; this.changed(room);
-      this.io.to(room.code).emit("reveal", reveal);
+      this.io.to(room.code).emit("reveal", this.guard(reveal));
       this.schedule(room, holdMs, () => this.afterReveal(room));
       return;
     }
@@ -681,6 +785,90 @@ export class RoomManager {
     }
     this.enterHeat(room, next);
   }
+  /**
+   * Recompute suspicions from the log so far (runs after every round). Any
+   * claim a suspicion has GRADUATED into is kept for the finale, where it
+   * arrives as an ordinary claim among the others.
+   */
+  private refreshHypotheses(room: Room, lastRoundId: string): void {
+    try {
+      const meta = this.meta(room);
+      const log = this.redactedLog(room).filter((r) => r.decoy !== true);
+      const signals = this.services.computeSignals(log, meta);
+      const update = updateHypotheses(signals, log, meta, room.priors, {
+        lastRoundId,
+        ...(room.testedHypothesisId ? { testedHypothesisId: room.testedHypothesisId } : {}),
+      });
+      room.hypotheses = update.hypotheses;
+      const seen = new Set(room.graduated.map((c) => c.id));
+      for (const claim of update.claims) if (!seen.has(claim.id)) { room.graduated.push(claim); seen.add(claim.id); }
+    } catch {
+      // A half-filled room cannot be scored yet; keep what we had.
+    } finally {
+      room.testedHypothesisId = undefined;
+    }
+  }
+  /**
+   * CROSS-NIGHT PRIORS. With accounts, last night's unresolved suspicions are
+   * mapped onto tonight's pseudonymous ids and quietly probed again. Nobody is
+   * told this is happening; guests simply carry nothing.
+   */
+  private loadPriors(room: Room): void {
+    const accounts = this.options.accounts;
+    if (!accounts) return;
+    const accountToPlayer = new Map<string, string>();
+    for (const player of room.players) if (player.accountId && !player.isBot) accountToPlayer.set(player.accountId, player.id);
+    if (accountToPlayer.size === 0) return;
+    const mapped = new Map<string, Hypothesis>();
+    for (const accountId of accountToPlayer.keys()) {
+      for (const prior of accounts.priors(accountId)) {
+        const subjects: string[] = [];
+        let usable = true;
+        for (const key of prior.subjects) {
+          const owner = key.split(":")[1];
+          const tonight = owner ? accountToPlayer.get(owner) : undefined;
+          if (!tonight) { usable = false; break; }
+          subjects.push(tonight);
+        }
+        if (!usable || subjects.length === 0) continue;
+        const id = `${prior.kind}-${[...subjects].sort().join("-")}`;
+        mapped.set(id, {
+          id, kind: prior.kind, subjects, status: "open", strength: prior.strength,
+          evidence: [...prior.evidence], openedAt: prior.openedAt,
+          ...(prior.lastTestedRound ? { lastTestedRound: prior.lastTestedRound } : {}),
+        });
+      }
+    }
+    room.priors = [...mapped.values()];
+    room.hypotheses = room.priors.map((h) => ({ ...h, subjects: [...h.subjects], evidence: [...h.evidence] }));
+  }
+  /** Carry tonight's unresolved suspicions into the accounts that were here. */
+  private savePriors(room: Room): void {
+    const accounts = this.options.accounts;
+    if (!accounts) return;
+    const accountOf = new Map<string, string>();
+    for (const player of room.players) if (player.accountId && !player.isBot) accountOf.set(player.id, player.accountId);
+    if (accountOf.size === 0) return;
+    const perAccount = new Map<string, StoredHypothesis[]>();
+    for (const accountId of accountOf.values()) perAccount.set(accountId, []);
+    for (const hypothesis of carryOver(room.hypotheses)) {
+      const keys = hypothesis.subjects.map((id) => {
+        const accountId = accountOf.get(id);
+        return accountId ? accountSubjectKey(accountId, id) : undefined;
+      });
+      // A guest subject cannot be found again next night, so the suspicion dies
+      // with the night rather than pointing at a stranger.
+      if (keys.some((key) => key === undefined)) continue;
+      for (const accountId of accountOf.values()) {
+        perAccount.get(accountId)?.push({
+          kind: hypothesis.kind, subjects: keys as string[], status: "unresolved",
+          strength: hypothesis.strength, evidence: [...hypothesis.evidence], openedAt: hypothesis.openedAt,
+          ...(hypothesis.lastTestedRound ? { lastTestedRound: hypothesis.lastTestedRound } : {}),
+        });
+      }
+    }
+    for (const [accountId, priors] of perAccount) accounts.setPriors(accountId, priors.slice(0, 20));
+  }
   private meta(room: Room): RoomMeta {
     return { roomId: room.id, players: room.players.map((p, i) => ({ id: p.id, alias: pseudonym(i) })), revealOptIn: room.players.filter((p) => p.consent.revealOptIn).map((p) => p.id) };
   }
@@ -695,6 +883,13 @@ export class RoomManager {
     let signals, results, digest: NightDigest, decks: Map<PlayerId, SecretCard[]>;
     try { signals = this.services.computeSignals(scoringLog, meta); } catch { signals = fallbackServices.computeSignals(scoringLog, meta); }
     try { results = this.services.computeResults(signals, scoringLog, meta); } catch { results = fallbackServices.computeResults(signals, scoringLog, meta); }
+    // ROUND 4 pay-off: suspicions that graduated tonight arrive as ORDINARY
+    // claims. (One-sided ones are private and become a Secret Card, never a
+    // public claim — the one-sided rule is unchanged.)
+    if (room.graduated.length > 0) {
+      const known = new Set(results.claims.map((c) => c.id));
+      results.claims.push(...room.graduated.filter((c) => !known.has(c.id)).map((c) => ({ ...c, subjects: [...c.subjects], evidence: [...c.evidence] })));
+    }
     // Debrief answers remain private even from the public digest and narrator.
     // Decoys DO ride the digest: pairing them with the captions is the joke.
     const publicLog = log.filter((r) => r.roundKind !== "debrief");
@@ -788,10 +983,11 @@ export class RoomManager {
     // keys — nothing about a hypothesis is ever emitted to any socket.
     if (this.options.accounts) {
       for (const player of room.players) if (player.accountId && !player.isBot) this.options.accounts.recordNight(player.accountId, room.id);
+      this.savePriors(room);
     }
     room.finale = { slides, summary }; room.stage = "finale"; this.changed(room);
-    this.io.to(room.code).emit("finale", room.finale); // public, identical on every socket
-    this.eachSocket(room, (socket, player) => { const deck = room.decks.get(player.id); if (deck) socket.emit("secrets", deck); });
+    this.io.to(room.code).emit("finale", this.guard(room.finale)); // public, identical on every socket
+    this.eachSocket(room, (socket, player) => { const deck = room.decks.get(player.id); if (deck) socket.emit("secrets", this.guard(deck)); });
   }
   private deleteRoom(room: Room): boolean {
     try { unlinkSync(room.file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false; }
