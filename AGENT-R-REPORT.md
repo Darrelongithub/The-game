@@ -2,7 +2,7 @@
 
 Branch: `arena/b866c916-the-game`
 Scope: R21, R22, R23, R24, R26, R27. **R25 skipped** by instruction.
-Base: `483121a` (Round 4 already landed).
+Base: `483121a` (Round 4 already landed). Merged with `origin/main` `8bb0219` before the merge PR.
 
 ## Commits (in order)
 
@@ -55,21 +55,34 @@ Per-round = spark secret cards / completed rounds. Per-night = nights with ≥1 
 
 The gate reuses `pairSupportCount`, `confidenceFromCount`, `CONFIDENCE_RULES.high.independentSignals` and existing `ENGINE_TUNING.support` bars. No new scoring or numerical tunable was added. `buildSecrets` also refuses spark claims below high confidence.
 
+## Merge with `origin/main`
+
+Merged `origin/main` `8bb0219` into the Round 5 branch before opening the merge
+PR. The merge preserves main's CONFESS ROUNDS, REVEAL_MODE, display finale
+theatre, Host lobby link, and local Ollama generation lane alongside R21–R27.
+The only textual conflict was `apps/web/package.json`; the combined web test
+script runs SSR, regressions, transport, authoritative, and display-theatre
+suites. `r24-session`, `spark-incidence`, and `demo-smoke` were updated to answer
+the new `confess` round kind. Post-merge spark measurement still shows zero noise
+sparks and 100% mutual-fixture spark nights; live mutual bot nights also remained
+100% after the confess-aware mutual policy.
+
 ## Tests run / output
 
 - `npm run typecheck`: passed (server, web, engine, narrator, prompts, scripts).
-- `npm run selfcheck`: **36/36**.
-- `npm test --workspace apps/server`: **75/75** (`.test-results/r27-server-suite.txt`).
-- `npm test --workspace packages/engine`: **45/45** (`.test-results/r27-engine-suite.txt`).
-- `npm test --workspace packages/prompts`: **104/104**.
-- `npm test --workspace packages/narrator`: **81/81**.
-- `npm run test --workspace apps/web`: passed — SSR **39**, UI/socket/mock/privacy regressions, transport **4/4**, authoritative **2/2**.
-- `npm run test:components`: **131/131**.
+- `npm run selfcheck`: **43/43** post-merge.
+- `npm test --workspace apps/server`: **88/88** post-merge (`.test-results/merge-server-suite.txt`).
+- `npm test --workspace packages/engine`: **60/60** post-merge (`.test-results/merge-engine-suite.txt`).
+- `npm test --workspace packages/prompts`: **117/117** post-merge.
+- `npm test --workspace packages/narrator`: **81/81** post-merge.
+- `npm run test --workspace apps/web`: passed post-merge — SSR, UI/socket/mock/privacy/confess regressions, transport **4/4**, authoritative **2/2**, display-theatre suites.
+- `npm run test:components`: **151/151** post-merge.
 - `npm run test:mock --workspace apps/web`: **56/56**.
 - `npm run build`: static export passed.
-- `npm run bundle:check`: player **145.4 KiB gzip / 150 KiB**, display **115.7 KiB / 120 KiB**.
-- `SMOKE_FAST=1 npm run smoke:verified`: passed (smoke room `4PW5`, 5 players, keys disabled).
-- Per-fix before/after logs are retained under `.test-results/r21-*`, `r22-*`, `r23-*`, `r24-*`, `r26-*`, `r27-*`.
+- `npm run bundle:check`: player **145.4 KiB gzip / 150 KiB**, display **116.8 KiB / 120 KiB** post-merge.
+- `SMOKE_FAST=1 npm run smoke:verified`: passed post-merge (smoke room `WTW9`, 5 players, keys disabled).
+- `npm run measure:sparks`: post-merge output in `.test-results/merge-spark-incidence.txt`.
+- Per-fix before/after logs are retained under `.test-results/r21-*`, `r22-*`, `r23-*`, `r24-*`, `r26-*`, `r27-*`; post-merge logs under `.test-results/merge-*`.
 
 ## Known gaps
 

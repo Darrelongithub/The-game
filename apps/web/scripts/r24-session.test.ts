@@ -41,6 +41,7 @@ function valueFor(round: RoundView, me: string, players: RoomView["players"]): R
     case "shout": return { kind: "shout", word: "vibes" };
     case "minigame": return { kind: "minigame", score: 20 };
     case "dare": case "pair_dare": return { kind: "dare", status: "done" };
+    case "confess": return { kind: "confess", yes: true };
     default: return { kind: "text", text: "The same seat remembers this answer." };
   }
 }
@@ -76,7 +77,7 @@ test("R24: real reloads reclaim guest/host seats, answers, profile and private d
       },
     },
     botDelayMs: [5, 10], revealHoldMs: 5, interludeHoldMs: 5, readyGraceMs: 1000,
-    roundTimers: { pick: 60000, text: 60000, shout: 60000, rating: 60000, ios: 60000, minigame: 60000, dare: 60000, pair_dare: 60000, debrief: 60000, spotlight: 200, verdict: 60000 },
+    roundTimers: { pick: 60000, text: 60000, shout: 60000, rating: 60000, ios: 60000, minigame: 60000, dare: 60000, pair_dare: 60000, debrief: 60000, spotlight: 200, verdict: 60000, confess: 60000 },
     graceMs: 50, verdictDiscussMs: 0,
     audit: { persisted() {}, decks(_code, _id, _players, decks) { expectedDeck = structuredClone(decks.get("p4")); } },
   });

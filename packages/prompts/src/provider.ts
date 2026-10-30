@@ -1,11 +1,12 @@
 // packages/prompts/src/provider.ts
 // TWO INDEPENDENT LANES. Code carries the night; providers only garnish.
 //
-//   Grok   (XAI_API_KEY)    → unhinged generation + one validated reveal call.
+//   Local OpenAI-compatible generation (GEN_BASE / GEN_MODEL), no key.
+//   Grok (XAI_API_KEY) → existing validated reveal call only.
 //   Gemini (GEMINI_API_KEY) → analysis (tags, debrief similarity) + narration.
 //
 // Rules this file enforces:
-//   • Each lane checks only its own key; a missing key means that lane returns
+//   • Cloud lanes check their own keys; a missing key means that lane returns
 //     `no-key` without touching the network. Nothing here ever throws.
 //   • Both lanes spend from ONE CallGuard (per room, MAX_PROVIDER_CALLS_PER_NIGHT).
 //   • 8s AbortController timeout. Refusals / 429 / timeouts return a reason so
@@ -70,6 +71,8 @@ export interface ProviderOptions {
   geminiApiKey?: string | null;
   fetchImpl?: FetchLike;
   guard?: CallGuard;
+  genBaseUrl?: string;
+  genModel?: string;
   grokBaseUrl?: string;
   geminiBaseUrl?: string;
   grokModel?: string;
@@ -224,6 +227,8 @@ export class Provider {
   private readonly xaiKey: string | null;
   private readonly geminiKey: string | null;
   private readonly fetchImpl: FetchLike | null;
+  private readonly genBaseUrl: string;
+  private readonly genModel: string;
   private readonly grokBaseUrl: string;
   private readonly geminiBaseUrl: string;
   private readonly grokModel: string;
@@ -237,6 +242,8 @@ export class Provider {
     this.geminiKey = keyOf(opts.geminiApiKey !== undefined ? opts.geminiApiKey : env.GEMINI_API_KEY);
     // The model id in contracts.ts is the contract default; XAI_MODEL lets the
     // host override it at game time without a contract change (ids drift).
+    this.genBaseUrl = (keyOf(opts.genBaseUrl) ?? keyOf(env.GEN_BASE) ?? "http://localhost:11434/v1").replace(/\/+$/, "");
+    this.genModel = keyOf(opts.genModel) ?? keyOf(env.GEN_MODEL) ?? keyOf(env.XAI_MODEL) ?? "dolphin-mistral";
     this.grokModel = opts.grokModel ?? keyOf(env.XAI_MODEL) ?? PROVIDERS.grok.generate;
     this.geminiTagModel = opts.geminiTagModel ?? resolveGeminiModel(keyOf(env.GEMINI_MODEL) ?? undefined);
     this.geminiAnalyzeModel = opts.geminiAnalyzeModel ?? resolveGeminiModel(keyOf(env.GEMINI_MODEL) ?? undefined);
@@ -256,7 +263,7 @@ export class Provider {
   // ---------- lane probes ----------
   /** Grok generation lane; reveal purpose is reserved for one validated narration request. */
   canGenerate(): boolean {
-    return this.xaiKey !== null && this.fetchImpl !== null;
+    return this.fetchImpl !== null;
   }
 
   /** Gemini lane: tagging and debrief analysis only. */
@@ -269,7 +276,7 @@ export class Provider {
   }
 
   modelFor(lane: Lane, purpose: CallPurpose = "generate"): string {
-    if (lane === "grok") return this.grokModel;
+    if (lane === "grok") return purpose === "generate" ? this.genModel : this.grokModel;
     if (purpose === "reveal") throw new Error("Gemini finale narration is disabled; use templates/Grok.");
     if (purpose === "tag") return this.geminiTagModel;
     return this.geminiAnalyzeModel;
@@ -279,7 +286,10 @@ export class Provider {
   async grok(req: GrokRequest): Promise<LaneResult> {
     const purpose = req.purpose ?? "generate";
     const lane: Lane = "grok";
-    if (this.xaiKey === null || this.fetchImpl === null) return { ok: false, lane, reason: "no-key", requests: 0 };
+    const generating = purpose === "generate";
+    const baseUrl = generating ? this.genBaseUrl : this.grokBaseUrl;
+    const key = generating ? null : this.xaiKey;
+    if ((!generating && key === null) || this.fetchImpl === null) return { ok: false, lane, reason: "no-key", requests: 0 };
     if (!this.guard.tryConsume(req.room, purpose)) return { ok: false, lane, reason: "budget", requests: 0 };
 
     const messages = req.messages.map((m) => ({
@@ -287,25 +297,25 @@ export class Provider {
       content: redactAliases(m.content, req.aliases),
     }));
     const baseBody: Record<string, unknown> = {
-      model: req.model ?? this.grokModel,
+      model: req.model ?? this.modelFor(lane, purpose),
       messages,
       temperature: req.temperature ?? 0.9,
       max_tokens: req.maxTokens ?? 1_600,
       stream: false,
     };
 
-    let result = await this.postJsonLane(lane, `${this.grokBaseUrl}${GROK_ENDPOINT}`, {
+    let result = await this.postJsonLane(lane, `${baseUrl}${GROK_ENDPOINT}`, {
       body: req.json === false ? baseBody : { ...baseBody, response_format: { type: "json_object" } },
-      key: this.xaiKey,
+      key,
       timeoutMs: req.timeoutMs ?? this.timeoutMs,
     });
 
     // Some model builds reject `response_format`; retry once without it and
     // strict-parse the fenced JSON instead. Retries share the consumed slot.
     if (!result.ok && result.status === 400 && req.json !== false) {
-      result = await this.postJsonLane(lane, `${this.grokBaseUrl}${GROK_ENDPOINT}`, {
+      result = await this.postJsonLane(lane, `${baseUrl}${GROK_ENDPOINT}`, {
         body: baseBody,
-        key: this.xaiKey,
+        key,
         timeoutMs: req.timeoutMs ?? this.timeoutMs,
       });
     }

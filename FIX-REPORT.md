@@ -41,15 +41,36 @@ The gate reuses `pairSupportCount`, `confidenceFromCount`,
 high confidence, so a downgraded/legacy claim cannot become an announcement.
 Deterministic replay is unchanged.
 
-### Final validation on this branch
+### Merge with `origin/main` (`8bb0219`) and post-merge validation
+
+Round 5 was merged with the latest `main` before opening the merge PR. The merge
+keeps both lanes: R21–R27 remediation and main's CONFESS ROUNDS, REVEAL_MODE,
+public-display finale theatre, Host lobby link, and local Ollama generation lane.
+The only textual conflict was `apps/web/package.json`; the web test script now
+runs SSR, regressions, transport, authoritative, and display-theatre suites.
+Harnesses were updated for the new `confess` round kind (`r24-session`,
+`spark-incidence`, `demo-smoke`). The R27 gate still reuses the existing
+confidence machinery; main's `confession` component is evidence-only and cannot
+lift a spark alone.
+
+Post-merge `npm run measure:sparks` (`.test-results/merge-spark-incidence.txt`):
+
+| Cohort | Policy | Nights | Rounds | Spark cards | Cards/round | Nights with spark |
+|---|---:|---:|---:|---:|---:|---:|
+| fixtures | noise | 200 | 4400 | 0 | 0 | 0% |
+| fixtures | mutual | 10 | 140 | 20 | 0.142857 | 100% |
+| live bots | noise | 30 | 930 | 0 | 0 | 0% |
+| live bots | mutual | 10 | 310 | 20 | 0.064516 | 100% |
+
+Post-merge validation:
 
 - `npm run typecheck`: passed (server, web, engine, narrator, prompts, scripts).
-- `npm run selfcheck`: **36/36**.
-- Server: **75/75**. Engine: **45/45**. Prompts: **104/104**. Narrator: **81/81**.
-- Web: SSR **39**, UI/socket/mock/privacy regressions, transport **4/4**, authoritative **2/2**.
-- `npm run test:components`: **131/131**. `npm run test:mock --workspace apps/web`: **56/56**.
-- `npm run build`: static export passed. `npm run bundle:check`: player **145.4 KiB gzip / 150 KiB**, display **115.7 KiB / 120 KiB**.
-- `SMOKE_FAST=1 npm run smoke:verified`: passed (smoke room `4PW5`, 5 players, keys disabled).
+- `npm run selfcheck`: **43/43**.
+- Server: **88/88**. Engine: **60/60**. Prompts: **117/117**. Narrator: **81/81**.
+- Web: SSR, UI/socket/mock/privacy/confess regressions, transport **4/4**, authoritative **2/2**, display-theatre suites passed.
+- `npm run test:components`: **151/151**. `npm run test:mock --workspace apps/web`: **56/56**.
+- `npm run build`: static export passed. `npm run bundle:check`: player **145.4 KiB gzip / 150 KiB**, display **116.8 KiB / 120 KiB**.
+- `SMOKE_FAST=1 npm run smoke:verified`: passed (smoke room `WTW9`, 5 players, keys disabled).
 
 ### Known gaps / release disposition
 
@@ -343,7 +364,9 @@ now 420s.
 
 ## R1–R20 remediation carry-forward — adapted to current `main`
 
-This section records the R1–R20 status after reconciling with the latest `main` (the ROUND 4 report above is historical). The merge adapts the remediation alongside main's reveal-ready gate and demo-room flow, preserving both sets of behavior rather than choosing one side wholesale. The merged contract, server, UI, and tests were revalidated together.
+This section records the R1–R20 branch status (the ROUND 4 report above is historical). **The branch is now reconciled with `main`.** The ROUND 4 ready-gate and demo-room features were adapted together with the R1–R20 remediation instead of taking either side wholesale: the shared contract is the additive union (`profile`/`role`/structured rating intent **plus** `ready`/`demo`/`impersonatedBy`), the server keeps the ready gate and demo seats while still requiring the 18+ profile for an ordinary room, the web entry collects the profile and consents and also offers the demo-room toggle, rating/IOS keeps the server-assigned trait/target (no silent client defaults), and narrator reveals stay Grok-only (Gemini is analysis-only).
+
+Re-validated after the merge (Node 22.22.3): `selfcheck` 36/36; engine 40/40; prompts 104/104; narrator 81/81; server 68/68; web typecheck + 39 SSR checks + 56 mock-flow checks + UI/socket/transport/mock/privacy regressions all passing; jsdom component suite 151/151 (including the ROUND 4 ready-screen and demo-console checks); production build, `bundle:check` (player 145.2 KiB / 150 KiB; display 115.7 KiB / 120 KiB) and `npm audit --omit=dev` (0 vulnerabilities) pass; `smoke:verified`, `smoke:demo` (42 round events, 12 finale slides) and the jsdom export smoke pass against the built server. The real-browser `test:browser` still needs a Chromium executable, and the physical-device/LAN/live-provider matrix remains outstanding (see below).
 
 ### Remediation and regression status
 
@@ -369,18 +392,73 @@ This section records the R1–R20 status after reconciling with the latest `main
 | R18 | Zero is measured and absence is not; measured-component weights renormalize, debrief has no 0.5 fallback, and high-confidence claims require at least three independent measured signal types. Golden fixtures and engine regressions pass. |
 | R19 | Removed the narrator package’s Gemini HTTP/reveal helper and exports. Gemini remains analysis-only; `GEMINI_MODEL` uses the shared resolver for Gemini call sites. Grok reveal integration and a negative Gemini-reveal provider regression pass. Contract and spec wording now agree. |
 | R20 | Engine code remains deterministic and wall-clock independent. Monte Carlo is bounded by `MC_SIMULATIONS`; noise tests are summarized per night. Same-log results are deeply equal, including restart replay. The 11-player/1,320-pick performance guard passes. |
+| R21 | **CONFESS ROUNDS (the second voice).** Every night now runs two voices: group questions ("Who here…", everyone picks someone) and confessions ("Have you ever…", everyone answers about themselves, privately). Contract deltas are owner-approved; `STYLE_MIX` balances the flexible question slots to 50/50, each heat phase deals two confessions, and a twin links a group seed to its confess seed 1–3 rounds later. Warm reveals are counts only, spicy reveals attribute YES answers only, a no is never named in any tier, and a missing phone never becomes a no. Engine, prompts, server and web regressions cover all of it. |
 
-### Validation on this branch
+### CONFESS ROUNDS — what changed and how it is held
 
-- `npm ci`: passed; 0 audit vulnerabilities.
-- `npm run typecheck`: passed across server, web, engine, narrator, and prompts after the final source edits.
-- Server: **68/68** tests passed, including demo-mode, reveal-ready gate, full-game, restart replay, protocol, provider integration, account, and bot coverage.
-- Engine: **40/40** passed. Same-log results, digest and secrets are deeply equal. Latest 11-player fixture: **1,057.1 ms**, below the 2-second regression ceiling. Prior recorded baseline: **278.8 ms**; the current result is slower, though still within the guard.
-- Prompts: **104/104** passed. Narrator: **81/81** passed. Web: **39 SSR checks**, all UI/socket/mock/privacy regressions, and **1/1** transport regression passed.
-- `npm run selfcheck`: **36 checks passed**.
-- `SMOKE_FAST=1 npm run smoke:verified`: passed; phases, public finale equality, secret ownership/limits, duplicate persistence, active/finale resume, dare pass, deletion, and live moments verified with keys disabled.
-- `npm run smoke:demo`: passed against the live server — 44 round events, 24 reveals, 48 ready-gate snapshots, and an 11-slide finale.
+**The two voices.** A group question captures the room's *perception* ("Who here
+would you set up with someone else in this room?"). A confession captures
+*reality*: the same "Have you ever…" question on every phone, answered about the
+respondent, privately. `PromptStyle = "group" | "confess"` tags every seed and
+every generated prompt; `STYLE_MIX = { group: 0.5, confess: 0.5 }` and a
+deterministic, round-index-seeded selector (error diffusion) keeps the flexible
+question slots inside ±1 of that mix for a whole night.
+
+**The round.** `RoundKind` gained `"confess"`, `ROUND_TIMERS_MS.confess` is
+20s, and `ResponseValue` gained `{ kind: "confess"; yes: boolean; target?:
+PlayerId; note?: string }`. There is no skip: a phone that never answers is
+counted as MISSING and is never converted to a "no". A confess answer that
+names a target feeds the pair machinery as the new `"confession"` component —
+evidence with weight 0, so a confession alone never graduates a claim.
+
+**The reveal (secrecy is structural).** `apps/server/src/confessReveal.ts` never
+sees a `PlayerId`; it is handed aliases or nothing, so a warm reveal cannot name
+anyone even by accident.
+
+| tier | phases | shown |
+|---|---|---|
+| warm | warmup | `N of M said yes.` only — no names, no hints; notes as "someone wrote: …" |
+| spicy | spicy / deep / dare | YES answers by alias, yes-notes attributed; NO is a NUMBER; a note attached to a no stays anonymous; `K stayed quiet.` when phones missed it |
+
+The reveal goes through the ready gate like every other reveal.
+
+**The payoff.** A group seed may carry `twinId`; the director schedules its
+confession 1–3 rounds later, at most once per phase, and — when it is due — deals
+it as its own round, so the two questions really do sit one to three rounds
+apart. At the finale, `confessMismatches` compares the room's guess with the
+confessions and the night gets one extra slide: "The room was sure it was Player
+3. Two people just said yes." The line names the room's *guess* and counts the
+yeses; no-attribution is absolute even there.
+
+**Gen lane.** Generation requests carry the style, and the generator's system
+prompt teaches both registers: second-person self-report ("Have you ever…") plus
+4–6 confession few-shots loaded from the bank at runtime alongside the group
+ones (a register without examples produces off-voice output).
+
+**Tests added (each fails on the old contract).** Contracts/validation
+(`isResponseValue`, `targetsOther`), engine (`chooseStyle` mix within ±1 over a
+12-round night, twin planning window, tally/missing, yes-rate, `"confession"`
+component, mismatch line), prompts (every question seed tagged, ten confession
+seeds per phase in the second voice, twin pairs, both voices in the gen system
+prompt with ≥4 bank few-shots), server (`confess-rounds.test.ts`: private
+answers with a missing phone, warm counts-only payload with no id/alias, spicy
+yeses-only attribution with a no never named in any tier, anonymous-vs-attributed
+notes, twin served inside its window plus the mismatch slide, and same-script
+determinism), web (`confess.tsx`: the answer sheet with no skip, "no" drops any
+target, warm reveal names nobody, spicy reveal never names a no).
+
+### Validation on this branch (with CONFESS ROUNDS)
+
+- `npm run typecheck`: passed across server, web, engine, narrator, and prompts.
+- Server: **73/73** tests passed, including the new `confess-rounds` suite (private answers with a missing phone, warm counts-only payload, spicy yeses-only attribution, anonymous-vs-attributed notes, twin window + mismatch slide, same-script determinism), demo-mode, reveal-ready gate, full-game, restart replay, protocol, provider integration, and bot coverage.
+- Engine: **55/55** passed. Same-log results, digest, secrets and the style/twin plans are deeply equal; `planStyles(12)` stays inside ±1 of `STYLE_MIX`.
+- Prompts: **117/117** passed (including the local-Ollama generation lane merged from `main`) — every question seed is tagged with a voice, each heat phase carries ten confession seeds in the second voice, twin pairs link different voices, and the gen system prompt ships both registers with ≥4 bank few-shots. Narrator: **81/81**.
+- Web: **39 SSR checks**, **151** component checks, **56** mock-flow checks, all UI/socket/transport/mock/privacy regressions, **1/1** transport regression, plus the new **4** confess UI regressions (answer sheet with no skip, "no" drops the target, warm names nobody, spicy never names a no).
+- `npm run selfcheck`: **43 checks passed** (includes `STYLE_MIX` sums to 1 and the twelve round kinds).
+- `npm run smoke:demo`: passed against a live local server — **51 round events, 31 reveals, 62 ready-gate snapshots, 11 finale slides**.
+- Merge with `main` (which landed the `GEN_BASE`/`GEN_MODEL` local-Ollama lane in `packages/prompts`): one import conflict in `generate.ts`, resolved by keeping BOTH lanes — the Ollama provider changes stay untouched and the two-voice register block rides on top. Nothing from `main` was reverted; prompt suite at 117 proves both survive.
 - `npm run build`: passed (Next static export). `npm run bundle:check`: player **145.2 KiB gzip / 150 KiB**; display **115.7 KiB / 120 KiB**.
+- Not re-run in this session: the private-oracle `smoke:verified` (needs an external oracle) and the on-device checklist below.
 
 ### Release disposition: **NO-GO / REQUIRES HUMAN**
 
@@ -388,7 +466,7 @@ Automated coverage is green, but no real Android or iPhone device results have b
 
 1. **0:00–1:00** — Open the hosted game on Android Chrome, then iPhone Safari. Confirm layout, 18+ profile and required consent gates; exercise the private-card opt-out.
 2. **1:00–3:00** — One phone creates a room and opens the public display; three additional phones join by code/link. Confirm the display has no player controls or private card content.
-3. **3:00–6:00** — Start the game. Submit pick, rating, IOS, text, and a dare pass with a reason. Confirm assigned rating/IOS intent cannot be changed and all phones advance without refresh.
+3. **3:00–6:00** — Start the game. Submit pick, rating, IOS, text, and a dare pass with a reason. Confirm assigned rating/IOS intent cannot be changed and all phones advance without refresh. Answer at least one confession with Yes, one with No plus a note, and leave one phone untouched: the warmup reveal must be a bare count that names nobody, and the hot reveal must name the yeses only — never the person who said no, and never the phone that stayed quiet.
 4. **6:00–8:00** — Background one phone, return, and verify authenticated reconnect restores the active round without duplicate submission. Rotate one device to portrait/landscape and check the display remains legible.
 5. **8:00–10:00** — Finish through the finale. Confirm all player phones show the same public finale, only each eligible owner sees their private deck, and delete-room removes the room from all clients.
 
@@ -396,3 +474,8 @@ Automated coverage is green, but no real Android or iPhone device results have b
 |---|---|---|---|---|
 | Android | _pending_ | _pending_ | **REQUIRES HUMAN** | _pending_ |
 | iPhone | _pending_ | _pending_ | **REQUIRES HUMAN** | _pending_ |
+
+
+**AGENT H1 — REVEAL QUEUE (`REVEAL_MODE`, server, DEFAULT-OFF)** — `"round"` is today's night byte-for-byte; `"finale"` suppresses every per-round reveal, appends the already-computed payload to an append-only `*.reveals.log` night queue beside the room log (0600, restart-safe, deterministic: same log ⇒ same queue, order from round index), bypasses the ready gate mid-game (rounds advance on the gate's grace exactly as if the reveal had fired — the gate itself is untouched and still protects the finale), and at finale start delivers the whole reel, in round order, as `reveal` events on the DISPLAY channel only, immediately before `finale` (a display joining mid-finale is caught up the same way; phones never see the queue and the phone finale is unchanged). Unset/empty/misspelt env ⇒ `"round"`. Proof: `apps/server/test/reveal-mode.test.ts` 8/8 (fails on pre-feature code: missing export), server suite 76/76 (68 pre-existing untouched), engine 40/40, prompts 104/104, narrator 81/81, web SSR 39/39 + transport 1/1, `npm run typecheck` clean, `npm run selfcheck` 36/36.
+- Agent H3 — Added lobby Host screen labeling and link copying (with LAN fallback), preserving public-display and invite actions; SSR, web/component tests, build, bundle check, and selfcheck (43/43) passed.
+- H2 FINALE THEATRE: display-only NEXT/arrow sequence buffers H1’s finale-phase `reveal` stream (or accepts an ordered array), reuses public reveal markup, is instant/no-confetti, and hands off to unchanged finale slides; H1 is merged and a real 31-reveal night verified order, reconnect and phone-finale equality; selfcheck 43/43, server 81/81, web/SSR, 151 component checks, typecheck, build/bundle and verified smoke passed (the older base’s flaky pair-dare assertion was revised upstream).

@@ -90,7 +90,7 @@ interface NightOptions {
 
 const TINY: Partial<Record<RoundView["kind"], number>> = {
   pick: 700, shout: 700, minigame: 700, rating: 700, ios: 700, text: 700,
-  dare: 700, pair_dare: 700, debrief: 700, spotlight: 700, verdict: 700,
+  dare: 700, pair_dare: 700, debrief: 700, spotlight: 700, verdict: 700, confess: 300,
 };
 
 /**
@@ -108,6 +108,7 @@ const submitValue = (socket: Client, me: string, round: RoundView, ids: string[]
     : ids[0] === me ? ids[1]! : ids[1] === me ? ids[2]! : others[0]!;
   let value: ResponseValue;
   switch (round.kind) {
+    case "confess": value = { kind: "confess", yes: true }; break;
     case "pick": case "verdict": value = { kind: "pick", target }; break;
     case "shout": value = { kind: "shout", word: "chaos" }; break;
     case "rating": value = { kind: "rating", trait: round.trait!, about: round.about!, value: 9 }; break;

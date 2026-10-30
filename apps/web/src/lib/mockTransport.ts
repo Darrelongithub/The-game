@@ -966,6 +966,9 @@ function autoAnswer(
       return { kind: "text", text: "Watching the door, honestly." };
     case "verdict":
       return { kind: "pick", target: other };
+    case "confess":
+      // A mock phone confesses about itself — never about anyone else.
+      return { kind: "confess", yes: true, ...(spec ? { note: "Only in the demo." } : {}) };
     default:
       return spec ? null : null;
   }
@@ -1002,6 +1005,33 @@ function buildReveal(
       celebrate: spec?.coding === "couple",
       holdMs: 8000,
       ...(winner ? { slide: { beat: "land" as const, flavor: "group" as const, title: name(winner[0]), body: `${winner[1]} of ${total} said it out loud.`, numbers: { votes: winner[1], of: total, share: winner[1] / total } } } : {}),
+    };
+  }
+  if (round.kind === "confess") {
+    // Same secrecy rules as the server: warm is counts only, spicy attributes
+    // YES answers only, and a "no" is a number forever.
+    const warm = round.phase === "warmup";
+    const answers = [...(spec?.botAnswers ?? []), { who: you, value: mine }];
+    const yes = answers.filter((a) => a.value.kind === "confess" && a.value.yes);
+    const notes = answers.flatMap((a) => {
+      if (a.value.kind !== "confess" || !a.value.note) return [];
+      const attributable = !warm && a.value.yes;
+      return [{ ...(attributable ? { alias: name(a.who) } : {}), text: a.value.note }];
+    });
+    return {
+      roundId: round.roundId,
+      kind: "confess",
+      summary: warm ? `${yes.length} of ${answers.length} said yes.` : `${yes.length} of ${answers.length} said yes.`,
+      holdMs: 4200,
+      confess: {
+        tier: warm ? "warm" : "spicy",
+        yes: yes.length,
+        no: answers.length - yes.length,
+        of: answers.length,
+        missing: 0,
+        ...(warm ? {} : { attributed: yes.map((a) => ({ alias: name(a.who) })) }),
+        ...(notes.length > 0 ? { notes } : {}),
+      },
     };
   }
   const items = (spec?.botAnswers ?? []).map((b) => ({
@@ -1042,6 +1072,8 @@ function describe(value: ResponseValue, name: (id: PlayerId) => string): string 
       return `${value.score} taps`;
     case "dare":
       return value.status === "passed" ? `passed — “${value.reason}”` : "did it";
+    case "confess":
+      return value.yes ? "said yes" : "said no";
     default:
       return "";
   }

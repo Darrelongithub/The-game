@@ -87,6 +87,7 @@ async function main(): Promise<void> {
       : round.kind === "ios" ? { kind: "ios" as const, about: round.about!, value: 5 }
       : round.kind === "minigame" ? { kind: "minigame" as const, score: 22 }
       : round.kind === "dare" || round.kind === "pair_dare" ? { kind: "dare" as const, status: "done" as const }
+      : round.kind === "confess" ? { kind: "confess" as const, yes: true }
       : { kind: "text" as const, text: "One laptop, whole night." };
     host.emit("submit", { roundId: round.roundId, clientUuid: `host-${round.roundId}`, value }, () => {});
   });

@@ -9,7 +9,7 @@ import {
   SPOTLIGHT_REVEAL_MS, TRAITS, VERDICT_DISCUSS_MS, VERDICT_REVEAL_MS, pseudonym,
   type ClientToServerEvents, type Consent, type FinaleSlide, type FinaleView, type InterludeView,
   type Claim, type Hypothesis, type JoinReply, type LogRecord, type NightDigest, type Phase, type PlayerId, type Prompt, type PromptCoding, type ProfileAnswers,
-  type ResponseValue, type RevealView, type RoomMeta, type RoomView, type RoundKind,
+  type PromptStyle, type ResponseValue, type RevealView, type RoomMeta, type RoomView, type RoundKind,
   type RoundView, type SecretCard, type SecretDeckView, type ServerToClientEvents,
 } from "../../../packages/shared/src/contracts.ts";
 import { isAlias, isRoomCode, playerCountOk, validSubmit } from "../../../packages/shared/src/validate.ts";
@@ -24,12 +24,94 @@ import {
   assertNoHypothesisLeak, carryOver, emptyDirectorState, planRound, recordSelection, updateHypotheses,
   type DirectorState,
 } from "../../../packages/engine/src/director.ts";
+import {
+  chooseStyle, confessMismatches, emptyStyleServed, isStyleQuestionKind, planTwin, recordStyle, styleDrift, twinDue,
+  type StyleServed, type TwinLink, type TwinPlan,
+} from "../../../packages/engine/src/confess.ts";
+import { buildConfessReveal, confessSummary, confessTierFor } from "./confessReveal.ts";
 
 type SocketData = { roomCode?: string; playerId?: string; display?: boolean };
 const displayChannel = (code: string): string => `display:${code}`;
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 type GameIO = Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
-type Stage = "lobby" | "round" | "ready" | "reveal" | "interlude" | "finale-building" | "finale" | "deleted";
+/**
+ * `queued` is REVEAL_MODE=finale's mid-game beat: the round closed, its reveal
+ * went to the night queue instead of a screen, and the night advances on the
+ * gate's grace timer exactly as if the reveal had fired. Nothing is emitted.
+ */
+type Stage = "lobby" | "round" | "ready" | "queued" | "reveal" | "interlude" | "finale-building" | "finale" | "deleted";
+
+// ---------------------------------------------------------------------------
+// REVEAL_MODE (env, DEFAULT-OFF)
+//   "round"  — today's night, byte-for-byte: every round closes into the ready
+//              gate and its reveal plays on every phone and the display.
+//   "finale" — per-round reveals are SUPPRESSED and QUEUED; the night's whole
+//              reveal reel plays on the DISPLAY role at the finale. Phones are
+//              untouched: no per-round reveals, and the phone finale is
+//              identical to a "round" night.
+// ---------------------------------------------------------------------------
+export type RevealMode = "round" | "finale";
+
+/** One night-queue line: the reveal a round WOULD have shown, in round order. */
+export interface QueuedReveal {
+  /** 1-based round index within the night — the queue's sort key. */
+  index: number;
+  roundId: string;
+  reveal: RevealView;
+}
+
+let warnedRevealMode = false;
+/**
+ * Parse the REVEAL_MODE env value. Anything unusable — unset, empty, a typo —
+ * falls back to "round", so a bad env line can never change a game night.
+ */
+export function resolveRevealMode(value: unknown): RevealMode {
+  if (typeof value !== "string" || value.trim() === "") return "round";
+  const mode = value.trim().toLowerCase();
+  if (mode === "finale") return "finale";
+  if (mode !== "round" && !warnedRevealMode) {
+    warnedRevealMode = true;
+    console.warn(`REVEAL_MODE="${value}" is not "round" or "finale"; using "round".`);
+  }
+  return "round";
+}
+
+/** The night queue lives beside the room log, 0600, append-only JSON lines.
+ *  It deliberately does NOT use the `.jsonl` room-log suffix: only room logs
+ *  are room logs, and every purge/scan in this file must stay unambiguous. */
+export const revealQueueFile = (file: string): string => file.replace(/\.jsonl$/u, ".reveals.log");
+
+const isQueuedReveal = (value: unknown): value is QueuedReveal => {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as QueuedReveal;
+  const reveal = entry.reveal as RevealView | undefined;
+  return typeof entry.roundId === "string" && entry.roundId.length > 0 &&
+    Number.isInteger(entry.index) && entry.index > 0 &&
+    !!reveal && typeof reveal === "object" &&
+    reveal.roundId === entry.roundId && typeof reveal.summary === "string" &&
+    typeof reveal.holdMs === "number" && Number.isFinite(reveal.holdMs) && reveal.holdMs >= 0;
+};
+
+/**
+ * DETERMINISM: the queue is a pure function of its own log. Lines are
+ * re-ordered into round order, an interrupted/doubled append is de-duplicated
+ * by roundId (first index wins) and unreadable lines are dropped. Feeding the
+ * same file in twice — or in a different line order — yields the same queue,
+ * which is what makes a mid-night restart and a replay agree.
+ */
+export function canonicalQueuedReveals(lines: readonly string[]): QueuedReveal[] {
+  const byRound = new Map<string, QueuedReveal>();
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let parsed: unknown;
+    try { parsed = JSON.parse(trimmed); } catch { continue; }
+    if (!isQueuedReveal(parsed)) continue;
+    const previous = byRound.get(parsed.roundId);
+    if (!previous || parsed.index < previous.index) byRound.set(parsed.roundId, parsed);
+  }
+  return [...byRound.values()].sort((a, b) => a.index - b.index || a.roundId.localeCompare(b.roundId));
+}
 interface Player {
   id: string; alias: string; consent: Consent; profile: ProfileAnswers; secret: string; isBot: boolean; connected: boolean; socketId?: string;
   /** A pending versioned resume is bound to a client-generated secret nonce. */
@@ -57,6 +139,8 @@ interface Definition {
    * round view still shows ordinary text — nothing points at a suspicion.
    */
   subjects?: string[];
+  /** true when this round's slot was style-eligible (the 50/50 counted it) */
+  styleEligible?: boolean;
 }
 /** Heat-phase dealing state: round slots first, then the live moments. */
 interface PhasePlan { phase: HeatPhase; slots: RoundKind[]; live: RoundKind[] }
@@ -99,6 +183,23 @@ interface Room {
    * contains player ids — nothing private.
    */
   pendingReveal?: RevealView; ready: Set<string>; readyClosesAt?: number;
+  /**
+   * REVEAL_MODE=finale: tonight's suppressed reveals, in round order, exactly
+   * as they would have played. Backed one-for-one by an append-only JSON line
+   * in `.reveals.log`, so a restart re-loads the same reel.
+   */
+  revealQueue: QueuedReveal[];
+  /**
+   * CONFESS ROUNDS — THE 50/50. Question rounds served per voice, so the
+   * selector can balance the night to STYLE_MIX (±1, deterministic).
+   */
+  styleServed: StyleServed;
+  /** CONFESS ROUNDS — scheduled confess twins (perception → reality), same phase only. */
+  twins: { plan: TwinPlan; phase: HeatPhase }[];
+  /** the phase that already consumed its one twin slot */
+  twinPhase?: HeatPhase;
+  /** group seed ↔ confess seed pairs actually served tonight (the payoff input) */
+  twinLinks: TwinLink[];
   /** ROUND 4 demo room: the host plays every seat from one laptop. */
   demo: boolean; demoSpeed: number;
   timer?: ReturnType<typeof setTimeout>; botTimers: Set<ReturnType<typeof setTimeout>>;
@@ -106,6 +207,12 @@ interface Room {
 export interface GameOptions {
   dataDir: string;
   services?: GameServices;
+  /**
+   * REVEAL_MODE. "round" (default, also what an unset/invalid `REVEAL_MODE`
+   * env value means) is today's night; "finale" suppresses and queues every
+   * per-round reveal and plays the reel on the display at the finale.
+   */
+  revealMode?: RevealMode;
   /** ROUND 4 identity store. Absent = guest-only night, identical gameplay. */
   accounts?: AccountStore;
   now?: () => number;
@@ -131,6 +238,11 @@ export interface GameOptions {
      * without exposing any of it on the wire.
      */
     directed?(roomCode: string, round: { mode: string; dimension: string; subjects: string[]; promptId: string; hypothesisId?: string }): void;
+    /**
+     * INTERNAL test observer: which VOICE a question round was dealt in, and
+     * whether it was a scheduled twin. Never emitted to any client.
+     */
+    styled?(roomCode: string, round: { roundIndex: number; style: PromptStyle; kind: RoundKind; promptId: string; twin?: { groupPromptId: string; groupRoundIndex: number; dueAt: number } }): void;
     decks(roomCode: string, roomId: string, players: string[], decks: ReadonlyMap<string, SecretDeckView>, results: import("../../../packages/shared/src/contracts.ts").Results): void;
   };
 }
@@ -184,6 +296,11 @@ function canonicalValue(value: ResponseValue): ResponseValue {
     case "rating": return { kind: "rating", trait: value.trait, about: value.about, value: value.value };
     case "ios": return { kind: "ios", about: value.about, value: value.value };
     case "minigame": return { kind: "minigame", score: value.score };
+    case "confess": return {
+      kind: "confess", yes: value.yes,
+      ...(value.target !== undefined ? { target: value.target } : {}),
+      ...(value.note !== undefined ? { note: value.note } : {}),
+    };
     case "dare": return value.status === "passed" ? { kind: "dare", status: "passed", reason: value.reason } : { kind: "dare", status: "done" };
   }
 }
@@ -194,6 +311,9 @@ function redactValue(value: ResponseValue, players: Player[]): ResponseValue {
   if (value.kind === "text") return { ...value, text: pseudonymizeText(value.text, players) };
   if (value.kind === "shout") return { ...value, word: pseudonymizeText(value.word, players) };
   if (value.kind === "dare" && value.reason) return { ...value, reason: pseudonymizeText(value.reason, players) };
+  // A confess NOTE is free text too: an alias typed into it must be scrubbed
+  // before anything downstream (digest, reveal copy, providers) sees it.
+  if (value.kind === "confess" && value.note) return { ...value, note: pseudonymizeText(value.note, players) };
   return { ...value };
 }
 function asSafePrompt(x: unknown, phase: HeatPhase): x is Prompt {
@@ -201,10 +321,12 @@ function asSafePrompt(x: unknown, phase: HeatPhase): x is Prompt {
   const p = x as Prompt;
   return typeof p.id === "string" && p.id.length > 0 && p.phase === phase &&
     ["bank", "host", "grok"].includes(p.source) &&
-    ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare"].includes(p.kind) &&
+    ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare", "confess"].includes(p.kind) &&
     typeof p.text === "string" && p.text.trim().length > 0 && p.text.length <= 160 && validPlaceholders(p.text) &&
     Array.isArray(p.measures) && p.measures.length > 0 && p.measures.every((m) => typeof m === "string" && m.length > 0) &&
-    ["couple", "friendship", "trust", "friction", "tease", "rivalry", "status", "neutral"].includes(p.coding) && typeof p.asksTarget === "boolean";
+    ["couple", "friendship", "trust", "friction", "tease", "rivalry", "status", "neutral"].includes(p.coding) && typeof p.asksTarget === "boolean" &&
+    (p.style === undefined || p.style === "group" || p.style === "confess") &&
+    (p.twinId === undefined || typeof p.twinId === "string");
 }
 
 export class RoomManager {
@@ -212,9 +334,15 @@ export class RoomManager {
   private readonly services: GameServices;
   private readonly now: () => number;
   private readonly sweepTimer: ReturnType<typeof setInterval>;
+  /**
+   * REVEAL_MODE for this process. An explicit option wins (tests, embeddings);
+   * otherwise the env var decides, and an unusable value is "round".
+   */
+  readonly revealMode: RevealMode;
   constructor(private readonly io: GameIO, private readonly options: GameOptions) {
     this.services = options.services ?? integratedServices;
     this.now = options.now ?? Date.now;
+    this.revealMode = resolveRevealMode(options.revealMode ?? process.env.REVEAL_MODE);
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
     this.restore();
     this.purge();
@@ -235,8 +363,9 @@ export class RoomManager {
     room.players.forEach((p) => { p.secret = ""; p.alias = ""; p.resumeRetry = undefined; }); room.players.length = 0;
     room.round = null; room.queue = []; room.custom = []; room.pair = undefined; room.reveal = undefined; room.interlude = undefined; room.finale = undefined;
     room.currentHeat = undefined; room.pendingHeatDown = undefined; room.spotlighted.clear(); room.lastSubject = undefined;
-    room.ready.clear(); room.pendingReveal = undefined; room.readyClosesAt = undefined;
+    room.ready.clear(); room.pendingReveal = undefined; room.readyClosesAt = undefined; room.revealQueue.length = 0;
     room.hypotheses.length = 0; room.priors.length = 0; room.director = emptyDirectorState(); room.plan = undefined; room.testedHypothesisId = undefined;
+    room.styleServed = emptyStyleServed(); room.twins = []; room.twinPhase = undefined; room.twinLinks = [];
     room.provider = new BankPromptProvider();
   }
   private persistRoom(room: Room): void {
@@ -267,7 +396,10 @@ export class RoomManager {
         const provider = this.services.createPromptProvider({ roomId: state.id });
         const room: Room = { id: state.id, code: state.code, createdAt, lastActivity, file, hostId: state.hostId, players,
           phase: "lobby", stage: "lobby", seq: records.length + 1, nextPlayer: Math.max(Number(state.nextPlayer) || 2, players.length + 1), roundIndex: records.reduce((max, r) => Math.max(max, Number(r.roundId.match(/(\d+)$/u)?.[1] ?? 0)), 0), dareCount: records.filter(r => r.roundKind === "dare").length,
-          provider, prepared: false, usedIds: new Set(records.map(r => r.promptId)), custom: [], log: records, queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(state.id), botTimers: new Set(), hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), demo: false, demoSpeed: 1 };
+          provider, prepared: false, usedIds: new Set(records.map(r => r.promptId)), custom: [], log: records, queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(state.id), botTimers: new Set(), hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), revealQueue: [], styleServed: emptyStyleServed(), twins: [], twinLinks: [], demo: false, demoSpeed: 1 };
+        // REVEAL_MODE=finale: the night queue is restored BEFORE the finale runs,
+        // so a restart mid-night replays the reel intact rather than losing it.
+        room.revealQueue = this.loadRevealQueue(file);
         this.rooms.set(room.code, room);
         if (records.length > 0) void this.finale(room);
       } catch { /* Invalid metadata or partial logs are ignored. */ }
@@ -426,6 +558,10 @@ export class RoomManager {
       if (room.round) socket.emit("round", this.guard(this.displayView(room).round!));
       if (room.reveal) socket.emit("reveal", this.guard({ ...room.reveal.value, holdMs: Math.max(0, room.reveal.endsAt - this.now()) }));
       if (room.interlude) socket.emit("interlude", this.guard({ ...room.interlude.value, holdMs: Math.max(0, room.interlude.endsAt - this.now()) }));
+      // REVEAL_MODE=finale: a display that joins mid-finale (or reconnects after
+      // a restart) still gets the whole night's reel, in round order, before
+      // the finale. Display-only, exactly like the live delivery.
+      if (room.stage === "finale-building" || room.stage === "finale") this.deliverQueuedReveals(room, socket);
       if (room.finale) socket.emit("finale", this.guard(room.finale));
     });
     socket.on("create", (input, reply) => {
@@ -441,7 +577,7 @@ export class RoomManager {
       const demo = (input as { demo?: unknown }).demo === true;
       const room: Room = { id, code, createdAt: now, lastActivity: now, file, hostId: player.id, players: [player], phase: "lobby", stage: "lobby", seq: 1, nextPlayer: 2, roundIndex: 0, dareCount: 0,
         provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set(),
-        hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), demo, demoSpeed: 1 };
+        hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), revealQueue: [], styleServed: emptyStyleServed(), twins: [], twinLinks: [], demo, demoSpeed: 1 };
       this.rooms.set(code, room); this.persistRoom(room); socket.data = { roomCode: code, playerId: player.id }; void socket.join(code);
       ack({ ok: true, code, you: player.id, secret: player.secret, state: this.view(room, player.id) });
       this.states(room);
@@ -560,13 +696,15 @@ export class RoomManager {
       if (room.stage === "round") this.finishRound(room);
       else if (room.stage === "ready") this.showReveal(room);
       else if (room.stage === "reveal") this.afterReveal(room);
+      // finale mode's suppressed beat: the host can always move the night on.
+      else if (room.stage === "queued") this.afterReveal(room);
       else if (room.stage === "interlude") this.afterInterlude(room);
       else this.err(socket, "BAD_PHASE", "No round to skip.");
     });
     socket.on("vote_heat_down", () => {
       const found = this.identify(socket); if (!found) return;
       const { room, player } = found;
-      if (!room.currentHeat || !["round", "ready", "reveal"].includes(room.stage) || room.pendingHeatDown) return this.err(socket, "BAD_PHASE", "Heat cannot be lowered here.");
+      if (!room.currentHeat || !["round", "ready", "queued", "reveal"].includes(room.stage) || room.pendingHeatDown) return this.err(socket, "BAD_PHASE", "Heat cannot be lowered here.");
       const i = HEAT_ORDER.indexOf(room.currentHeat);
       if (i <= 0) return this.err(socket, "MIN_HEAT", "The room is already at the lowest heat.");
       room.votes.add(player.id);
@@ -684,7 +822,7 @@ export class RoomManager {
     } catch { /* Bank remains available. */ }
   }
   private checkVotes(room: Room): void {
-    if (!room.currentHeat || room.pendingHeatDown || !["round", "ready", "reveal"].includes(room.stage)) return;
+    if (!room.currentHeat || room.pendingHeatDown || !["round", "ready", "queued", "reveal"].includes(room.stage)) return;
     const active = room.players.filter((p) => p.connected);
     const votes = active.filter((p) => room.votes.has(p.id)).length;
     const index = HEAT_ORDER.indexOf(room.currentHeat);
@@ -692,7 +830,7 @@ export class RoomManager {
       room.pendingHeatDown = HEAT_ORDER[index - 1]; room.votes.clear();
       if (room.stage === "round") this.finishRound(room);
       else if (room.stage === "ready") this.showReveal(room);
-      else this.afterReveal(room);
+      else this.afterReveal(room); // "queued" (finale mode) included
     }
   }
   /** Round kinds a heat phase deals, in order (spec §3). */
@@ -728,8 +866,17 @@ export class RoomManager {
    * WHICH ordinary prompt comes next and which people its `{P1}`/`{P2}` slots
    * bind to. Nothing about the choice reaches a client.
    */
-  private directedDefinition(room: Room, phase: HeatPhase, kind: RoundKind): Definition | undefined {
-    let pool = this.candidatePool(room, phase).filter(this.permittedIn(phase, kind));
+  private directedDefinition(room: Room, phase: HeatPhase, kind: RoundKind, style: PromptStyle = "group"): Definition | undefined {
+    // THE SECOND VOICE: a confess slot is dealt as its own round kind. If the
+    // bank/generator has no confession left, the slot falls back to the group
+    // voice rather than starving the phase.
+    if (style === "confess" && (isStyleQuestionKind(kind) || kind === "confess")) {
+      const confessDefinition = this.confessDefinition(room, phase);
+      if (confessDefinition) return confessDefinition;
+    }
+    let pool = this.candidatePool(room, phase).filter(this.permittedIn(phase, kind))
+      // Group slots never serve a confession wearing a pick/text costume.
+      .filter((p) => (p.style ?? (p.kind === "confess" ? "confess" : "group")) !== "confess");
     // Generated Grok material fills flexible slots ahead of bank copy; the
     // explicit pick slots below retain their evidence-density coding floor.
     if (kind !== "pick") pool = [...pool].sort((a, b) => (a.source === "grok" ? -1 : 0) - (b.source === "grok" ? -1 : 0));
@@ -769,19 +916,142 @@ export class RoomManager {
       mode: planned.mode, dimension: planned.dimension, subjects: [...planned.subjects], promptId: planned.prompt.id,
       ...(planned.hypothesisId ? { hypothesisId: planned.hypothesisId } : {}),
     });
+    this.scheduleTwinFor(room, phase, planned.prompt);
     return {
       prompt: planned.prompt, phase, kind: planned.prompt.kind, text: planned.prompt.text,
       ...(planned.subjects.length > 0 ? { subjects: [...planned.subjects] } : {}),
     };
   }
+  /**
+   * PAYOFF — perception, then reality. A group seed that carries a twinId may
+   * have its confess twin scheduled 1–3 rounds later, at most once per phase,
+   * and only sometimes (planTwin is deterministic and seeded by the round).
+   */
+  private scheduleTwinFor(room: Room, phase: HeatPhase, prompt: Prompt): void {
+    if (!prompt.twinId) return;
+    if ((prompt.style ?? "group") !== "group") return;
+    const twinAvailable = this.candidatePool(room, phase).some((p) => p.id === prompt.twinId && !room.usedIds.has(p.id));
+    if (!twinAvailable) return;
+    const plan = planTwin({
+      groupRoundIndex: room.roundIndex + 1,
+      groupPromptId: prompt.id,
+      confessPromptId: prompt.twinId,
+      seed: room.roundIndex + 1,
+      scheduledThisPhase: room.twinPhase === phase,
+    });
+    if (!plan) return;
+    room.twins.push({ plan, phase });
+    room.twinPhase = phase;
+  }
+  /**
+   * Deal a confess round: a due TWIN first (the same topic the room was just
+   * asked about), otherwise the deterministic pick from the confess pool.
+   */
+  private confessDefinition(room: Room, phase: HeatPhase): Definition | undefined {
+    const pool = this.candidatePool(room, phase)
+      .filter((p) => (p.style ?? (p.kind === "confess" ? "confess" : "group")) === "confess" && p.kind === "confess");
+    if (pool.length === 0) return undefined;
+    const due = room.twins.find((entry) => entry.phase === phase && twinDue(entry.plan, room.roundIndex + 1));
+    if (due) {
+      const twin = pool.find((p) => p.id === due.plan.confessPromptId);
+      if (twin) {
+        room.twins = room.twins.filter((entry) => entry !== due);
+        room.twinLinks.push({ groupPromptId: due.plan.groupPromptId, confessPromptId: twin.id });
+        room.director = recordSelection(room.director, { subjects: [], dimension: twin.coding, promptId: twin.id });
+        this.options.audit?.styled?.(room.code, {
+          roundIndex: room.roundIndex + 1, style: "confess", kind: "confess", promptId: twin.id,
+          twin: { groupPromptId: due.plan.groupPromptId, groupRoundIndex: due.plan.groupRoundIndex, dueAt: due.plan.dueAt },
+        });
+        return { prompt: twin, phase, kind: "confess", text: twin.text };
+      }
+    }
+    const planned = planRound({
+      hypotheses: room.hypotheses,
+      state: room.director,
+      candidates: pool,
+      seed: room.roundIndex + 1,
+      kind: "confess",
+      meta: this.meta(room),
+    });
+    if (!planned) return undefined;
+    room.director = planned.state;
+    this.options.audit?.styled?.(room.code, { roundIndex: room.roundIndex + 1, style: "confess", kind: "confess", promptId: planned.prompt.id });
+    return { prompt: planned.prompt, phase, kind: "confess", text: planned.prompt.text };
+  }
+  /**
+   * THE 50/50. Which voice does the next QUESTION round speak in?
+   * Deterministic: chooseStyle is seeded by the round index and diffuses the
+   * error against STYLE_MIX, so the night stays within ±1 of the target. A due
+   * twin may pull forward a confess round — but never past that ±1 band.
+   */
+  /**
+   * Which question slots the 50/50 may rewrite. pick / text / shout are the
+   * conversational question kinds; rating, ios and minigame are instruments
+   * that keep their own mechanics (spec: the mix applies only to questions).
+   *
+   * Two floors are preserved because they are existing HARD requirements of
+   * this game, not preferences:
+   *   • each phase keeps its last public TEXT round — later phases quote those
+   *     answers verbatim (callbacks) and the digest needs them;
+   *   • each phase keeps its last PICK round — the claim engine's coded
+   *     evidence (friendship / couple / rivalry) may not starve.
+   * Everything else is fair game for the second voice.
+   */
+  private styleEligible(plan: PhasePlan, kind: RoundKind): boolean {
+    if (kind === "text" && !plan.slots.includes("text")) return false;
+    if (kind === "pick") {
+      // A phase's coded picks are the claim engine's evidence: warmup and deep
+      // need one, spicy needs both (couple + rivalry). Only a SPARE pick is
+      // fair game for the second voice.
+      const picksLeft = 1 + plan.slots.filter((slot) => slot === "pick").length;
+      const required = plan.phase === "spicy" ? 2 : plan.phase === "dare" ? 0 : 1;
+      return picksLeft > required;
+    }
+    // The shout round (one word, majority wins) is an instrument like rating /
+    // ios: it appears once a night and the digest milks it. Not swappable.
+    if (kind === "shout") return false;
+    return true;
+  }
+  private nextStyle(room: Room, phase: HeatPhase): PromptStyle {
+    const desired = chooseStyle(room.styleServed, room.roundIndex + 1);
+    if (desired === "confess") return "confess";
+    const twinWaiting = room.twins.some((entry) => entry.phase === phase && twinDue(entry.plan, room.roundIndex + 1));
+    if (twinWaiting && styleDrift(recordStyle(room.styleServed, "confess")) <= 1) return "confess";
+    return desired;
+  }
   /** Deal the next round of the phase; undefined means the phase is over. */
   private planNext(room: Room): Definition | undefined {
     const plan = room.plan;
     if (!plan) return undefined;
+    // PERCEPTION → REALITY: a twin that is due NOW is dealt as its own round,
+    // between whatever the phase had planned. Waiting for the phase's tail
+    // confession would put the two questions four or five rounds apart and the
+    // room would lose the thread — so the confessed twin is inserted exactly
+    // one to three rounds after the group seed that scheduled it.
+    const dueTwin = room.twins.find((entry) => entry.phase === plan.phase && entry.plan.dueAt === room.roundIndex + 1);
+    if (dueTwin && plan.phase !== "dare") {
+      const twinDefinition = this.confessDefinition(room, plan.phase);
+      if (twinDefinition) {
+        twinDefinition.styleEligible = true;
+        return twinDefinition;
+      }
+      room.twins = room.twins.filter((entry) => entry !== dueTwin);
+    }
     while (plan.slots.length > 0) {
       const kind = plan.slots.shift()!;
-      const definition = this.directedDefinition(room, plan.phase, kind);
-      if (definition) return definition;
+      // Only the flexible question slots are style-swappable; rating, ios and
+      // minigame keep their own mechanics and every non-question round is
+      // dealt exactly as before.
+      const confessSlot = kind === "confess";
+      const styleEligible = confessSlot || (isStyleQuestionKind(kind) && plan.phase !== "dare" && this.styleEligible(plan, kind));
+      const style: PromptStyle = confessSlot ? "confess" : styleEligible ? this.nextStyle(room, plan.phase) : "group";
+      const definition = this.directedDefinition(room, plan.phase, kind, style);
+      if (definition) {
+        // Bookkeeping follows what was ACTUALLY served: a confess slot that
+        // fell back to a group prompt counts as a group question round.
+        definition.styleEligible = styleEligible;
+        return definition;
+      }
     }
     while (plan.live.length > 0) {
       const moment = plan.live.shift()!;
@@ -820,11 +1090,17 @@ export class RoomManager {
   private enterHeat(room: Room, phase: HeatPhase): void {
     this.clearTimers(room); room.phase = phase; room.currentHeat = phase; room.votes.clear(); room.pendingHeatDown = undefined;
     room.queue = []; room.pair = undefined; room.interlude = undefined;
+    // A twin only makes sense in the phase it was scheduled in: perception and
+    // reality must sit close together, or the room cannot feel the gap.
+    room.twins = []; room.twinPhase = undefined;
     // LIVE MOMENTS (spec §3): ~1 spotlight per phase from warmup on, ~1 verdict
     // per phase from spicy on. Both close the phase.
     room.plan = {
       phase,
-      slots: this.phaseSlots(phase),
+      // THE SECOND VOICE has guaranteed seats: every heat phase ends on two
+      // private questions, so the room always hears confessions even when the
+      // evidence floors leave no spare group slot to convert.
+      slots: [...this.phaseSlots(phase), ...(phase === "dare" ? [] : (["confess", "confess"] as RoundKind[]))],
       live: [
         ...(liveKindInPhase("spotlight", phase) ? (["spotlight"] as RoundKind[]) : []),
         ...(liveKindInPhase("verdict", phase) ? (["verdict"] as RoundKind[]) : []),
@@ -914,6 +1190,12 @@ export class RoomManager {
       round.targets = new Map(eligible.map(id => { const others = eligible.filter(x => x !== id); return [id, others[Math.max(0, room.roundIndex - 1) % others.length]!] as const; }));
       if (round.kind === "rating") round.trait = TRAITS[(room.roundIndex - 1) % TRAITS.length]!;
     }
+    // THE 50/50 bookkeeping: only question rounds move the balance. rating,
+    // ios and minigame are instruments; dares and live moments are not
+    // questions at all.
+    if (definition.styleEligible) {
+      room.styleServed = recordStyle(room.styleServed, round.kind === "confess" ? "confess" : "group");
+    }
     room.round = round; room.usedIds.add(definition.prompt.id); this.changed(room);
     this.eachSocket(room, (socket, player) => socket.emit("round", this.guard(this.roundView(round, player.id))));
     this.io.to(displayChannel(room.code)).emit("round", this.guard(this.displayView(room).round!));
@@ -947,6 +1229,7 @@ export class RoomManager {
         // Live moments. A bot cannot know whether it is the spotlight subject
         // (the cover round looks identical), so it always sends a short text —
         // exactly what the server expects from both sides of the moment.
+        case "confess": value = { kind: "confess", yes: room.rng() < 0.5 }; break;
         case "spotlight": value = { kind: "text", text: ["Just vibing, honestly.", "Watching the room.", "Thinking about food.", "Nothing, I swear."][rand(4)]! }; break;
         case "verdict": value = { kind: "pick", target: other }; break;
       }
@@ -1021,8 +1304,52 @@ export class RoomManager {
     // ROUND 4: the engine re-reads the room after EVERY round. Pure deterministic
     // code decides what it suspects; nothing here is emitted.
     this.refreshHypotheses(room, round.id);
+    const reveal = this.buildReveal(room, round);
+    // REVEAL_MODE=finale: nothing is emitted. The reveal goes to the night
+    // queue and the night advances on the gate's grace timer, exactly as if the
+    // reveal had played — the ready gate is bypassed mid-game only.
+    if (this.revealMode === "finale") return this.queueReveal(room, round, reveal);
     // ROUND 4: the reveal is PENDING, not shown. Nobody misses the moment.
-    this.beginReady(room, this.buildReveal(room, round));
+    this.beginReady(room, reveal);
+  }
+  // ---------------------------------------------------------------------------
+  // REVEAL_MODE=finale — THE NIGHT QUEUE
+  // The reveal a round would have shown is appended to `.reveals.log` (one
+  // JSON object per line, 0600, exactly the room log's discipline) and kept in
+  // memory in round order. Nothing rides a socket here: phones see nothing and
+  // the display sees nothing until the finale.
+  // ---------------------------------------------------------------------------
+  private queueReveal(room: Room, round: LiveRound, reveal: RevealView): void {
+    const entry: QueuedReveal = { index: round.index, roundId: reveal.roundId, reveal };
+    // Persist first: the file is the source of truth a restart replays.
+    try { appendFileSync(revealQueueFile(room.file), `${JSON.stringify(entry)}\n`, { encoding: "utf8", mode: 0o600 }); }
+    catch { /* Unwritable queue: the night still plays, the reel is memory-only. */ }
+    room.revealQueue.push(entry);
+    room.stage = "queued";
+    this.changed(room);
+    // The gate's grace is reused as the mid-game beat so the night keeps the
+    // same rhythm it would have had if the reveal had fired. The reveal's own
+    // hold is skipped: there is nothing on screen to hold for.
+    const beat = this.scale(room, this.options.readyGraceMs ?? REVEAL_READY_GRACE_MS);
+    this.schedule(room, beat, () => this.afterReveal(room));
+  }
+  private loadRevealQueue(file: string): QueuedReveal[] {
+    try { return canonicalQueuedReveals(readFileSync(revealQueueFile(file), "utf8").split(/\r?\n/u)); }
+    catch { return []; }
+  }
+  /**
+   * FINALE MODE: the whole night's reel, in round order, to the DISPLAY role
+   * only — immediately before the finale. Phones never receive these, and the
+   * phone finale is untouched. A display that joins mid-finale is caught up by
+   * the same call.
+   */
+  private deliverQueuedReveals(room: Room, socket?: GameSocket): void {
+    if (this.revealMode !== "finale" || room.revealQueue.length === 0) return;
+    for (const entry of room.revealQueue) {
+      const payload = this.guard({ ...entry.reveal });
+      if (socket) socket.emit("reveal", payload);
+      else this.io.to(displayChannel(room.code)).emit("reveal", payload);
+    }
   }
   /** The reveal payload for a round that just closed. Pure formatting — the
    *  only side effect is the (internal) hypothesis refresh, done by the caller. */
@@ -1047,6 +1374,25 @@ export class RoomManager {
       }
     }
     const alias = (id: string | undefined): string => room.players.find((p) => p.id === id)?.alias ?? "Player";
+    if (round.kind === "confess") {
+      // THE SECOND VOICE. Secrecy rules are HARD:
+      //   warm  → counts only (no names, no hints);
+      //   spicy → YES answers attributed by alias; a NO is never named, ever.
+      // The payload is built from aliases only — a PlayerId never enters it.
+      const tier = confessTierFor(round.phase);
+      const answers = [...round.responses].flatMap(([id, value]) => value.kind === "confess"
+        ? [{ alias: alias(id), yes: value.yes, ...(value.note !== undefined ? { note: value.note } : {}) }]
+        : []);
+      const view = buildConfessReveal({ tier, of: room.players.length, answers });
+      const confessItems: NonNullable<RevealView["items"]> = [];
+      for (const entry of view.attributed ?? []) confessItems.push({ alias: entry.alias, text: entry.note ?? "Said yes." });
+      for (const note of view.notes ?? []) confessItems.push({ alias: note.alias ?? "Someone", text: note.text });
+      const holdMs = this.scale(room, this.options.revealHoldMs ?? REVEAL_HOLD_MS);
+      return {
+        roundId: round.id, kind: "confess", summary: confessSummary(view),
+        ...(confessItems.length > 0 ? { items: confessItems } : {}), confess: view, holdMs,
+      };
+    }
     if (round.kind === "spotlight") {
       // RAPID CAPTION WALL: the room's one-liners stack in submission order, and
       // the subject's own decoy answer lands LAST, biggest. Captions only — the
@@ -1120,7 +1466,8 @@ export class RoomManager {
     return room.demo ? Math.max(1, Math.round(ms * room.demoSpeed)) : ms;
   }
   private afterReveal(room: Room): void {
-    if (room.stage !== "reveal") return;
+    // "queued" is finale mode's suppressed reveal: same continuation, no screen.
+    if (room.stage !== "reveal" && room.stage !== "queued") return;
     this.clearTimers(room); room.reveal = undefined;
     if (room.pendingHeatDown) { const next = room.pendingHeatDown; room.pendingHeatDown = undefined; room.queue = []; return this.beginInterlude(room, next, true); }
     this.nextRound(room);
@@ -1250,6 +1597,9 @@ export class RoomManager {
   private async finale(room: Room): Promise<void> {
     if (room.stage === "deleted" || room.stage === "finale" || room.stage === "finale-building") return;
     this.clearTimers(room); room.stage = "finale-building"; room.phase = "finale"; room.round = null; room.currentHeat = undefined; this.changed(room);
+    // REVEAL_MODE=finale: the night's reel plays on the host screen from here.
+    // Phones get nothing extra; their finale below is identical to "round".
+    this.deliverQueuedReveals(room);
     const meta = this.meta(room), log = this.redactedLog(room);
     // Spotlight decoy answers answer nothing: they never reach signals, scores,
     // claims or secrets. (The engine also defends itself — see computeSignals.)
@@ -1272,6 +1622,14 @@ export class RoomManager {
     // Decoys DO ride the digest: pairing them with the captions is the joke.
     const publicLog = log.filter((r) => r.roundKind !== "debrief");
     try { digest = this.services.buildNightDigest(publicLog, meta); } catch { digest = fallbackServices.buildNightDigest(publicLog, meta); }
+    // THE PAYOFF — perception vs confession. The room's certainty about a
+    // person, next to how many people quietly said yes about themselves. The
+    // engine writes the line; it never exposes a no, in any wording.
+    let mismatches: ReturnType<typeof confessMismatches> = [];
+    try {
+      mismatches = confessMismatches(scoringLog, meta, room.twinLinks);
+      for (const mismatch of mismatches) if (!digest.pickTeasers.includes(mismatch.line)) digest.pickTeasers.push(mismatch.line);
+    } catch { mismatches = []; }
     try { decks = this.services.buildSecrets(results, digest, meta); if (!(decks instanceof Map)) throw new Error("Invalid decks"); }
     catch { decks = fallbackServices.buildSecrets(results, digest, meta); }
     // Store decks only on the room, so a deletion can synchronously purge them
@@ -1315,6 +1673,14 @@ export class RoomManager {
     let skeleton: FinaleSlide[];
     try { skeleton = this.services.buildSkeleton(publicResults, publicDigest, meta); if (!Array.isArray(skeleton)) throw new Error("Invalid skeleton"); }
     catch { skeleton = fallbackServices.buildSkeleton(publicResults, publicDigest, meta); }
+    // The mismatch is the best content in the game: the room was SURE, and the
+    // room also told the truth. It lands as a Group Announcement beat before
+    // the closing slide — counts and the room's own certainty, nothing else.
+    for (const mismatch of mismatches.slice(0, 1)) {
+      skeleton.splice(Math.max(0, skeleton.length - 1), 0, {
+        beat: "land", flavor: "group", title: "Perception and reality", body: mismatch.line,
+      });
+    }
     // A provider polishing public slides receives public material only. In particular,
     // the private map never leaves this process or becomes input to public copy.
     // Engine-written secret copy remains the safe, useful no-key fallback.
@@ -1374,6 +1740,7 @@ export class RoomManager {
   private deleteRoom(room: Room): boolean {
     try { unlinkSync(room.file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false; }
     try { unlinkSync(metadataFile(room.file)); } catch { /* Metadata may not exist for legacy rooms. */ }
+    try { unlinkSync(revealQueueFile(room.file)); } catch { /* No queued reveals: round mode never writes one. */ }
     room.stage = "deleted"; room.phase = "closed"; this.transitions.delete(room.id); this.rooms.delete(room.code);
     this.io.to(room.code).emit("deleted"); this.io.to(displayChannel(room.code)).emit("deleted");
     this.eachSocket(room, (socket) => { socket.data = {}; void socket.leave(room.code); });
@@ -1384,15 +1751,22 @@ export class RoomManager {
   purge(): void {
     const now = this.now();
     for (const room of this.rooms.values()) if (this.expired(room)) this.deleteRoom(room);
-    const live = new Set([...this.rooms.values()].map((r) => r.file));
+    // A live room keeps its log AND its REVEAL_MODE night queue;
+    // everything else in the data dir is reaped on the same clock.
+    const live = new Set([...this.rooms.values()].flatMap((r) => [r.file, revealQueueFile(r.file)]));
     try {
       for (const entry of readdirSync(this.options.dataDir, { withFileTypes: true })) {
-        const match = entry.name.match(/^(\d{13})-[0-9a-f]{32}\.jsonl$/);
+        const roomLog = entry.name.match(/^(\d{13})-[0-9a-f]{32}\.jsonl$/);
+        const nightQueue = entry.name.match(/^(\d{13})-[0-9a-f]{32}\.reveals\.log$/);
+        const match = roomLog ?? nightQueue;
         if (!entry.isFile() || !match) continue;
         const file = join(this.options.dataDir, entry.name); if (live.has(file)) continue;
         try {
           const modified = statSync(file).mtimeMs;
-          if (now - Number(match[1]) >= RETENTION_HOURS * HOUR || now - modified >= IDLE_TTL_HOURS * HOUR) { unlinkSync(file); try { unlinkSync(metadataFile(file)); } catch { /* Legacy log without metadata. */ } }
+          if (now - Number(match[1]) >= RETENTION_HOURS * HOUR || now - modified >= IDLE_TTL_HOURS * HOUR) {
+            unlinkSync(file);
+            if (roomLog) try { unlinkSync(metadataFile(file)); } catch { /* Legacy log without metadata. */ }
+          }
         } catch { /* Retry next sweep; never delete unrelated files. */ }
       }
     } catch { /* Retry next sweep. */ }

@@ -112,7 +112,7 @@ async function liveCohort(): Promise<void> {
   const server = createGameServer({
     dataDir: join(directory, 'data'),
     services: createProductionServices(),
-    roundTimers: { spotlight: 100, verdict: 200, pick: 200, text: 200, shout: 200, rating: 200, ios: 200, minigame: 200, dare: 200, pair_dare: 200, debrief: 200 },
+    roundTimers: { spotlight: 100, verdict: 200, pick: 200, text: 200, shout: 200, rating: 200, ios: 200, minigame: 200, dare: 200, pair_dare: 200, debrief: 200, confess: 200 },
     verdictDiscussMs: 0, graceMs: 10, revealHoldMs: 1, interludeHoldMs: 1, readyGraceMs: 1,
     audit: {
       persisted(_roomCode, path) { file = path; },
@@ -149,7 +149,9 @@ async function liveCohort(): Promise<void> {
           const partner = ids[i === 0 ? 1 : 0]!;
           // The mutual room keeps three independent supports: it agrees on
           // third targets outside the couple rounds, picks each other on
-          // couple-coded/spicy/verdict rounds, and rates assigned closeness 7.
+          // couple-coded/spicy/verdict rounds, and names each other in confess
+          // rounds. Assigned IOS/rating subjects still get close answers when
+          // the server happens to aim them at the partner.
           const pickTarget = mutualPair
             ? ((round.phase === 'spicy' || round.kind === 'verdict') ? partner : ids[2]!)
             : others[Math.floor(rng() * others.length)]!;
@@ -162,6 +164,7 @@ async function liveCohort(): Promise<void> {
             case 'shout': value = { kind: 'shout', word: ['chaos', 'vibes', 'legend'][Math.floor(rng() * 3)]! }; break;
             case 'minigame': value = { kind: 'minigame', score: 10 + Math.floor(rng() * 51) }; break;
             case 'dare': case 'pair_dare': value = { kind: 'dare', status: 'done' }; break;
+            case 'confess': value = { kind: 'confess', yes: mutualPair ? true : rng() < 0.5, ...(mutualPair ? { target: partner } : {}) }; break;
             default: value = { kind: 'text', text: mutualPair ? 'we talked about Nairobi and laughed together' : 'the group chat keeps surprising us tonight' };
           }
           const send = (): void => {
