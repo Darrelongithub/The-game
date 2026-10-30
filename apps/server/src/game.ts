@@ -617,7 +617,7 @@ export class RoomManager {
       const holdMs = this.options.revealHoldMs ?? VERDICT_REVEAL_MS;
       const reveal: RevealView = { roundId: round.id, kind: "verdict",
         summary: winner ? `The room decided: ${alias(winner[0])}` : "Nobody voted. The room argued for nothing.",
-        ...(slide ? { slide } : {}), celebrate: round.prompt.coding === "couple", holdMs };
+        ...(slide ? { slide } : {}), celebrate: round.couple ?? round.prompt.coding === "couple", holdMs };
       room.reveal = { value: reveal, endsAt: this.now() + holdMs }; this.changed(room);
       this.io.to(room.code).emit("reveal", reveal);
       this.schedule(room, holdMs, () => this.afterReveal(room));

@@ -75,8 +75,9 @@ npm run smoke:verified
 
 This command starts its **own isolated local server** with the production
 adapters, keys disabled, an ephemeral port and a temporary data directory. It
-runs five external Socket.IO players through a full game, reconnects and deletes
-the room. A local test-only oracle independently records expected engine decks,
+runs five external Socket.IO players through a full game — including the
+spotlight and verdict live moments (the bots wait out each verdict's 90-second
+debate) — reconnects and deletes the room. It takes several minutes by design. A local test-only oracle independently records expected engine decks,
 actual outgoing socket recipients, persisted submission counts, dare passes,
 and joker weights. It is never exposed through HTTP or game events and is
 removed after the run. Do not use this harness against a real game or commit
@@ -94,6 +95,32 @@ production server. A generic `npm run smoke` against an independently started
 server still requires a separately supplied private `SMOKE_ORACLE` file; the
 public wire alone cannot establish ownership or persistence. The verified
 harness is the recommended repeatable command.
+
+## Round list (what a night actually runs)
+
+Each heat phase opens with its normal rounds and closes with its live moments:
+
+| phase | rounds | live moments |
+|---|---|---|
+| warmup | 3 questions (pick / shout / minigame …) | 1 spotlight |
+| spicy | 3 questions (pick / rating / ios …) | 1 spotlight, 1 verdict |
+| deep | 3 questions (text / rating / pick …) | 1 spotlight, 1 verdict |
+| dare | 2 dares + the pair dare | 1 spotlight, 1 verdict |
+| debrief | 2 private pair texts (onlyPlayers) | — |
+
+**spotlight (25s):** one player is watched; everyone else captions them in ≤80
+characters. The subject's own phone shows a decoy question or an idle screen and
+never the real prompt. The reveal is a caption wall that ends on the subject's
+own decoy answer (~8s).
+
+**verdict (105s):** the room argues for 90 seconds with phones face-down, then
+everyone secretly picks at the same time (15s, self excluded). The reveal is a
+Group Announcement — anonymous vote bars, count-up, then the answer lands
+(~6s). Couple-coded verdicts get confetti.
+
+Expect a full night to take noticeably longer than the question-only game:
+verdicts alone add ~90s of real debate each, and the external smoke now allows
+seven minutes (`SMOKE_TIMEOUT_MS`).
 
 ## Additional checks
 

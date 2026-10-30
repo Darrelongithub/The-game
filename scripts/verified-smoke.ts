@@ -85,7 +85,7 @@ async function main(): Promise<void> {
 try {
   const port = await server.listen(0, '127.0.0.1', false);
   const child = spawn(process.execPath, ['--import', 'tsx', 'scripts/bots.ts'], {
-    cwd: process.cwd(), stdio: 'inherit', env: { ...process.env, XAI_API_KEY: '', GEMINI_API_KEY: '', SMOKE_URL: `http://127.0.0.1:${port}`, SMOKE_ORACLE: oraclePath, SMOKE_TIMEOUT_MS: '120000' },
+    cwd: process.cwd(), stdio: 'inherit', env: { ...process.env, XAI_API_KEY: '', GEMINI_API_KEY: '', SMOKE_URL: `http://127.0.0.1:${port}`, SMOKE_ORACLE: oraclePath, SMOKE_TIMEOUT_MS: '420000' },
   });
   const code = await new Promise<number>((resolve, reject) => {
     child.once('error', reject);

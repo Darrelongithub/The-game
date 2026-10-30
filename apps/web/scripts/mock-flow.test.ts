@@ -90,6 +90,8 @@ function answerFor(r: RoundView): ResponseValue {
     case "dare": return { kind: "dare", status: "done" };
     case "pair_dare": return { kind: "dare", status: "done" };
     case "debrief": return { kind: "text", text: "They said they already knew. I said nothing back." };
+    case "spotlight": return { kind: "text", text: "Watching the door, honestly." };
+    case "verdict": return { kind: "pick", target: other };
   }
 }
 
@@ -108,6 +110,11 @@ transport.setHandlers({
     }
     void (async () => {
       await sleep(15);
+      // The verdict's phones-down debate: wait for the window like a player would.
+      if (r.kind === "verdict" && r.voteOpensAt && r.voteOpensAt > Date.now()) {
+        ok("verdict debate is phones-down before the vote opens", true);
+        await sleep(r.voteOpensAt - Date.now() + 30);
+      }
       if (r.kind === "dare") {
         // exercise the REQUIRED reason path from the local phone too
         const res = await transport.darePass({ roundId: r.roundId, reason: "my mother is watching" });
