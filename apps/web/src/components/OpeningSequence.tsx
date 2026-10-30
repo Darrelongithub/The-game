@@ -12,7 +12,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Flame } from './Flame'
 import { AnimatedWords } from './AnimatedWords'
 import { easeOutExpo } from '../lib/motion'
-import { haptic } from './feedback'
+import { haptic } from './deviceFeedback'
 
 type Beat = 'idle' | 'wipe' | 'words' | 'flame' | 'done'
 

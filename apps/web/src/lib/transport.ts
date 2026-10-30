@@ -21,8 +21,6 @@ import type {
   SecretDeckView,
   SubmitRequest,
 } from "@shared/contracts.ts";
-import { MockTransport } from "./mockTransport";
-import { SocketTransport } from "./socketTransport";
 
 export interface TransportHandlers {
   /** full snapshot — server authoritative, always replaces local state */
@@ -65,10 +63,12 @@ export function transportMode(): "socket" | "mock" {
   return process.env.NEXT_PUBLIC_TRANSPORT === "mock" ? "mock" : "socket";
 }
 
-export function createTransport(handlers: TransportHandlers = {}): Transport {
-  const mode = transportMode();
-  const t: Transport =
-    mode === "mock" ? new MockTransport() : new SocketTransport();
+export async function createTransport(handlers: TransportHandlers = {}): Promise<Transport> {
+  // The large scripted mock is a development-only chunk, never part of the
+  // socket build's initial download. Both modes remain available offline.
+  const t: Transport = transportMode() === "mock"
+    ? new (await import("./mockTransport")).MockTransport()
+    : new (await import("./socketTransport")).SocketTransport();
   t.setHandlers(handlers);
   return t;
 }
@@ -81,4 +81,3 @@ export function roundTargetsMe(round: RoundView | null, you: PlayerId | null): b
 }
 
 export type { Transport as TransportApi };
-export { MockTransport, SocketTransport };

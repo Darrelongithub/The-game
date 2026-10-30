@@ -11,15 +11,16 @@ export interface PromptProvider {
   forPhase(phase: HeatPhase, n: number, usedIds: ReadonlySet<string>): Prompt[];
   /** Optional provider work is kicked off in the lobby and is never awaited by play. */
   prepare?(input: { playerCount: number; usedIds: string[]; digest: NightDigest }): Promise<void>;
+  dispose?(): void;
 }
 export interface GameServices {
-  createPromptProvider(): PromptProvider;
+  createPromptProvider(roomId?: string): PromptProvider;
   computeSignals(log: LogRecord[], meta: RoomMeta): PairSignal[];
   computeResults(signals: PairSignal[], log: LogRecord[], meta: RoomMeta): Results;
   buildNightDigest(log: LogRecord[], meta: RoomMeta): NightDigest;
   buildSecrets(results: Results, digest: NightDigest, meta: RoomMeta): Map<PlayerId, SecretCard[]>;
-  buildSkeleton(results: Results, digest: NightDigest): FinaleSlide[];
-  writeFinale(skeleton: FinaleSlide[], decks: Map<PlayerId, SecretCard[]>, results: Results, digest: NightDigest): Promise<{ slides: FinaleSlide[]; decks: Map<PlayerId, SecretCard[]> }>;
+  buildSkeleton(results: Results, digest: NightDigest, meta?: RoomMeta): FinaleSlide[];
+  writeFinale(skeleton: FinaleSlide[], decks: Map<PlayerId, SecretCard[]>, results: Results, digest: NightDigest, meta?: RoomMeta): Promise<{ slides: FinaleSlide[]; decks: Map<PlayerId, SecretCard[]> }>;
 }
 
 // Small standalone bank. Agent D's full bank/provider is injected at merge; these

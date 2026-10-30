@@ -86,9 +86,7 @@ export function PlayScreen({ room }: { room: UseRoom }) {
         round={round}
         room={view}
         you={you}
-        onSubmit={(value) => {
-          void submit(value);
-        }}
+        onSubmit={async (value) => (await submit(value)).ok}
         onVoteHeatDown={voteHeatDown}
       />
     );

@@ -37,7 +37,7 @@ export class SocketTransport implements Transport {
   private lastJoin: { code: RoomCode; alias: string; playerId: PlayerId; secret: string } | null = null;
   private resuming = false;
   private resumeWanted = false;
-  private boundVisibility = false;
+  private visibilityHandler: (() => void) | null = null;
   private everConnected = false;
 
   constructor() {
@@ -95,6 +95,8 @@ export class SocketTransport implements Transport {
     });
 
     socket.on("disconnect", () => {
+      this.resuming = false;
+      if (this.lastJoin?.secret) this.resumeWanted = true;
       this.handlers.onConnection?.(false);
     });
 
@@ -121,9 +123,8 @@ export class SocketTransport implements Transport {
   }
 
   private bindVisibility(): void {
-    if (this.boundVisibility || typeof document === "undefined") return;
-    this.boundVisibility = true;
-    document.addEventListener("visibilitychange", () => {
+    if (this.visibilityHandler || typeof document === "undefined") return;
+    this.visibilityHandler = () => {
       if (document.visibilityState !== "visible") return;
       if (!this.socket) return;
       if (!this.socket.connected) {
@@ -132,7 +133,8 @@ export class SocketTransport implements Transport {
       }
       // Same socket, but the phone was asleep: take a fresh snapshot anyway.
       if (this.lastJoin?.secret) this.resume();
-    });
+    };
+    document.addEventListener("visibilitychange", this.visibilityHandler);
   }
 
   /** Resolves once the socket is connected (or rejects on timeout). */
@@ -190,10 +192,10 @@ export class SocketTransport implements Transport {
   }
 
   async darePass(req: DarePassRequest): Promise<{ ok: boolean; error?: string }> {
-    const socket = await this.ready();
-    if (!req.reason.trim()) return { ok: false, error: "A reason is required." };
-    socket.emit("dare_pass", req);
-    return { ok: true };
+    if (!req.reason.trim() || req.reason.length > 140) return { ok: false, error: "A reason of up to 140 characters is required." };
+    // Submit already carries an acknowledgement in the frozen contract. Reuse
+    // it rather than pretending the fire-and-forget dare_pass was accepted.
+    return this.submit({ roundId: req.roundId, clientUuid: `pass:${req.roundId}`, value: { kind: "dare", status: "passed", reason: req.reason } });
   }
 
   start(): void { this.socket?.emit("start"); }
@@ -204,7 +206,9 @@ export class SocketTransport implements Transport {
   deleteRoom(): void { this.socket?.emit("delete_room"); }
 
   resume(): void {
-    if (!this.lastJoin?.secret) return;
+    // Rejoins rotate the server secret. Duplicate visibility/connect events
+    // must not race two joins with the same token.
+    if (this.resuming || !this.lastJoin?.secret) return;
     const socket = this.socket;
     if (!socket || !socket.connected) {
       // will re-resume on the next `connect`
@@ -256,5 +260,9 @@ export class SocketTransport implements Transport {
   disconnect(): void {
     this.socket?.disconnect();
     this.socket = null;
+    if (this.visibilityHandler && typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
   }
 }

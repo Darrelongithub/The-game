@@ -19,7 +19,7 @@ import type {
   SecretDeckView,
   SubmitRequest,
 } from "@shared/contracts.ts";
-import { createTransport, roundTargetsMe, type Transport, type TransportHandlers } from "./transport";
+import { createTransport, roundTargetsMe, transportMode, type Transport, type TransportHandlers } from "./transport";
 import { clearSession, loadSession, saveSession } from "./session";
 
 export interface UseRoom {
@@ -67,7 +67,7 @@ export function clientUuid(): string {
 
 export function useRoom(): UseRoom {
   const transportRef = useRef<Transport | null>(null);
-  const [mode, setMode] = useState<"socket" | "mock">("mock");
+  const [mode, setMode] = useState<"socket" | "mock">(transportMode);
   const [view, setView] = useState<RoomView | null>(null);
   const [you, setYou] = useState<PlayerId | null>(null);
   const [code, setCode] = useState<RoomCode | null>(null);
@@ -135,22 +135,26 @@ export function useRoom(): UseRoom {
       },
     };
 
-    const transport = createTransport(handlers);
-    transportRef.current = transport;
-    setMode(transport.mode);
-
-    // Boot: if this tab has a session, ask for a full snapshot right away.
-    if (stored) transport.resume();
+    let disposed = false;
+    void createTransport(handlers).then((transport) => {
+      if (disposed) { transport.disconnect(); return; }
+      transportRef.current = transport;
+      setMode(transport.mode);
+      if (stored) transport.resume();
+    }).catch(() => {
+      if (!disposed) { setConnected(false); setError("Could not start the connection. Please reload."); }
+    });
 
     // Belt and braces for mobile Safari: it does not always fire `online`.
     const onVisible = () => {
-      if (document.visibilityState === "visible") transport.resume();
+      if (document.visibilityState === "visible") transportRef.current?.resume();
     };
     document.addEventListener("visibilitychange", onVisible);
 
     return () => {
+      disposed = true;
       document.removeEventListener("visibilitychange", onVisible);
-      transport.disconnect();
+      transportRef.current?.disconnect();
       transportRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

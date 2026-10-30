@@ -66,56 +66,50 @@ requires a 48-hour hard purge and 24-hour idle-room expiry; verify these on the
 integrated server before relying on them. Stopping the process alone is not a
 substitute for deleting room logs.
 
-## External smoke bots
-
-Start the integrated game first in a separate terminal with `npm run host` or
-`npm start`, then:
+## Verified no-key smoke game
 
 ```sh
-npm run smoke
+npm ci
+npm run smoke:verified
 ```
 
-The default is five external Socket.IO players at `http://localhost:3001`.
-For a different server/count/timeout:
+This command starts its **own isolated local server** with the production
+adapters, keys disabled, an ephemeral port and a temporary data directory. It
+runs five external Socket.IO players through a full game, reconnects and deletes
+the room. A local test-only oracle independently records expected engine decks,
+actual outgoing socket recipients, persisted submission counts, dare passes,
+and joker weights. It is never exposed through HTTP or game events and is
+removed after the run. Do not use this harness against a real game or commit
+its temporary data.
+
+Check the checker (expected: the underlying smoke fails with
+`secret frame delivered to a non-owner`):
 
 ```sh
-SMOKE_URL=http://localhost:3001 SMOKE_BOTS=5 SMOKE_TIMEOUT_MS=480000 npm run smoke
+SMOKE_INJECT_LEAK=1 npm run smoke:verified
 ```
 
-The test creates and deletes a real room, exercises rounds and resume, and
-fails on any failed assertion. To pass, it also requires an **independent,
-local-only test oracle** produced by the integrated server/test harness:
+The deliberate leak exists only in this local test harness, not in the
+production server. A generic `npm run smoke` against an independently started
+server still requires a separately supplied private `SMOKE_ORACLE` file; the
+public wire alone cannot establish ownership or persistence. The verified
+harness is the recommended repeatable command.
+
+## Additional checks
 
 ```sh
-SMOKE_ORACLE=/absolute/path/to/private-oracle.json npm run smoke
+npm run selfcheck
+npm run typecheck
+npm test --workspace apps/server
+npm run test:transport --workspace apps/web
+npm run test:components
+npm run test:mock --workspace apps/web
+npm audit --omit=dev
+# After npm run build and npm start in another terminal:
+node scripts/jsdom-export-smoke.mjs
 ```
 
-The frozen public socket contract cannot establish which player's private deck
-was intended for a frame, whether a duplicate actually persisted twice, or the
-joker's scoring weight. The oracle is not implemented in this kit; Agent Z
-must supply it. Do not serve it over HTTP, expose it to game clients, or commit
-it. It must reflect independently captured server-side facts for the *current*
-smoke room, not facts reconstructed from the bots' received messages. Write it
-atomically once the finale is ready, and update it after a finale reconnect.
-The smoke test expects this JSON shape:
-
-```json
-{
-  "roomCode": "AB2C",
-  "decks": { "player-id": { "cards": [] }, "player-without-deck": null },
-  "secretFrames": [{ "recipient": "player-id", "owner": "player-id", "deck": { "cards": [] } }],
-  "submissions": [{ "roundId": "round-id", "playerId": "player-id", "clientUuid": "uuid", "count": 1 }],
-  "darePasses": [{ "playerId": "dodger-id", "reason": "My mother is watching." }],
-  "joker": { "playerId": "joker-id", "target": "target-id", "pickRounds": 3, "sameTargetPicks": 3, "negativeNominations": 1, "nominationWeight": 0.5, "victimToxicConfidence": null }
-}
-```
-
-Use actual generated IDs, the complete expected deck for every player (or
-`null` for no deck), and actual per-delivery frames in order, including after
-reconnect. A non-null deck must contain at least one real card. `count` is the
-number actually persisted for the specified UUID. The trace must identify the
-actual recipient and intended owner at emission, including unintended
-broadcast recipients. The joker weight, negative nomination count and victim toxic-claim confidence
-must be actual engine results, not assumptions. At least one negative nomination
-is required to exercise the guard. Without this oracle the test deliberately fails rather than
-claiming to have proved privacy or idempotence.
+The jsdom test exercises the exported bundle and creates and deletes a test
+room. It is not a browser, phone, or LAN test. Test on actual iOS and Android
+devices and the target desktop browsers before game night. See
+`MERGE-REPORT.md` for known gaps, test results and bundle measurement.

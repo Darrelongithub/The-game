@@ -164,6 +164,11 @@ async function verifyOracle(): Promise<void> {
   check(oracle.darePasses.some(pass => pass.playerId === bots[1].id && pass.reason === 'My mother is watching.'), 'dare pass reason was not stored verbatim');
   const joker = oracle.joker;
   check(joker.playerId === bots[0].id && joker.target === bots[1].id && joker.pickRounds > 0 && joker.sameTargetPicks === joker.pickRounds && joker.negativeNominations > 0 && joker.nominationWeight === 0.5 && (joker.victimToxicConfidence === null || joker.victimToxicConfidence === 'low' || joker.victimToxicConfidence === 'med'), 'joker guard did not protect the fixed-target victim');
+  const publicFinale = JSON.stringify(bots[0].finales[0]);
+  check(!publicFinale.includes('"cards"'), 'public finale contains a private deck');
+  for (const deck of Object.values(oracle.decks)) if (deck) for (const card of deck.cards) {
+    check(!publicFinale.includes(JSON.stringify(card)), 'public finale contains a private card');
+  }
   for (const frame of oracle.secretFrames) check(frame.owner === frame.recipient, 'secret frame delivered to a non-owner');
   check(oracle.secretFrames.every(frame => bots.some(bot => bot.id === frame.recipient)), 'oracle has an unknown secret recipient');
   for (const bot of bots) {
@@ -199,6 +204,9 @@ async function main(): Promise<void> {
     } else acceptJoin(bot, await join(bot, false));
   }
   console.log(`Smoke room ${code}: ${count} players at ${address}`);
+  // Ensure the live scenario includes a negative nomination: bank ordering
+  // alone does not guarantee a friction/rivalry pick on every night.
+  bots[0].socket.emit('custom_prompts', { lines: ['spicy: Who here would argue with a rival?'] });
   bots[0].socket.emit('start');
   await waitFor(() => bots.every(bot => bot.finales.length > 0), 'finale on every socket');
   await waitFor(() => pending.size === 0, 'pending submissions', 15000);

@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["bots.ts", "../packages/shared/src/**/*.ts"]
+  "include": ["bots.ts", "verified-smoke.ts", "../packages/shared/src/**/*.ts"]
 }

@@ -13,6 +13,7 @@ import {
 } from "../../../packages/shared/src/contracts.ts";
 import { isAlias, isRoomCode, playerCountOk, validSubmit } from "../../../packages/shared/src/validate.ts";
 import { BankPromptProvider, fallbackServices, type GameServices, type HeatPhase, type PromptProvider } from "./services.ts";
+import { checkBanned, checkHardBlocked } from "../../../packages/prompts/src/filter.ts";
 
 type SocketData = { roomCode?: string; playerId?: string };
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
@@ -44,6 +45,11 @@ export interface GameOptions {
   interludeHoldMs?: number;
   botDelayMs?: [number, number];
   writerTimeoutMs?: number;
+  /** In-process test observer only; never configured by the production entry point. */
+  audit?: {
+    persisted(roomCode: string, file: string, request: { roundId: string; playerId: string; clientUuid: string }): void;
+    decks(roomCode: string, roomId: string, players: string[], decks: ReadonlyMap<string, SecretDeckView>, results: import("../../../packages/shared/src/contracts.ts").Results): void;
+  };
 }
 const HOUR = 60 * 60 * 1000;
 const PAIR_KEY = (a: string, b: string): string => [a, b].sort().join("\u0000");
@@ -128,7 +134,7 @@ export class RoomManager {
     room.log.length = 0; room.decks.clear(); room.seen.clear(); room.interactions.clear(); room.votes.clear(); room.usedIds.clear();
     room.players.forEach((p) => { p.secret = ""; p.alias = ""; }); room.players.length = 0;
     room.round = null; room.queue = []; room.custom = []; room.pair = undefined; room.reveal = undefined; room.interlude = undefined; room.finale = undefined;
-    room.currentHeat = undefined; room.pendingHeatDown = undefined; room.provider = new BankPromptProvider();
+    room.currentHeat = undefined; room.pendingHeatDown = undefined; room.provider.dispose?.(); room.provider = new BankPromptProvider();
   }
   private code(): string {
     for (let tries = 0; tries < 10000; tries++) {
@@ -199,7 +205,7 @@ export class RoomManager {
       try { writeFileSync(file, "", { flag: "wx", mode: 0o600 }); } catch { return ack({ ok: false, error: "Unable to create room storage." }); }
       const player: Player = { id: "p1", alias: input.alias.trim(), consent: { ...input.consent }, secret: secret(), isBot: false, connected: true, socketId: socket.id };
       let provider: PromptProvider;
-      try { provider = this.services.createPromptProvider(); } catch { provider = new BankPromptProvider(); }
+      try { provider = this.services.createPromptProvider(id); } catch { provider = new BankPromptProvider(); }
       const room: Room = { id, code, createdAt: now, lastActivity: now, file, hostId: player.id, players: [player], phase: "lobby", stage: "lobby", seq: 1, nextPlayer: 2, roundIndex: 0,
         provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set() };
       this.rooms.set(code, room); socket.data = { roomCode: code, playerId: player.id }; void socket.join(code);
@@ -263,9 +269,9 @@ export class RoomManager {
         const text = line.slice(prefix?.[0].length ?? 0).trim();
         // Every host prompt must actually extract data about the room, not random spectacle.
         if (!text || !validPlaceholders(text) || !/(\{P(?:[1-9]|1[01])\}|\b(?:here|someone|anyone|person|people|player|friend|pair|room|each other|two of you)\b)/iu.test(text)) return this.err(socket, "INVALID_PROMPTS", "Every prompt must refer to someone in the room or a pair.");
-        // Conservative host-side guard; the complete shared prompt filter is
-        // owned by the provider agent and must also be wired at integration.
-        if (/\b(?:favou?rites?|zombies?|desert island|most likely to|underage|minors?|children|child|teens?|rape|molest|non.?consensual|without consent|oral sex|intercourse|blow.?job|hand.?job)\b/iu.test(text)) return this.err(socket, "INVALID_PROMPTS", "That prompt is not allowed in this game.");
+        // Apply the same provider safety rules as generated prompts, in addition
+        // to the host-specific checks (which cover some additional phrases).
+        if (checkBanned(text) || checkHardBlocked(text) || /\b(?:favou?rites?|zombies?|desert island|most likely to|underage|minors?|children|child|teens?|rape|molest|non.?consensual|without consent|oral sex|intercourse|blow.?job|hand.?job)\b/iu.test(text)) return this.err(socket, "INVALID_PROMPTS", "That prompt is not allowed in this game.");
         const kind: Prompt["kind"] = phase === "dare" ? (/\b(pair|two of you|each other)\b/i.test(text) ? "pair_dare" : "dare") : (/^\s*(who|which)\b/i.test(text) ? "pick" : "text");
         const coding: Prompt["coding"] = /\b(flirt|crush|romance|kiss)\b/i.test(text) ? "couple" : /\b(friend|appreciate)\b/i.test(text) ? "friendship" : /\b(trust|secret|honest)\b/i.test(text) ? "trust" : /\b(rival|argue|conflict)\b/i.test(text) ? "rivalry" : "neutral";
         custom.push({ id: `host-${phase}-${index + 1}`, source: "host", phase, kind, text, asksTarget: true, coding, measures: [kind === "dare" || kind === "pair_dare" ? "dareCompliance" : kind] });
@@ -438,6 +444,7 @@ export class RoomManager {
     try { appendFileSync(room.file, `${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 }); }
     catch { return { ok: false, error: "Unable to save the answer." }; }
     room.log.push(record); room.seen.set(key, { roundId: r.roundId, fingerprint }); round.responses.set(player.id, value); room.lastActivity = at;
+    this.options.audit?.persisted(room.code, room.file, { roundId: r.roundId, playerId: player.id, clientUuid: r.clientUuid });
     if (target) { const k = PAIR_KEY(player.id, target); room.interactions.set(k, (room.interactions.get(k) ?? 0) + 1); }
     this.changed(room);
     if (!player.isBot && player.socketId) this.io.sockets.sockets.get(player.socketId)?.emit("round", this.roundView(round, player.id));
@@ -541,6 +548,7 @@ export class RoomManager {
         .filter((c) => c.facts.length > 0);
       if (cards.length) room.decks.set(player.id, { cards });
     }
+    this.options.audit?.decks(room.code, room.id, room.players.map((p) => p.id), room.decks, results);
     decks.clear();
     const privateDebriefs = log.flatMap((r) => r.roundKind === "debrief" && r.value.kind === "text" ? [r.value.text.toLocaleLowerCase()] : []);
     const safeClaims = results.claims.filter((c) => c.audience === "public" && c.type !== "spark" && c.type !== "onesided" && !(c.confidence === "low" && (c.type === "toxic" || c.type === "rival"))).map((c) => ({ ...c, evidence: c.evidence.filter((e) => !privateDebriefs.some((d) => d.length >= 10 && e.toLocaleLowerCase().includes(d))) }));
@@ -565,7 +573,7 @@ export class RoomManager {
     // therefore be purged immediately rather than waiting for the provider.
     privateDebriefs.length = 0; log.length = 0; signals = []; results = publicResults; digest = publicDigest;
     let skeleton: FinaleSlide[];
-    try { skeleton = this.services.buildSkeleton(publicResults, publicDigest); if (!Array.isArray(skeleton)) throw new Error("Invalid skeleton"); }
+    try { skeleton = this.services.buildSkeleton(publicResults, publicDigest, meta); if (!Array.isArray(skeleton)) throw new Error("Invalid skeleton"); }
     catch { skeleton = fallbackServices.buildSkeleton(publicResults, publicDigest); }
     // A provider polishing public slides receives public material only. In particular,
     // the private map never leaves this process or becomes input to public copy.
@@ -574,7 +582,7 @@ export class RoomManager {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const deadline = new Promise<undefined>((resolve) => { timeout = setTimeout(() => resolve(undefined), this.options.writerTimeoutMs ?? 10_000); timeout.unref(); });
-      written = await Promise.race([Promise.resolve().then(() => this.services.writeFinale(structuredClone(skeleton), new Map(), structuredClone(publicResults), structuredClone(publicDigest))), deadline]);
+      written = await Promise.race([Promise.resolve().then(() => this.services.writeFinale(structuredClone(skeleton), new Map(), structuredClone(publicResults), structuredClone(publicDigest), meta)), deadline]);
     } catch { /* deterministic template */ } finally { if (timeout) clearTimeout(timeout); }
     if (room.stage !== "finale-building" || this.rooms.get(room.code) !== room) return;
     const publicIds = new Set(safeClaims.map((c) => c.id));

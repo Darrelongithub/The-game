@@ -5,8 +5,10 @@
 // change, so the embers teleported. FIXED.
 import { useMemo } from 'react'
 import { motion } from 'framer-motion'
+import { usePrefersReducedMotion } from './deviceFeedback'
 
 export function Flame({ size = 140 }: { size?: number }) {
+  const reduced = usePrefersReducedMotion()
   // Deterministic-per-mount ember configs (stable across re-renders).
   const embers = useMemo(
     () =>
@@ -30,12 +32,12 @@ export function Flame({ size = 140 }: { size?: number }) {
           background: 'radial-gradient(circle, rgba(182,255,60,0.35), rgba(139,47,224,0.2) 50%, transparent 75%)',
           filter: 'blur(20px)',
         }}
-        animate={{ opacity: [0.6, 1, 0.6], scale: [0.9, 1.05, 0.9] }}
-        transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+        animate={reduced ? { opacity: 0.8, scale: 1 } : { opacity: [0.6, 1, 0.6], scale: [0.9, 1.05, 0.9] }}
+        transition={reduced ? { duration: 0 } : { duration: 2, repeat: Infinity, ease: 'easeInOut' }}
       />
 
       {/* Embers — stable configs, see FIX #3 */}
-      {embers.map((e, i) => (
+      {!reduced && embers.map((e, i) => (
         <motion.div
           key={i}
           className="absolute rounded-full bg-lime-accent"
@@ -68,16 +70,16 @@ export function Flame({ size = 140 }: { size?: number }) {
           d="M50 140 C20 110 15 75 35 45 C40 65 50 65 48 45 C65 65 85 95 65 125 C75 110 72 95 65 90 C68 115 58 130 50 140 Z"
           fill="url(#flameGrad)"
           style={{ transformOrigin: '50% 100%' }}
-          animate={{ scaleY: [1, 1.08, 0.96, 1.05, 1], scaleX: [1, 0.95, 1.04, 0.97, 1] }}
-          transition={{ duration: 0.6, repeat: Infinity, ease: 'easeInOut' }}
+          animate={reduced ? { scaleY: 1, scaleX: 1 } : { scaleY: [1, 1.08, 0.96, 1.05, 1], scaleX: [1, 0.95, 1.04, 0.97, 1] }}
+          transition={reduced ? { duration: 0 } : { duration: 0.6, repeat: Infinity, ease: 'easeInOut' }}
         />
         <motion.path
           d="M50 140 C30 115 28 85 42 55 C45 72 50 72 48 55 C60 75 72 100 58 125 Z"
           fill="#f5f3ff"
           opacity={0.5}
           style={{ transformOrigin: '50% 100%' }}
-          animate={{ scaleY: [1, 0.92, 1.06, 0.98, 1], scaleX: [1, 1.05, 0.95, 1.02, 1] }}
-          transition={{ duration: 0.45, repeat: Infinity, ease: 'easeInOut', delay: 0.1 }}
+          animate={reduced ? { scaleY: 1, scaleX: 1 } : { scaleY: [1, 0.92, 1.06, 0.98, 1], scaleX: [1, 1.05, 0.95, 1.02, 1] }}
+          transition={reduced ? { duration: 0 } : { duration: 0.45, repeat: Infinity, ease: 'easeInOut', delay: 0.1 }}
         />
       </svg>
     </div>
