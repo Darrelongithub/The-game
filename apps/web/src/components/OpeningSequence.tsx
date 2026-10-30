@@ -161,7 +161,7 @@ export function OpeningSequence({ onComplete }: { onComplete: () => void }) {
             {/* Lime vignette flash on flame impact */}
             <motion.div
               className="fixed inset-0 pointer-events-none"
-              style={{ background: 'radial-gradient(circle, transparent 40%, rgba(182,255,60,0.15) 100%)' }}
+              style={{ background: 'radial-gradient(circle, transparent 40%, rgba(214,115,255,0.15) 100%)' }}
               initial={{ opacity: 0 }}
               animate={{ opacity: [0, 0.6, 0] }}
               transition={{ duration: 0.5, delay: 0.3 }}

@@ -9,8 +9,54 @@ export { computeSignals, pairScoreOf, type PairWeights } from "./signals.ts";
 export { computeResults } from "./results.ts";
 export { buildNightDigest } from "./digest.ts";
 export { buildSecrets } from "./secrets.ts";
+// Live moments (ROUND 3): name clustering + decoy pairing. Never a Claim.
+export {
+  clusterNames,
+  decoyPairings,
+  decoyQuote,
+  detectNamedPlayers,
+  nameClusterTeaser,
+  normalizeName,
+  type DecoyPairing,
+  type NameCandidate,
+  type NameCluster,
+  type NameClusterResult,
+} from "./live.ts";
+
+// ROUND 4 — the Director. INTERNAL: hypotheses are game-direction hints and
+// are never serialized to a client. Selection is deterministic (seeded).
+export {
+  assertNoHypothesisLeak,
+  aboveBand,
+  carryOver,
+  consecutiveTouches,
+  coverageCells,
+  coverageCount,
+  coverageKey,
+  DIMENSIONS,
+  directNextRound,
+  emptyDirectorState,
+  formHypotheses,
+  HYPOTHESIS_DIMENSION,
+  inBand,
+  pickMode,
+  planRound,
+  recordSelection,
+  starvedCells,
+  subjectPairKey,
+  updateHypotheses,
+  type Coverage,
+  type CoverageCell,
+  type Dimension,
+  type DirectedMode,
+  type DirectedRound,
+  type DirectorState,
+  type HypothesisOptions,
+  type HypothesisUpdate,
+  type PlanInput,
+} from "./director.ts";
 
 // Exposed for tuning, tests and Agent Z's hand-verification:
 export { maximumWeightMatching, constrainedMatching, type Matching } from "./matching.ts";
 export { mulberry32 } from "./rng.ts";
-export { ENGINE_TUNING, logRecordId, tokenJaccard } from "./internal.ts";
+export { ENGINE_TUNING, jokerNominationWeights, logRecordId, tokenJaccard } from "./internal.ts";

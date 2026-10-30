@@ -16,18 +16,29 @@ import type {
   DarePassRequest,
   JoinReply,
   JoinRequest,
-  ProfileAnswers,
   PlayerId,
+  ProfileAnswers,
   RoomCode,
   ServerToClientEvents,
   SubmitRequest,
 } from "@shared/contracts.ts";
-import { loadSession, saveSession } from "./session";
+import { clearSession, loadSession, saveSession } from "./session";
 import type { Transport, TransportHandlers } from "./transport";
 
 type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 const ACK_TIMEOUT_MS = 12_000;
+const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const NONCE_PATTERN = /^[a-f0-9]{32}$/;
+
+/** Never use Math.random for a credential. Older browsers can use the
+ * legacy same-socket retry when secure random bytes are unavailable. */
+function resumeNonce(): string | undefined {
+  try {
+    if (!globalThis.crypto?.getRandomValues) return undefined;
+    return Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  } catch { return undefined; }
+}
 
 export class SocketTransport implements Transport {
   readonly mode = "socket" as const;
@@ -35,13 +46,22 @@ export class SocketTransport implements Transport {
   private socket: GameSocket | null = null;
   private handlers: TransportHandlers = {};
   private lastSeq = -1;
-  private lastJoin: { code: RoomCode; alias: string; playerId: PlayerId; secret: string } | null = null;
+  private lastJoin: { code: RoomCode; alias: string; playerId: PlayerId; secret: string; resumeNonce?: string } | null = null;
   private resuming = false;
   private resumeWanted = false;
-  private visibilityHandler: (() => void) | null = null;
+  private boundVisibility = false;
   private everConnected = false;
+  private resumeAttempt = 0;
+  private readonly onVisibility = () => {
+    if (document.visibilityState !== "visible" || !this.socket) return;
+    if (!this.socket.connected) {
+      this.socket.connect();
+    } else if (this.lastJoin?.secret) {
+      this.resume();
+    }
+  };
 
-  constructor() {
+  constructor(private readonly ackTimeoutMs = ACK_TIMEOUT_MS) {
     // sessionStorage is the source of truth for a reloaded tab.
     const stored = loadSession();
     if (stored) {
@@ -50,6 +70,7 @@ export class SocketTransport implements Transport {
         alias: stored.alias ?? "",
         playerId: stored.you,
         secret: stored.secret,
+        ...(stored.resumeNonce && NONCE_PATTERN.test(stored.resumeNonce) && TOKEN_PATTERN.test(stored.secret) ? { resumeNonce: stored.resumeNonce } : {}),
       };
       this.resumeWanted = true;
     }
@@ -62,8 +83,10 @@ export class SocketTransport implements Transport {
 
   // ---------------------------------------------------------------- socket
   private url(): string | undefined {
-    // undefined → socket.io uses window.location (same origin). The exported
-    // build is served by the game server, so this is the normal path.
+    // Browser traffic must stay same-origin, including under the dev proxy;
+    // a localhost override would address the player's phone, not the host.
+    // The explicit URL is retained only for headless transport tests in Node.
+    if (typeof window !== "undefined" && window.location) return undefined;
     const explicit = process.env.NEXT_PUBLIC_SERVER_URL;
     return explicit && explicit.length > 0 ? explicit : undefined;
   }
@@ -96,9 +119,12 @@ export class SocketTransport implements Transport {
     });
 
     socket.on("disconnect", () => {
+      // A lost acknowledgement must not leave a later reconnect permanently
+      // blocked behind the previous attempt.
+      this.resumeAttempt++;
       this.resuming = false;
-      if (this.lastJoin?.secret) this.resumeWanted = true;
-      this.handlers.onConnection?.(false);
+      this.resumeWanted = Boolean(this.lastJoin);
+      this.handlers.onConnection?.(false, { resuming: false });
     });
 
     socket.on("connect_error", () => {
@@ -119,23 +145,22 @@ export class SocketTransport implements Transport {
     socket.on("interlude", (view) => this.handlers.onInterlude?.(view));
     socket.on("finale", (view) => this.handlers.onFinale?.(view));
     socket.on("secrets", (deck) => this.handlers.onSecrets?.(deck));
-    socket.on("deleted", () => this.handlers.onDeleted?.());
+    socket.on("deleted", () => {
+      this.resumeAttempt++;
+      this.lastJoin = null;
+      this.lastSeq = -1;
+      this.resuming = false;
+      this.resumeWanted = false;
+      clearSession();
+      this.handlers.onDeleted?.();
+    });
     socket.on("error", (e) => this.handlers.onError?.(e));
   }
 
   private bindVisibility(): void {
-    if (this.visibilityHandler || typeof document === "undefined") return;
-    this.visibilityHandler = () => {
-      if (document.visibilityState !== "visible") return;
-      if (!this.socket) return;
-      if (!this.socket.connected) {
-        this.socket.connect();
-        return;
-      }
-      // Same socket, but the phone was asleep: take a fresh snapshot anyway.
-      if (this.lastJoin?.secret) this.resume();
-    };
-    document.addEventListener("visibilitychange", this.visibilityHandler);
+    if (this.boundVisibility || typeof document === "undefined") return;
+    this.boundVisibility = true;
+    document.addEventListener("visibilitychange", this.onVisibility);
   }
 
   /** Resolves once the socket is connected (or rejects on timeout). */
@@ -156,11 +181,27 @@ export class SocketTransport implements Transport {
     });
   }
 
+  // A timed-out create/join may have occupied a seat without delivering its
+  // secret. Detach that socket so the player can try again instead of becoming
+  // stuck in an unknown room.
+  private abandonUnacknowledgedJoin(socket: GameSocket): void {
+    if (this.socket !== socket) return;
+    socket.disconnect();
+    this.socket = null;
+    this.everConnected = false;
+    this.connect();
+  }
+
   // ----------------------------------------------------------------- API
   async create(alias: string, consent: Consent, profile: ProfileAnswers): Promise<JoinReply & { code?: RoomCode }> {
     const socket = await this.ready();
     const reply = await new Promise<JoinReply & { code?: RoomCode }>((resolve) => {
-      socket.emit("create", { alias, consent, profile }, (r) => resolve(r));
+      socket.timeout(this.ackTimeoutMs).emit("create", { alias, consent, profile }, (error, r) => {
+        if (error) {
+          this.abandonUnacknowledgedJoin(socket);
+          resolve({ ok: false, error: "The server did not answer. Please try again." });
+        } else resolve(r && typeof r.ok === "boolean" ? r : { ok: false, error: "Invalid server reply." });
+      });
     });
     this.remember(reply, alias);
     return reply;
@@ -169,7 +210,12 @@ export class SocketTransport implements Transport {
   async join(req: JoinRequest): Promise<JoinReply> {
     const socket = await this.ready();
     const reply = await new Promise<JoinReply>((resolve) => {
-      socket.emit("join", req, (r) => resolve(r));
+      socket.timeout(this.ackTimeoutMs).emit("join", req, (error, r) => {
+        if (error) {
+          this.abandonUnacknowledgedJoin(socket);
+          resolve({ ok: false, error: "The server did not answer. Please try again." });
+        } else resolve(r && typeof r.ok === "boolean" ? r : { ok: false, error: "Invalid server reply." });
+      });
     });
     this.remember(reply, req.alias);
     return reply;
@@ -188,15 +234,24 @@ export class SocketTransport implements Transport {
   async submit(req: SubmitRequest): Promise<{ ok: boolean; error?: string }> {
     const socket = await this.ready();
     return new Promise((resolve) => {
-      socket.emit("submit", req, (r) => resolve(r));
+      socket.timeout(this.ackTimeoutMs).emit("submit", req, (error, reply) => {
+        if (error) {
+          // The server may have saved the answer despite the lost ack. Refresh
+          // the authoritative snapshot before the player retries.
+          this.resume();
+          resolve({ ok: false, error: "The server did not answer. Please try again." });
+        } else resolve(reply && typeof reply.ok === "boolean" ? reply : { ok: false, error: "Invalid server reply." });
+      });
     });
   }
 
   async darePass(req: DarePassRequest): Promise<{ ok: boolean; error?: string }> {
-    if (!req.reason.trim() || req.reason.length > 140) return { ok: false, error: "A reason of up to 140 characters is required." };
-    // Submit already carries an acknowledgement in the frozen contract. Reuse
-    // it rather than pretending the fire-and-forget dare_pass was accepted.
-    return this.submit({ roundId: req.roundId, clientUuid: `pass:${req.roundId}`, value: { kind: "dare", status: "passed", reason: req.reason } });
+    const reason = req.reason.trim();
+    if (!reason || reason.length > 140) return { ok: false, error: "A reason of up to 140 characters is required." };
+    const uuid = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    // Use the acknowledged submission route rather than assuming a fire-and-
+    // forget dare_pass event succeeded.
+    return this.submit({ roundId: req.roundId, clientUuid: `pass-${uuid}`, value: { kind: "dare", status: "passed", reason } });
   }
 
   start(): void { this.socket?.emit("start"); }
@@ -207,9 +262,17 @@ export class SocketTransport implements Transport {
   deleteRoom(): void { this.socket?.emit("delete_room"); }
 
   resume(): void {
-    // Rejoins rotate the server secret. Duplicate visibility/connect events
-    // must not race two joins with the same token.
-    if (this.resuming || !this.lastJoin?.secret) return;
+    this.tryResume(true);
+  }
+
+  private tryResume(allowSameSocketRetry: boolean): void {
+    if (!this.lastJoin?.secret) {
+      // Retry must also work before a player has joined a room.
+      this.connect();
+      if (!this.socket?.connected) this.socket?.connect();
+      return;
+    }
+    if (this.resuming) return;
     const socket = this.socket;
     if (!socket || !socket.connected) {
       // will re-resume on the next `connect`
@@ -217,28 +280,55 @@ export class SocketTransport implements Transport {
       socket?.connect();
       return;
     }
+    // Persist a fresh, unpredictable retry nonce *before* the request leaves.
+    // If storage is unavailable, stick to the legacy same-socket exchange;
+    // never send a nonce that a reload cannot reproduce.
+    if (!this.lastJoin.resumeNonce && TOKEN_PATTERN.test(this.lastJoin.secret)) {
+      const nonce = resumeNonce();
+      if (nonce && saveSession({ code: this.lastJoin.code, you: this.lastJoin.playerId, secret: this.lastJoin.secret, alias: this.lastJoin.alias, resumeNonce: nonce })) {
+        this.lastJoin.resumeNonce = nonce;
+      }
+    }
+    const proof = this.lastJoin.resumeNonce ? `rr1.${this.lastJoin.secret}.${this.lastJoin.resumeNonce}` : this.lastJoin.secret;
     this.resuming = true;
+    this.resumeWanted = false;
+    const attempt = ++this.resumeAttempt;
     this.handlers.onConnection?.(true, { resuming: true });
-    socket.emit(
+    socket.timeout(this.ackTimeoutMs).emit(
       "join",
       {
         roomCode: this.lastJoin.code,
         alias: this.lastJoin.alias || "Player",
         consent: { age: true, terms: true, revealOptIn: true },
-        resume: { playerId: this.lastJoin.playerId, secret: this.lastJoin.secret },
+        resume: { playerId: this.lastJoin.playerId, secret: proof },
       },
-      (reply) => {
+      (error, reply) => {
+        if (attempt !== this.resumeAttempt) return;
         this.resuming = false;
+        if (error) {
+          // Retry the same nonce-bound request on this connection. If the
+          // socket drops, the persisted request is retried on reconnect.
+          if (allowSameSocketRetry && socket.connected) {
+            this.tryResume(false);
+            return;
+          }
+          this.handlers.onError?.({ code: "resume_timeout", message: "The room did not answer. Please retry." });
+          this.handlers.onConnection?.(false, { resuming: false });
+          return;
+        }
         if (!reply?.ok) {
+          this.lastJoin = null;
+          clearSession();
           this.handlers.onError?.({
             code: "resume_failed",
             message: reply?.error ?? "Could not rejoin the room.",
           });
-          this.handlers.onConnection?.(false);
+          // The socket is connected even though this particular seat expired.
+          this.handlers.onConnection?.(true, { resuming: false });
           return;
         }
         if (reply.secret) {
-          this.lastJoin = { ...this.lastJoin!, secret: reply.secret };
+          this.lastJoin = { ...this.lastJoin!, secret: reply.secret, resumeNonce: undefined };
           saveSession({
             code: this.lastJoin.code,
             you: this.lastJoin.playerId,
@@ -246,7 +336,7 @@ export class SocketTransport implements Transport {
             alias: this.lastJoin.alias,
           });
         }
-        this.handlers.onConnection?.(true);
+        this.handlers.onConnection?.(true, { resuming: false });
         if (reply.state) {
           if (typeof reply.state.seq === "number") {
             if (reply.state.seq <= this.lastSeq && reply.state.seq !== this.lastSeq) return;
@@ -258,12 +348,29 @@ export class SocketTransport implements Transport {
     );
   }
 
-  disconnect(): void {
+  forgetSession(): void {
+    this.lastJoin = null;
+    this.lastSeq = -1;
+    this.resuming = false;
+    this.resumeWanted = false;
+    this.resumeAttempt++;
+    clearSession();
+    // A server-side socket can occupy only one seat. Reconnect without the old
+    // seat so "start over" can actually create or join another room.
     this.socket?.disconnect();
     this.socket = null;
-    if (this.visibilityHandler && typeof document !== "undefined") {
-      document.removeEventListener("visibilitychange", this.visibilityHandler);
-      this.visibilityHandler = null;
+    this.everConnected = false;
+    this.connect();
+  }
+
+  disconnect(): void {
+    this.resumeAttempt++;
+    this.resuming = false;
+    this.socket?.disconnect();
+    this.socket = null;
+    if (this.boundVisibility && typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this.onVisibility);
+      this.boundVisibility = false;
     }
   }
 }

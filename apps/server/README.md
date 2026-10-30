@@ -1,78 +1,70 @@
-# Agent F: game server
+# Reveal — server
 
-Node 20+; Express and Socket.IO v4. The default host is `0.0.0.0:3001`.
-The server serves `apps/web/out/` and the Socket.IO endpoint from the same
-origin. If the export is not present yet, `/` shows a build note instead.
-
-## Run independently (before the other agents are merged)
-
-From the repository root:
+The server owns room state, scoring, timers, persistence, token rotation and
+Socket.IO fan-out. It listens on `0.0.0.0:3001` and serves the exported web
+client from `apps/web/out` when present. Install at the repository root and
+follow the root `RUNBOOK.md` for game-night setup and configuration.
 
 ```sh
-npm install --prefix apps/server
-npm run --prefix apps/server typecheck
-npm run --prefix apps/server test
-npm run --prefix apps/server start
+npm ci
+npm run build
+npm run start             # start the previously built game
+npm test --workspace apps/server
 ```
 
-No API keys are needed. The banner prints localhost, **every** non-loopback
-IPv4 LAN URL and a terminal QR for the first LAN address. Phones must be on the
-same LAN/hotspot and the host firewall must allow the selected port. Set
-`HOST`/`PORT` in the environment if necessary. Agent G's root `host.mjs` will
-load `.env`; when launching this TypeScript entry directly with a root `.env`:
+No API keys are required. The startup banner prints localhost, every non-loopback
+IPv4 address and a QR code. Phones need the same LAN/hotspot and a firewall
+that allows the selected port. `HOST` and `PORT` override the defaults; the
+root host launcher loads `.env`.
 
-```sh
-cd apps/server
-node --env-file=../../.env --import tsx src/index.ts
-```
+Accepted responses are appended to per-room JSONL files under `apps/server/data/`
+(mode `0600`). Live room state, session tokens and private decks are memory-only;
+restarting the server does not restore them. Programmatic callers can isolate
+logs via `createGameServer({ dataDir })`. Any player can delete a room. The
+hourly sweep removes rooms idle for 24 hours and all rooms after 48 hours,
+including recognized orphan logs after restart. Access checks also prevent
+expired rooms from being revived before the sweep.
 
-The standalone server has a small local bank and conservative deterministic
-results/digest/secrets/template narration. They are **integration fallbacks**,
-not a substitute for Agent C's complete scoring and Agent D's full prompt bank.
-The standalone fallback deliberately does not make network/API calls, even if a
-key happens to be set. An unfinished web export is not a playable UI.
+## Integration and fallbacks
 
-## Integration contract for Agent Z
+`RoomManager` uses `src/integratedServices.ts` by default: prompts, scoring,
+digests, private decks and narration are connected to the workspace packages.
+`src/services.ts` retains conservative injectable fallback implementations for
+provider failure, defensive error handling and tests. It is not the default
+production scoring pipeline. The older `src/integrated-services.ts` injectable
+adapter is retained for compatibility and synthetic provider tests; production
+uses `src/integratedServices.ts`. `createGameServer({ services })` remains the
+injectable test seam; each room has its own prompt provider. Lobby preparation
+runs in the background and `forPhase()` returns already-available prompts.
+Transient reveal, interlude and finale events are re-emitted on reconnect.
 
-`createGameServer({ services })` accepts the `GameServices` interface in
-`src/services.ts`. Inject the finished prompt, engine and narrator packages
-here; nothing imports an unfinished agent's files. Each room gets its own
-`createPromptProvider()` instance. `prepare()` is started once in the lobby at
-four players, without blocking play; `forPhase()` must return an already
-available bank synchronously. Its second argument is the requested maximum
-number of prompts (not the player count), so adapt another provider's signature
-if needed. Provider failure and narration timeout use the local fallback.
-Share a room-scoped provider-call budget across the agents' optional lanes.
+With no `XAI_API_KEY` or `GEMINI_API_KEY`, bank prompts and deterministic local
+copy make the game playable without network calls. With keys, each room shares a
+physical HTTP-attempt budget across prompt generation and narration; retries
+count and deleting a room aborts pending calls. Narration receives pseudonymous,
+public-only material, never secret decks or private debriefs. Provider output is
+validated and falls back to deterministic copy when rejected.
 
-All scoring/digest/narration inputs use pseudonymized room metadata and text;
-real aliases are restored only for client-facing display. Debriefs are used by
-scoring but excluded from public digest/reveals. For a strong isolation
-boundary, public `buildSkeleton`/`writeFinale` see only public claims, a digest
-without private debriefs or blind spots, and an **empty** secret-deck map.
-Private cards retain the deterministic engine copy. Do not pass private decks
-to a model that can produce public slides without a separately enforceable
-privacy boundary. `finale` contains only public material and is the same for all
-sockets; `secrets` is emitted individually to the current authenticated socket
-for each opted-in owner, including on resume.
+Prompt generation starts in the lobby, before answers exist. During play a local
+callback adds a clearly marked verbatim excerpt from an earlier public text
+answer to one eligible non-host prompt per later phase. It skips the callback
+when there is no suitable answer, or it would exceed the prompt length limit;
+private debriefs are never candidates, and authored spotlight/verdict prompts
+remain unchanged. Warmup includes a text round, and the same neutral tap-war
+bank prompt appears in the deep phase.
 
-A majority cooling vote moves to the immediately preceding heat phase; ordinary
-phase progression can resume one level at a time afterward. For transient
-reveal/interlude/finale reconnects the server re-emits the corresponding event
-with the remaining hold time after the full `RoomView` snapshot.
+When a Gemini key is present, pseudonymized public text can be tagged once in
+the background during debrief. A completed positive tag may supply a bounded
+style hint to narration; numeric scores and claims always use deterministic
+local tags, regardless of provider output or timing. Spotlight cover answers
+are not classified; their already-revealed punchlines may appear in the public
+digest. Private debriefs are never sent to a provider and use local similarity only. Reconnect rotation supports a
+nonce-bound retry across a dropped acknowledgement for updated clients; older
+clients retain same-socket recovery.
+See `NOTES/contract-requests.md` for frozen-contract gaps, including worst-case
+reveal/finale payloads that can exceed 5 KB without a chunking interface, and
+`RUNBOOK.md` for the independent smoke-oracle requirements.
 
-## Storage and retention
-
-Accepted responses are appended as individual `LogRecord` lines under
-`apps/server/data/`, created with file mode `0600`. Private decks and session
-secrets are memory-only and never written to those files. Any joined player can
-send `delete_room`; the server deletes the file, clears private memory, and
-notifies the room. The hourly sweep removes idle rooms after 24 hours and all
-rooms after 48 hours, including recognized orphan logs after a restart. Restart
-does not restore live room state. The frozen contract currently cannot express
-chunking: a worst-case 11-player Unicode reveal/finale can exceed 5 KB. See
-`NOTES/contract-requests.md` rather than silently losing answers.
-
-Tests include an actual five-client scripted Socket.IO game, ownership and
-reconnect isolation, timers and grace, heat voting, host authorization, bots,
-LAN/QR output, static export/preview-origin handling, malformed answers, and
-retention/deletion (including while narration is pending).
+Server tests cover real five-client play, private-deck ownership, reconnects,
+authorization, timers, retention and deletion, as well as synthetic provider
+requests and cancellation.

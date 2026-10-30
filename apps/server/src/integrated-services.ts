@@ -4,16 +4,16 @@ import { PromptProvider as FullPromptProvider, Provider, selectFromBank, tagText
 import { buildSkeleton, SYSTEM_PROMPT, writeFinale } from "../../../packages/narrator/src/index.ts";
 import type { GameServices, PromptProvider } from "./services.ts";
 
-/** Production adapter. The room manager supplies pseudonymized public sources
- * and consent-gated private cards in separate structured sections to the single
- * Grok reveal request; narrator validation keeps the sections disjoint. No calls
- * are needed in no-key mode. */
+/** Injectable compatibility adapter. The default production server uses
+ * integratedServices.ts, with room-scoped HTTP attempt limits and cancellation.
+ * This entry point remains available for existing callers and provider tests. */
 export function createIntegratedServices(
   provider = Provider.fromEnv(),
   onJokerWeights?: (roomId: string, weights: ReadonlyMap<string, number>) => void,
 ): GameServices {
   return {
-    createPromptProvider(roomId = "unassigned"): PromptProvider {
+    createPromptProvider(context = "unassigned"): PromptProvider {
+      const roomId = typeof context === "string" ? context : context.roomId;
       let full: FullPromptProvider | undefined;
       let disposed = false;
       return {
@@ -37,7 +37,7 @@ export function createIntegratedServices(
     },
     computeSignals,
     computeResults(signals, log, meta) {
-      const tags = new Map(log.map((record: LogRecord) => {
+      const tags = new Map(log.filter((record) => record.roundKind !== "debrief").map((record: LogRecord) => {
         const value = record.value;
         const text = value.kind === "text" ? value.text : value.kind === "shout" ? value.word : value.kind === "dare" ? value.reason ?? "" : "";
         return [logRecordId(record), tagText(text)] as const;
@@ -49,21 +49,13 @@ export function createIntegratedServices(
     buildSecrets,
     buildSkeleton(results, digest, meta) { return buildSkeleton(results, digest, meta?.players); },
     async writeFinale(slides, decks, results, digest, meta) {
+      const aliases = meta?.players.map((player) => player.alias) ?? [];
       return writeFinale(slides, decks, results, digest, {
         roster: meta?.players,
         grok: async (payload) => {
-          const response = await provider.grokJson({
-            room: meta?.roomId ?? "unassigned",
-            purpose: "reveal",
-            messages: [
-              { role: "system", content: SYSTEM_PROMPT },
-              { role: "user", content: JSON.stringify(payload) },
-            ],
-            temperature: 0.35,
-            maxTokens: 4096,
-            json: true,
-          });
-          return response.result.ok ? response.value : null;
+          const result = await provider.grokJson({ room: results.roomId, purpose: "reveal", json: true, aliases,
+            messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: JSON.stringify(payload) }] });
+          return result.result.ok ? result.value : null;
         },
       });
     },

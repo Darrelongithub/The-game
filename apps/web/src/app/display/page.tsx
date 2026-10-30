@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
-import type { FinaleView, InterludeView, JoinReply, RoomCode, RoomView, RoundView, RevealView } from "@shared/contracts.ts";
+import type { FinaleView, InterludeView, RoomCode, RoomView, RoundView, RevealView } from "@shared/contracts.ts";
 import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from "@shared/contracts.ts";
 
 const cleanCode = (raw: string): RoomCode => [...raw.toUpperCase()].filter(c => ROOM_CODE_ALPHABET.includes(c)).slice(0, ROOM_CODE_LENGTH).join("") as RoomCode;
@@ -28,7 +28,7 @@ export default function DisplayPage() {
     let seq = -1;
     const joinDisplay = () => {
       setStatus("Connecting to the public room display…");
-      socket.emit("join", { roomCode: code, alias: "", consent: { age: false, terms: false, revealOptIn: false }, role: "display" }, (reply: JoinReply) => {
+      socket.emit("display_join", { roomCode: code }, (reply: { ok: boolean; state?: RoomView; error?: string }) => {
         if (!reply.ok) { setStatus(reply.error ?? "Could not open this display."); return; }
         if (reply.state) { setState(reply.state); setRound(reply.state.round); }
         setStatus("Connected · public display only");

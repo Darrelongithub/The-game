@@ -10,10 +10,12 @@ import { GlowButton } from "@/components/GlowButton";
 export function ConnectionLostOverlay({
   connected,
   resuming,
+  hasSession = false,
   onRetry,
 }: {
   connected: boolean;
   resuming: boolean;
+  hasSession?: boolean;
   onRetry: () => void;
 }) {
   const [attempts, setAttempts] = useState(0);
@@ -60,12 +62,14 @@ export function ConnectionLostOverlay({
               transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}
             />
             <h2 className="font-display text-heading text-white mb-2">
-              {resuming ? "Getting you back in" : "You slipped off"}
+              {resuming ? "Getting you back in" : hasSession ? "You slipped off" : "Can't reach the game"}
             </h2>
             <p className="text-sm text-white/60 leading-relaxed">
               {resuming
-                ? "Pulling the room back from the server. Nothing was lost."
-                : "Your phone lost the room. Retrying on its own — keep this tab open."}
+                ? "Pulling the room back from the server."
+                : hasSession
+                  ? "Your phone lost the room. Retrying on its own — keep this tab open."
+                  : "The game server isn't responding yet. Check the host's link or WiFi, then retry."}
             </p>
             <p className="mt-2 text-[11px] text-white/30 tabular-nums">
               {attempts > 0 ? `auto-retry ${attempts}× · ` : ""}same WiFi as the host?

@@ -39,7 +39,7 @@ import type {
 } from "@shared/contracts.ts";
 import { MIN_PLAYERS, ROUND_TIMERS_MS } from "@shared/contracts.ts";
 import { isAlias, isResponseValue, targetsOther } from "@shared/validate.ts";
-import { clearSession, loadSession, saveSession } from "./session";
+import { clearSession, saveSession } from "./session";
 import type { Transport, TransportHandlers } from "./transport";
 
 const MOCK_CODE: RoomCode = "MOCK";
@@ -58,6 +58,8 @@ const MOCK_CLAMP: Partial<Record<RoundKind, number>> = {
   dare: 45_000,
   pair_dare: 35_000,
   debrief: 25_000,
+  spotlight: 20_000,
+  verdict: 30_000,
 };
 
 interface RoundSpec {
@@ -69,6 +71,14 @@ interface RoundSpec {
   /** interim shim — see NOTES/contract-requests.md (RoundView payload) */
   trait?: TraitId;
   about?: PlayerId;
+  /** spotlight: who the room is watching (the local player may be the subject) */
+  subject?: PlayerId;
+  /** spotlight: the cover question the subject sees instead of the real one */
+  decoy?: string;
+  /** spotlight: the subject's cover answer, revealed last as the punchline */
+  punchline?: string;
+  /** verdict: how long the phones stay face-down before the secret pick */
+  debateMs?: number;
   /** what the bots "said" — flavour + reveal fuel, never scored */
   botAnswers?: { who: PlayerId; value: ResponseValue }[];
 }
@@ -110,9 +120,9 @@ export class MockTransport implements Transport {
   private roundId = "";
   private closed = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private finaleTimer: ReturnType<typeof setTimeout> | null = null;
   private heatDownVotes = 0;
   private restoredSnapshot: Snap | null = null;
-  private restoredTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     this.restoredSnapshot = this.readSnapshot();
@@ -190,10 +200,13 @@ export class MockTransport implements Transport {
       this.armTimer(ms);
     } else {
       this.round = null;
+      // Older mock snapshots marked the finale as closed after its deck. A
+      // deleted mock removes its snapshot, so those snapshots are recoverable.
+      if (this.phase === "closed") this.phase = "finale";
       this.emitState();
       if (this.phase === "finale") this.emitFinale();
-      if (this.phase === "closed") this.emitSecrets();
     }
+    this.handlers.onConnection?.(true, { resuming: false });
   }
 
   // ---------------------------------------------------------------- join
@@ -266,6 +279,7 @@ export class MockTransport implements Transport {
     this.handlers.onConnection?.(true, { resuming: true });
     this.emitState();
     if (this.round) this.handlers.onRound?.(this.round);
+    this.handlers.onConnection?.(true, { resuming: false });
     return { ok: true, you: this.you, secret: MOCK_SECRET, state: this.view() };
   }
 
@@ -279,6 +293,7 @@ export class MockTransport implements Transport {
     this.handlers.onConnection?.(true, { resuming: true });
     this.emitState();
     if (this.round) this.handlers.onRound?.(this.round);
+    this.handlers.onConnection?.(true, { resuming: false });
   }
 
   // ------------------------------------------------------------- actions
@@ -369,6 +384,19 @@ export class MockTransport implements Transport {
     this.handlers.onDeleted?.();
   }
 
+  forgetSession(): void {
+    this.stopTimer();
+    this.players = [];
+    this.round = null;
+    this.phase = "lobby";
+    this.closed = false;
+    this.restoredSnapshot = null;
+    clearSession();
+    if (typeof window !== "undefined") {
+      try { window.sessionStorage.removeItem(SNAPSHOT_KEY); } catch { /* ignore */ }
+    }
+  }
+
   disconnect(): void {
     this.stopTimer();
   }
@@ -383,6 +411,9 @@ export class MockTransport implements Transport {
     }
     if (this.round.onlyPlayers && !this.round.onlyPlayers.includes(this.you)) {
       return { ok: false, error: "This one isn't yours to answer." };
+    }
+    if (this.round.kind === "verdict" && (this.round.voteOpensAt ?? 0) > Date.now()) {
+      return { ok: false, error: "Phones down. Argue it out first." };
     }
     // NOTE: no onRound re-emit here — the UI already flips `youSubmitted`
     // locally, and a second round event for the same roundId would make
@@ -442,14 +473,17 @@ export class MockTransport implements Transport {
     this.roundId = `r${this.stepIndex + 1}`;
     const ms = MOCK_CLAMP[spec.kind] ?? ROUND_TIMERS_MS[spec.kind];
     this.phase = spec.phase;
+    // The spotlight subject's own phone shows the COVER, never the question.
+    const cover = spec.subject === this.you ? spec.decoy : undefined;
     this.round = {
       roundId: this.roundId,
       index: this.stepIndex + 1,
       phase: spec.phase,
       kind: spec.kind,
-      promptText: substitute(spec.text, this.players),
+      promptText: cover ?? substitute(spec.text, this.players),
       closesAt: Date.now() + ms,
       youSubmitted: false,
+      ...(spec.kind === "verdict" ? { voteOpensAt: Date.now() + Math.min(spec.debateMs ?? 16_000, Math.max(0, ms - 2_000)) } : {}),
       ...(spec.onlyPlayers ? { onlyPlayers: spec.onlyPlayers } : {}),
       // INTERIM SHIM (contract request filed): the round needs to tell the UI
       // which trait/player a rating or IOS answer is about.
@@ -490,9 +524,9 @@ export class MockTransport implements Transport {
 
   private stopTimer(): void {
     if (this.timer) clearTimeout(this.timer);
+    if (this.finaleTimer) clearTimeout(this.finaleTimer);
     this.timer = null;
-    if (this.restoredTimer) clearTimeout(this.restoredTimer);
-    this.restoredTimer = null;
+    this.finaleTimer = null;
   }
 
   private goFinale(): void {
@@ -535,14 +569,18 @@ export class MockTransport implements Transport {
     this.handlers.onFinale?.(finale);
     this.phase = "finale";
     this.writeSnapshot();
-    // The deck unlocks only AFTER the public story ends on this phone (§2).
-    setTimeout(() => this.emitSecrets(), 600);
+    // The UI keeps the deck closed until the public story ends. Track this
+    // delayed event so deletion, start-over and unmount cannot revive a room.
+    if (this.finaleTimer) clearTimeout(this.finaleTimer);
+    this.finaleTimer = setTimeout(() => {
+      this.finaleTimer = null;
+      if (!this.closed && this.phase === "finale") this.emitSecrets();
+    }, 600);
   }
 
   private emitSecrets(): void {
     const deck: SecretDeckView = { cards: secretCards(this.players) };
     this.handlers.onSecrets?.(deck);
-    this.phase = "closed";
     this.seq += 1;
     this.emitState();
   }
@@ -651,6 +689,36 @@ function buildScript(players: PlayerView[]): Step[] {
           { who: p2, value: { kind: "minigame", score: 61 } },
           { who: p3, value: { kind: "minigame", score: 58 } },
           { who: p4, value: { kind: "minigame", score: 47 } },
+        ],
+      },
+    },
+    {
+      kind: "round",
+      spec: {
+        kind: "spotlight",
+        phase: "spicy",
+        coding: "couple",
+        text: "Who here is {P3} trying to impress?",
+        subject: p3,
+        punchline: "What did you eat today? — nothing, I'm being watched.",
+        botAnswers: [
+          { who: p2, value: { kind: "text", text: "{P2}" } },
+          { who: p4, value: { kind: "text", text: "{P2}, obviously" } },
+        ],
+      },
+    },
+    {
+      kind: "round",
+      spec: {
+        kind: "verdict",
+        phase: "spicy",
+        coding: "couple",
+        debateMs: 6_000,
+        text: "THE VERDICT: who here would make the best couple? Debate. Decide.",
+        botAnswers: [
+          { who: p2, value: { kind: "pick", target: p3 } },
+          { who: p3, value: { kind: "pick", target: p2 } },
+          { who: p4, value: { kind: "pick", target: p3 } },
         ],
       },
     },
@@ -787,6 +855,10 @@ function autoAnswer(
       return { kind: "dare", status: "done" };
     case "debrief":
       return { kind: "text", text: "We mostly talked about who is buying the next round." };
+    case "spotlight":
+      return { kind: "text", text: "Watching the door, honestly." };
+    case "verdict":
+      return { kind: "pick", target: other };
     default:
       return spec ? null : null;
   }
@@ -800,6 +872,31 @@ function buildReveal(
   you: PlayerId
 ): RevealView {
   const name = (id: PlayerId) => players.find((p) => p.id === id)?.alias ?? "Player";
+  if (round.kind === "spotlight") {
+    // Captions stack, then the subject's own decoy line lands last.
+    const subject = spec?.subject === you ? name(you) : name(spec?.subject ?? players[0]!.id);
+    const captions = (spec?.botAnswers ?? [])
+      .filter((b) => b.who !== spec?.subject)
+      .map((b) => ({ alias: name(b.who), text: b.value.kind === "text" ? b.value.text : describe(b.value, name) }));
+    if (spec?.subject !== you && mine.kind === "text") captions.push({ alias: name(you), text: mine.text });
+    return { roundId: round.roundId, kind: "spotlight", summary: `Live on ${subject}`, subject,
+      items: captions, ...(spec?.punchline ? { punchline: spec.punchline } : {}), holdMs: 8000 };
+  }
+  if (round.kind === "verdict") {
+    const votes = new Map<PlayerId, number>();
+    for (const b of spec?.botAnswers ?? []) if (b.value.kind === "pick") votes.set(b.value.target, (votes.get(b.value.target) ?? 0) + 1);
+    if (mine.kind === "pick") votes.set(mine.target, (votes.get(mine.target) ?? 0) + 1);
+    const total = [...votes.values()].reduce((a, b) => a + b, 0);
+    const winner = [...votes].sort((a, b) => b[1] - a[1])[0];
+    return {
+      roundId: round.roundId,
+      kind: "verdict",
+      summary: winner ? `The room decided: ${name(winner[0])}` : "Nobody voted. The room argued for nothing.",
+      celebrate: spec?.coding === "couple",
+      holdMs: 8000,
+      ...(winner ? { slide: { beat: "land" as const, flavor: "group" as const, title: name(winner[0]), body: `${winner[1]} of ${total} said it out loud.`, numbers: { votes: winner[1], of: total, share: winner[1] / total } } } : {}),
+    };
+  }
   const items = (spec?.botAnswers ?? []).map((b) => ({
     alias: name(b.who),
     text: describe(b.value, name),

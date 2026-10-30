@@ -2,7 +2,7 @@
 // components/play/PlayScreen.tsx — Agent A's phase router for the night itself.
 //
 // Wiring (post-merge): it now renders OTHER AGENTS' real screens:
-//   round     → src/screens/PromptScreen   (B1/B2 input surface, all 9 kinds,
+//   round     → src/screens/PromptScreen   (B1/B2 input surface, all 11 kinds,
 //                                           onlyPlayers spectator handling)
 //   interlude → src/screens/InterludeScreen
 //   reveal    → src/screens/RevealScreen
@@ -19,10 +19,14 @@ import { PromptScreen } from "@/screens/PromptScreen";
 import { InterludeScreen } from "@/screens/InterludeScreen";
 import { RevealScreen } from "@/screens/RevealScreen";
 import { FinaleScreen } from "@/components/FinaleScreen";
-import { SecretDeck } from "@/components/SecretDeck";
 import { Flame } from "@/components/Flame";
 
 export function PlayScreen({ room }: { room: UseRoom }) {
+  if (!room.view) return null;
+  return <><PlayContent room={room} /><PlayControls room={room} /></>;
+}
+
+function PlayContent({ room }: { room: UseRoom }) {
   const {
     view, you, round, interlude, reveal, finale, secrets,
     submit, voteHeatDown,
@@ -32,8 +36,6 @@ export function PlayScreen({ room }: { room: UseRoom }) {
   // and each phone dismisses them independently.
   const [watchedInterlude, setWatchedInterlude] = useState<unknown>(null);
   const [watchedReveal, setWatchedReveal] = useState<string | null>(null);
-  const [storyEnded, setStoryEnded] = useState(false);
-  const [deckOpen, setDeckOpen] = useState(false);
 
   useEffect(() => setWatchedInterlude(null), [interlude]);
   useEffect(() => setWatchedReveal(null), [reveal]);
@@ -43,26 +45,12 @@ export function PlayScreen({ room }: { room: UseRoom }) {
   // ── finale first: once it lands, it owns the screen until the player leaves
   if (finale) {
     return (
-      <>
-        <FinaleScreen
-          view={finale}
-          deck={secrets ?? undefined}
-          roomCode={view.code}
-          onStoryEnd={() => setStoryEnded(true)}
-        />
-        {/* Safety net: a phone that reconnects after the story ended can still
-            reopen its private deck without replaying the slides. */}
-        {storyEnded && secrets && !deckOpen && (
-          <button
-            type="button"
-            onClick={() => setDeckOpen(true)}
-            className="fixed bottom-4 left-1/2 z-40 min-h-[48px] -translate-x-1/2 rounded-2xl border border-lime-accent/50 bg-[#0d0617]/90 px-4 text-[11px] uppercase tracking-[0.2em] text-lime-accent"
-          >
-            {secrets.cards.length} secret{secrets.cards.length === 1 ? "" : "s"} · only on this phone
-          </button>
-        )}
-        {deckOpen && secrets && <SecretDeck deck={secrets} onClose={() => setDeckOpen(false)} />}
-      </>
+      <FinaleScreen
+        view={finale}
+        deck={secrets ?? undefined}
+        roomCode={view.code}
+        onExit={room.reset}
+      />
     );
   }
 
@@ -96,6 +84,36 @@ export function PlayScreen({ room }: { room: UseRoom }) {
     <HoldingScreen
       label={view.phase === "interlude" ? "Changing the temperature…" : "Next prompt incoming…"}
     />
+  );
+}
+
+function PlayControls({ room }: { room: UseRoom }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  return (
+    <>
+      <div className="fixed bottom-2 right-2 z-[60] flex gap-2" role="group" aria-label="Room controls">
+        {room.isHost && room.round && !room.finale && (
+          <button type="button" onClick={room.skipRound} className="min-h-[48px] rounded-xl border border-white/20 bg-[#0d0617]/95 px-3 text-xs text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent">
+            Skip round
+          </button>
+        )}
+        <button type="button" onClick={() => setConfirmDelete(true)} className="min-h-[48px] rounded-xl border border-alert/40 bg-[#0d0617]/95 px-3 text-xs text-alert focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent">
+          Delete room
+        </button>
+      </div>
+      {confirmDelete && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4" role="alertdialog" aria-modal="true" aria-labelledby="play-delete-title" onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") setConfirmDelete(false); }}>
+          <div className="glass-card w-full max-w-sm bg-[#0d0617] p-5">
+            <h2 id="play-delete-title" className="text-lg font-bold text-white">Delete this room for everyone?</h2>
+            <p className="mt-2 text-sm text-white/70">This immediately removes the room and its saved answers.</p>
+            <div className="mt-4 flex gap-2">
+              <button type="button" autoFocus onClick={() => setConfirmDelete(false)} className="min-h-[48px] rounded-xl border border-white/30 px-4 text-white">Keep it</button>
+              <button type="button" onClick={room.deleteRoom} className="min-h-[48px] rounded-xl border border-alert px-4 text-alert">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

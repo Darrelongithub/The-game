@@ -11,6 +11,8 @@ export interface StoredSession {
   you: PlayerId;
   secret: string;
   alias?: string;
+  /** Private nonce for an in-flight token rotation; cleared on acknowledgement. */
+  resumeNonce?: string;
 }
 
 const alive = () => typeof window !== "undefined";
@@ -28,12 +30,15 @@ export function loadSession(): StoredSession | null {
   }
 }
 
-export function saveSession(s: StoredSession): void {
-  if (!alive()) return;
+export function saveSession(s: StoredSession): boolean {
+  if (!alive()) return false;
   try {
-    window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(s));
+    const raw = JSON.stringify(s);
+    window.sessionStorage.setItem(SESSION_KEY, raw);
+    return window.sessionStorage.getItem(SESSION_KEY) === raw;
   } catch {
-    /* private mode / quota — the game still works, resume is just dead */
+    // Private mode / quota: play can continue, but reload recovery is limited.
+    return false;
   }
 }
 

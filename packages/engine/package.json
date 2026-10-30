@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Reveal Game scoring engine — pure deterministic functions, zero I/O, zero network, zero runtime dependencies.",
+  "description": "Reveal Game scoring engine \u2014 pure deterministic functions, zero I/O, zero network, zero runtime dependencies.",
   "exports": {
     ".": "./src/index.ts"
   },

@@ -42,7 +42,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   // keep 100dvh honest on iOS: no layout shift when the address bar collapses
   viewportFit: "cover",
-  themeColor: "#0d0617",
+  themeColor: "#100019",
 };
 
 export default function RootLayout({
@@ -50,7 +50,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${clashDisplay.variable} ${inter.variable}`}>
-      <body className="bg-base text-white antialiased overflow-x-hidden">
+      <body className="bg-base text-white antialiased overflow-x-hidden relative isolate">
         <AmbientBackground />
         {children}
       </body>

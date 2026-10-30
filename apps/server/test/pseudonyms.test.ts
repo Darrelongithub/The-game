@@ -6,6 +6,7 @@ test("pseudonym substitution respects Unicode word boundaries and protects conta
   const players = [{ id: "p1", alias: "Ian" }, { id: "p2", alias: "An" }, { id: "p3", alias: "Brian" }];
   assert.equal(pseudonymizeText("Ian told Brian; An agreed.", players), "Player 1 told Player 3; Player 2 agreed.");
   assert.equal(pseudonymizeText("Brianian and candy", players), "Brianian and candy");
+  assert.equal(pseudonymizeText("Zoe\u0308 said hello", [{ id: "p4", alias: "Zoë" }]), "Player 1 said hello", "NFD alias spellings cannot evade provider redaction");
 });
 
 test("swap-back uses deterministic room order and whole pseudonym tokens", () => {

@@ -13,7 +13,7 @@
 //   • prefers-reduced-motion: hold opens instantly — still hides on release.
 'use client'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { SECRET_HOLD_MS } from '../../../../packages/shared/src/contracts.ts'
 import { haptic, usePrefersReducedMotion } from './feedback'
 import { sfx } from './sound'
@@ -45,6 +45,10 @@ export function HoldToReveal({
   const [open, setOpen] = useState(false)
   const [pressed, setPressed] = useState(false)
   const [progress, setProgress] = useState(0)
+  const reducedRef = useRef(reduced)
+  reducedRef.current = reduced
+  const advanceRef = useRef(onAdvance)
+  advanceRef.current = onAdvance
 
   const pointer = useRef<{
     id: number
@@ -65,8 +69,56 @@ export function HoldToReveal({
     }
   }
 
-  // Unmount safety: never leave a rAF running.
-  useEffect(() => () => stopRamp(), [])
+  const cancelHold = () => {
+    stopRamp()
+    pointer.current = null
+    setOpen(false)
+    setPressed(false)
+    setProgress(0)
+  }
+
+  const finishHold = (id: number, allowAdvance: boolean) => {
+    const p = pointer.current
+    if (!p || p.id !== id) return
+    stopRamp()
+    const dur = Date.now() - p.t
+    const dx = p.dx
+    const opened = p.opened
+    pointer.current = null
+    setOpen(false)
+    setPressed(false)
+    setProgress(0)
+    if (!allowAdvance) return
+    if (opened) {
+      // Instant reduced-motion reveals still preserve quick-tap navigation.
+      if (reducedRef.current && dur < TAP_MS && Math.abs(dx) <= TAP_SLOP_PX) advanceRef.current?.(1)
+    } else if (Math.abs(dx) >= SWIPE_PX) {
+      advanceRef.current?.(dx < 0 ? 1 : -1)
+    } else if (dur < TAP_MS && Math.abs(dx) <= TAP_SLOP_PX) {
+      advanceRef.current?.(1)
+    }
+  }
+
+  // Also catch release outside the card (where pointer capture is unavailable),
+  // app switching and focus loss. Cancellation must never navigate the deck.
+  useEffect(() => {
+    const onUp = (event: PointerEvent) => finishHold(event.pointerId, true)
+    const onCancel = (event: PointerEvent) => finishHold(event.pointerId, false)
+    const onVisibility = () => { if (document.visibilityState !== 'visible') cancelHold() }
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
+    window.addEventListener('blur', cancelHold)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      stopRamp()
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+      window.removeEventListener('blur', cancelHold)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+    // These callbacks use refs for the current hold and navigation handler.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const beginRamp = () => {
     const p = pointer.current
@@ -118,36 +170,6 @@ export function HoldToReveal({
     p.dx = e.clientX - p.x
   }
 
-  const release = (e: React.PointerEvent<HTMLDivElement>) => {
-    const p = pointer.current
-    if (!p || e.pointerId !== p.id) return
-    stopRamp()
-    const dur = Date.now() - p.t
-    const dx = p.dx
-    const opened = p.opened || open
-    pointer.current = null
-    setPressed(false)
-    setProgress(0)
-
-    if (opened) {
-      // Release hides it again — shoulder-surfers see nothing.
-      setOpen(false)
-      // Reduced motion opens instantly on pointerdown, so a quick tap there
-      // flashes the face and must still navigate: hide + advance together.
-      if (reduced && dur < TAP_MS && Math.abs(dx) <= TAP_SLOP_PX) onAdvance?.(1)
-      return
-    }
-    if (Math.abs(dx) >= SWIPE_PX) {
-      onAdvance?.(dx < 0 ? 1 : -1)
-      return
-    }
-    if (dur < TAP_MS && Math.abs(dx) <= TAP_SLOP_PX) {
-      // Quick tap → next card (a hold that never completed is NOT a tap
-      // unless it was fast — mid-length presses just cancel).
-      onAdvance?.(1)
-    }
-  }
-
   const ringLen = 1 // pathLength={1} → dash math is 0..1
   const ringOffset = ringLen - (pressed ? progress : 0)
 
@@ -165,21 +187,35 @@ export function HoldToReveal({
       }}
       role="button"
       tabIndex={0}
-      aria-label={open ? 'Secret card revealed — release to hide' : 'Secret card face-down — press and hold to reveal'}
+      aria-label={open ? 'Secret card revealed — release to hide' : 'Secret card face-down — hold Space or Enter to reveal, use arrow keys to change cards'}
       data-testid="hold-to-reveal"
       data-state={open ? 'open' : 'closed'}
       data-pressed={pressed ? '1' : '0'}
       data-progress={(pressed ? progress : 0).toFixed(2)}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onPointerUp={release}
-      onPointerCancel={release}
-      onLostPointerCapture={release}
+      onPointerUp={(e) => finishHold(e.pointerId, true)}
+      onPointerCancel={(e) => finishHold(e.pointerId, false)}
+      onLostPointerCapture={(e) => finishHold(e.pointerId, false)}
+      onBlur={cancelHold}
       onContextMenu={(e) => e.preventDefault()}
       onKeyDown={(e) => {
+        if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+          e.preventDefault()
+          if (!pointer.current) advanceRef.current?.(e.key === 'ArrowRight' ? 1 : -1)
+        } else if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          if (e.repeat || pointer.current) return
+          pointer.current = { id: -1, x: 0, y: 0, t: Date.now(), dx: 0, raf: 0, start: 0, opened: false }
+          setPressed(true)
+          setProgress(0)
+          beginRamp()
+        }
+      }}
+      onKeyUp={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
-          onAdvance?.(1)
+          finishHold(-1, true)
         }
       }}
     >
@@ -190,8 +226,8 @@ export function HoldToReveal({
           transition: reduced ? 'none' : 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
           // Face-down: glass + grain + heat gradient
           background: open
-            ? 'linear-gradient(140deg, #8b2fe0 0%, #2f5fe0 55%, #b6ff3c 145%)'
-            : 'linear-gradient(150deg, rgba(139,47,224,0.55) 0%, rgba(47,95,224,0.4) 55%, rgba(182,255,60,0.22) 130%)',
+            ? 'linear-gradient(140deg, #8b2fe0 0%, #cf2ba9 55%, #efb4ff 145%)'
+            : 'linear-gradient(150deg, rgba(139,47,224,0.55) 0%, rgba(207,43,169,0.4) 55%, rgba(239,180,255,0.22) 130%)',
           backdropFilter: 'blur(24px) saturate(140%)',
           WebkitBackdropFilter: 'blur(24px) saturate(140%)',
           border: '1px solid rgba(255,255,255,0.18)',
@@ -213,7 +249,7 @@ export function HoldToReveal({
             <svg width="76" height="76" viewBox="0 0 24 24" fill="none" aria-hidden>
               <path
                 d="M7 10V7a5 5 0 0 1 10 0v3"
-                stroke="#b6ff3c"
+                stroke="#efb4ff"
                 strokeWidth="1.6"
                 strokeLinecap="round"
               />
@@ -223,12 +259,12 @@ export function HoldToReveal({
                 width="14.6"
                 height="10.3"
                 rx="2.6"
-                stroke="#b6ff3c"
+                stroke="#efb4ff"
                 strokeWidth="1.6"
                 fill="rgba(13,6,23,0.55)"
               />
-              <circle cx="12" cy="14.6" r="1.5" fill="#b6ff3c" />
-              <path d="M12 15.9v1.8" stroke="#b6ff3c" strokeWidth="1.5" strokeLinecap="round" />
+              <circle cx="12" cy="14.6" r="1.5" fill="#efb4ff" />
+              <path d="M12 15.9v1.8" stroke="#efb4ff" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
 
             <span className="text-[11px] uppercase tracking-[0.28em] text-white/75 font-medium">
@@ -254,7 +290,7 @@ export function HoldToReveal({
                 height="97"
                 rx="7"
                 fill="none"
-                stroke="#b6ff3c"
+                stroke="#efb4ff"
                 strokeWidth="1.6"
                 pathLength={ringLen}
                 strokeDasharray={ringLen}
@@ -267,14 +303,12 @@ export function HoldToReveal({
         )}
 
         {/* ── revealed (mounted only while held) ────────────────────── */}
-        <AnimatePresence>
-          {open && (
+        {open && (
             <motion.div
               key="face"
               className="absolute inset-0 p-6 flex flex-col gap-3 overflow-hidden"
               initial={reduced ? { opacity: 1 } : { opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1, transition: { duration: reduced ? 0 : 0.22 } }}
-              exit={{ opacity: 0, transition: { duration: 0.12 } }}
               data-testid="hold-face"
             >
               {/* lime flash (§12: revealed = full heat gradient + lime flash) */}
@@ -288,8 +322,7 @@ export function HoldToReveal({
               )}
               {face}
             </motion.div>
-          )}
-        </AnimatePresence>
+        )}
       </div>
     </div>
   )

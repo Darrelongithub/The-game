@@ -31,9 +31,9 @@ for (const [playerId, cards] of decks) {
 
 - **Pass `roster`** (a `RoomMeta`, or `meta.players`, or `{ id, alias }[]`). The
   digest is keyed by **alias** (`quotes`, `dodges`, `stats`), claims are keyed by
-  **PlayerId**. Without the roster the narrator refuses to guess and drops the
-  digest attributions ("— Player 2") instead of misattributing them. Everything
-  else still renders. This is also requested in `NOTES/contract - requests.md`.
+  **PlayerId**. Without the roster the local skeleton still renders, but the
+  narrator skips the provider call because it cannot reliably scrub aliases
+  typed in free text. This is also requested in `NOTES/contract - requests.md`.
 - `slides` are **broadcast-safe**: public claim types only, `Player N` tokens
   only, identical on every phone. `onesided` / `spark` claims can never appear.
 - `decks` are **per player**: emit each deck on that player's socket only, never

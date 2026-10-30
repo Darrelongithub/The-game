@@ -149,8 +149,8 @@ export function buildSecrets(
     for (let j = i + 1; j < meta.players.length; j++) {
       const b = meta.players[j]!;
       if (!optIn.has(a.id) || !optIn.has(b.id)) continue;
-      const intent = meta.profiles[a.id]?.tonight;
-      if (!intent || intent !== meta.profiles[b.id]?.tonight) continue;
+      const intent = meta.profiles?.[a.id]?.tonight;
+      if (!intent || intent !== meta.profiles?.[b.id]?.tonight) continue;
       const label = ({ chaos: "a little chaos", vibes: "good vibes", feelings: "real feelings", mission: "a shared mission" } as const)[intent];
       add(a.id, card(`secret-profile-intent-${a.id}-${b.id}`, "roomnote", "A shared vibe", [
         `You and ${pseudoOf(meta, b.id)} both came looking for ${label}.`,
@@ -205,6 +205,8 @@ export function buildSecrets(
   // ---------- fixed order spark → onesided → blindspot → roomnote → stat, capped ----------
   const decks = new Map<PlayerId, SecretCard[]>();
   for (const player of meta.players) {
+    // The reveal opt-in gates the entire private deck, not only spark/onesided.
+    if (!optIn.has(player.id)) continue;
     const cards = buckets.get(player.id);
     if (!cards || cards.length === 0) continue;
     const ordered = [...cards].sort((x, y) => KIND_ORDER.indexOf(x.kind) - KIND_ORDER.indexOf(y.kind));

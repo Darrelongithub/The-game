@@ -42,7 +42,8 @@ export function RoomApp() {
 
   return (
     <>
-      <AnimatePresence mode="wait">
+      {/* Clear the old room synchronously, including any revealed private card. */}
+      <AnimatePresence key={inRoom ? "in-room" : "without-room"} mode="wait">
         {!inRoom && room.hasSession ? (
           <motion.div key="resuming" variants={pageVariants} initial="initial" animate="animate" exit="exit">
             <ResumeSplash onGiveUp={room.reset} />
@@ -81,14 +82,16 @@ export function RoomApp() {
             />
           </motion.div>
         ) : (
-          <motion.div key="play" variants={pageVariants} initial="initial" animate="animate" exit="exit">
+          // Do not transform this wrapper: the finale and room controls are
+          // fixed to the viewport and must remain visible on mobile browsers.
+          <motion.div key="play" className="min-h-[100dvh]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
             <PlayScreen room={room} />
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Reconnect handling is global: it can hit any screen, any phase. */}
-      <ConnectionLostOverlay connected={room.connected} resuming={room.resuming} onRetry={room.retry} />
+      <ConnectionLostOverlay connected={room.connected} resuming={room.resuming} hasSession={room.hasSession} onRetry={room.retry} />
     </>
   );
 }

@@ -61,10 +61,13 @@ function useCountUp(running: boolean, instant: boolean, durationMs: number): num
 export function GroupAnnouncement({
   slide,
   skipToEnd = false,
+  celebrate = true,
   onDone,
 }: {
   slide: FinaleSlide
   skipToEnd?: boolean
+  /** confetti on the land beat — couple-coded verdicts only (spec §3) */
+  celebrate?: boolean
   onDone?: () => void
 }) {
   const reduced = usePrefersReducedMotion()
@@ -110,13 +113,15 @@ export function GroupAnnouncement({
   useEffect(() => {
     if (phase !== 'land' || fireRef.current) return
     fireRef.current = true
-    fireConfettiBurst({ particleCount: 160, y: 0.5 })
-    fireConfettiSides()
+    if (celebrate) {
+      fireConfettiBurst({ particleCount: 160, y: 0.5 })
+      fireConfettiSides()
+    }
     haptic([16, 40, 24])
     sfx.landBoom()
     markDone()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase])
+  }, [phase, celebrate])
 
   const running = phase === 'count'
   const count = useCountUp(running, reduced, COUNT_UP_MS)
@@ -194,7 +199,7 @@ export function GroupAnnouncement({
                     <span
                       className="tabular-nums font-display font-bold text-display-lg text-lime-accent"
                       data-testid={`ga-num-${key.toLowerCase()}`}
-                      style={{ textShadow: '0 0 22px rgba(182,255,60,0.45)' }}
+                      style={{ textShadow: '0 0 22px rgba(239,180,255,0.45)' }}
                     >
                       {shown(value)}
                       {isPercentKey(key) ? '%' : ''}
@@ -231,7 +236,7 @@ export function GroupAnnouncement({
               style={{
                 fontSize: 'clamp(3rem, 14vw, 7rem)',
                 color: 'var(--white-text)',
-                textShadow: '0 0 60px rgba(255,77,109,0.5), 0 0 24px rgba(182,255,60,0.25)',
+                textShadow: '0 0 60px rgba(255,77,109,0.5), 0 0 24px rgba(239,180,255,0.25)',
               }}
             >
               {slide.title}

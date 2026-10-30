@@ -98,7 +98,7 @@ function keyOf(value: string | null | undefined): string | null {
  * body (which would corrupt the request AND leak nothing but still break it).
  */
 function aliasPattern(alias: string): RegExp | null {
-  const clean = alias.trim();
+  const clean = alias.trim().normalize("NFC");
   if (clean.length < 2) return null;
   const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "giu");
@@ -107,7 +107,7 @@ function aliasPattern(alias: string): RegExp | null {
 /** Rewrite any known alias to a neutral in-room reference (pseudonyms only). */
 export function redactAliases(text: string, aliases: readonly string[] | undefined): string {
   if (!text || !aliases || aliases.length === 0) return text;
-  let out = text;
+  let out = text.normalize("NFC");
   for (const alias of aliases) {
     const pattern = typeof alias === "string" ? aliasPattern(alias) : null;
     if (pattern) out = out.replace(pattern, "someone in the room");
@@ -118,10 +118,11 @@ export function redactAliases(text: string, aliases: readonly string[] | undefin
 /** True when a payload still contains a real alias (used by tests/asserts). */
 export function containsAlias(text: string, aliases: readonly string[] | undefined): boolean {
   if (!text || !aliases) return false;
+  const normalized = text.normalize("NFC");
   return aliases.some((alias) => {
     if (typeof alias !== "string") return false;
     const pattern = aliasPattern(alias);
-    return pattern ? pattern.test(text) : false;
+    return pattern ? pattern.test(normalized) : false;
   });
 }
 

@@ -67,7 +67,7 @@ test("display-role sockets get only public stage and finale events", { timeout: 
   t.after(async () => { host.disconnect(); display.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const profile = { age: 30, relationship: "single" as const, partnersToDate: 1, longestMonths: 6, crushingHere: false, tonight: "vibes" as const };
   const made = await new Promise<any>(resolve => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile }, resolve));
-  const joined = await new Promise<any>(resolve => display.emit("join", { roomCode: made.code, alias: "", consent: { age: false, terms: false, revealOptIn: false }, role: "display" }, resolve));
+  const joined = await new Promise<any>(resolve => display.emit("display_join", { roomCode: made.code }, resolve));
   assert.equal(joined.ok, true); assert.equal(joined.you, undefined); assert.equal(joined.secret, undefined);
   assert.equal(joined.state.phase, "lobby");
   for (let i = 0; i < 3; i++) host.emit("add_bot");
@@ -172,7 +172,7 @@ test("one host and three in-server bots can finish the entire game without API k
     }),
     writeFinale() { writerStarted = true; return new Promise(() => {}); },
   };
-  const server = createGameServer({ dataDir: dir, services, writerTimeoutMs: 20, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2 });
+  const server = createGameServer({ dataDir: dir, services, writerTimeoutMs: 20, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, verdictDiscussMs: 0, roundTimers: { spotlight: 300, verdict: 300 } });
   const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
   t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" } }, resolve));
@@ -190,6 +190,8 @@ test("one host and three in-server bots can finish the entire game without API k
       case "ios": value = { kind: "ios", about: round.about!, value: 5 }; break;
       case "minigame": value = { kind: "minigame", score: 23 }; break;
       case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
+      case "spotlight": value = { kind: "text", text: "Watching the room right now." }; break;
+      case "verdict": value = { kind: "pick", target: "p2" }; break;
     }
     host.emit("submit", { roundId: round.roundId, clientUuid: `host-${round.roundId}`, value }, () => {});
   });

@@ -1,63 +1,335 @@
-# Remediation report
+# Fix & feature report — ROUND 4: THE DIRECTOR + ACCOUNTS
+(ROUND 3 report continues below.)
 
-**Decision: NO-GO — REQUIRES HUMAN DEVICE TESTING.** R1–R20 implementation and automated regression work is complete on this branch. A real Android + iPhone pass has not been performed; do not merge or treat this as a release-ready build until the device checklist below is completed and recorded.
+## ROUND 4 status: SHIPPED (contract + engine + server + accounts + tests + spec)
 
-## Completed
+**Hypotheses are invisible to players BY DESIGN.** The engine develops private
+suspicions about the room and quietly interrogates them; players never see a
+hypothesis — no board, no event, no interlude line, no recap, and no "what the
+game suspected" beat at the finale. The only player-visible effect is that
+rounds keep feeling fresh, relevant and slightly uncanny. Hypotheses exist to
+steer selection; the only place one can ever surface is as an ORDINARY finale
+claim it graduated into.
 
-- **Step 1 — contract baseline:** Added `tease`, personalized RoundView metadata, dare performer log metadata, role/profile contract and `PROFILE_QUESTIONS`, requested tunables, and updated provider constants. Mirrored the contract summary in `spec/spec.md`; added optional model overrides in `.env.example`; added selfcheck assertions for all three new tunables.
-  - Evidence: `npx -y tsx scripts/selfcheck.ts` — **34 checks passed**.
-- **R4 — pick secrecy:** Removed the round-reveal `Chose <name>` entry. Added a protocol regression assertion that fails if a pick reveal contains a “Chose” item.
-  - Evidence: protocol test passed in the suite run below.
-- **Contract integration cleanup:** Added empty profile maps to existing RoomMeta fixtures and adjusted stale Gemini `reveal` model references so the contract typechecks. This is compile compatibility only; it does not implement profile collection or route finale narration through Grok.
-  - Evidence: `npm run typecheck` passed.
+### 1. Contract (approved edits, `packages/shared/src/contracts.ts`)
+- `Hypothesis` / `HypothesisKind` / `HypothesisStatus`, marked INTERNAL
+  ("never serialized to any client"), with the fields exactly as approved.
+- `AccountInfo { username, createdAt, nightsPlayed }` (no email field, by design).
+- Tunables: `HYPOTHESIS_FORM_BAND = { lo: 0.35, hi: 0.65 }`,
+  `ROUND_MIX = { test: 0.5, explore: 0.3, classic: 0.2 }`,
+  `ANTI_TELEGRAPH_MAX = 2`.
+- Regression test `packages/engine/test/contracts.test.ts`: band is a real
+  mid-band, the mix sums to exactly 1, the cap stays 2..4, no email-shaped field
+  exists anywhere in the source, and no `Hypothesis` rides `ServerToClientEvents`.
 
-## Completed remediation requirements
+### 2. Accounts — username + PIN + one-time recovery code (no email, ever)
+- `apps/server/src/accounts.ts`: `AccountStore` (scrypt PIN/recovery hashes,
+  hashed token seeds, case-insensitive unique usernames, failed-login lockout,
+  nights-played bookkeeping, per-account priors, hard wipe). Stored at
+  `apps/server/data/accounts.json` (0600), so identity survives the 48h room
+  purge while night data does not.
+- `apps/server/src/account-routes.ts`: `POST /api/account` (returns the code
+  ONCE — "store it, there is no email"), `/login`, `/recover` (rotates the code),
+  `/night` (binds tonight's room using the player's own session secret),
+  `GET /api/account`, `DELETE /api/account` (hard wipe). Unknown fields are
+  refused, Bearer tokens only, same-origin only, mounted before the SPA
+  catch-all. Accounts ride REST, so guest play is untouched and fully available.
+- `apps/web/src/lib/account.ts`: client helpers (localStorage token, alias
+  suggestion, attach-night, wipe). **Known gap:** the login UI itself is not
+  wired into `JoinScreen` in this round (no screen files were touched, to keep
+  the frozen UI system intact) — the helpers are ready for it.
 
-- **R1 — rating/IOS subjects:** Implemented server-assigned non-self subjects and rating traits, submit enforcement, personalized RoundView metadata, live submitted IDs, and removed client dropdowns. Protocol regressions verify all four rating assignments and each IOS subject; SSR regression verifies the assigned subject/trait is displayed.
-- **R2 — solo dares:** One rotating performer per dare; only that phone can answer, prompts are substituted without naming the performer, spectators see the same prompt, and `performerId` is persisted.
-- **R3 — pair dares:** Both players receive identical “You two:” instructions. A pass blocks the other player from marking it done; both must submit a required reason, recorded separately. Debriefs remain `onlyPlayers`-private.
-- **R5 — profile collection/enforcement:** Added a `PROFILE_QUESTIONS`-driven join flow for age, relationship, dating history, private-crush status, and tonight intent; age is hard-gated at 18+, and existing consent choices remain required. Create and first-time join now validate and store bounded profile data; room metadata carries profiles into the engine, bots receive deterministic neutral profiles, and resume/reclaim paths retain the seat's stored profile. Added protocol regressions for missing create/join profiles. Raw profile answers are not included in RoomView or shown directly in UI. Regression coverage rejects missing profiles at both creation and first join. The web mock-flow (53 checks), Socket.IO transport test, strict typecheck, selfcheck, server validation, and profile UI SSR checks passed. The R5 implementation and profile-required mock/bot flows are committed.
-- **R6 — rejoin:** Resume credentials stay stable; active credential replay cannot displace an already-connected seat; disconnected seat can be reclaimed mid-round by alias + room code. Protocol test verifies same seat and active-round snapshot.
-- **R7 — pseudonymization:** Implemented Unicode word-boundary substitution, stable alias table, and deterministic swap-back; tests cover Ian/Brian, overlapping aliases, and reverse mapping.
-- **R8 — statistical gates:** Spark requires at least two mutual couple-coded picks in each direction; consensus uses the picker threshold and allows below-threshold claims only when unanimous, capped at medium confidence. Secret generation suppresses low-confidence claims. Single-mutual spark regression passes. Consensus high confidence now requires the same target on the same coding to clear the threshold in three independent rounds. A 500-night n=4 randomized regression recorded 0 high-confidence consensus false positives (≤2%).
-- **R9 — tease coding:** Toxic indegree remains limited to friction/rivalry; added `tease` to server prompt validation and recoded w4, s2, u8, u16 in the prompt bank/source references. Added a tease-heavy no-toxic-claim regression test.
-- **R10 — profile-derived signals:** The engine derives a low-stakes shared-intent note when two players selected the same `tonight` intent. It is private to each person in the pair, requires both reveal-card opt-ins, and explicitly says it is not proof of compatibility. Relationship history and private-crush answers are not used for inference or exposed. Regression checks dual delivery, opt-in gating, and profile privacy.
-- **R11 — pick-round density:** Warmup, spicy, and deep now each schedule two pick rounds (six total), while preserving the phase's other formats; `ROUNDS_PER_PHASE` is four. Full-game regression asserts two picks in each heat phase (six total). The focused full-game server test and strict TypeScript check passed.
-- **R12 — LAN interface selection:** Added a deterministic preferred IPv4 selector that prioritizes named Wi-Fi/Ethernet interfaces over virtual bridges, VPNs, and tunnel adapters; the banner QR uses that address while still listing all usable LAN IPv4s. Added selection regression with Wi-Fi, hotspot, and Docker interfaces.
-- **R13 — deterministic JSONL replay:** Room/player metadata is atomically stored in a mode-0600 sidecar beside the JSONL answer log; at startup the server validates metadata and replays valid records into engine services. A mid-game restart closes into a replayed finale rather than attempting to resume an ephemeral timer/queue. Regression restarts twice and asserts deep-equal results for the same JSONL, then verifies a resumed credential receives the replayed finale.
-- **R14 — Grok reveal narration:** Added one guarded Grok reveal call for public slides plus structured private-card copy, with pseudonymized payloads, existing source/number/person/fact validators, deterministic fallback, and no Gemini reveal path. Narrator regression verifies alias scrubbing and safe fallback. Narrator and integrated-service regressions verify pseudonymized request content, exactly one reveal-budget slot, consented private-card narration, filtering of private phrases from public slide copy, and deterministic fallback.
-- **R15 — generated prompt share:** The server now prioritizes available Grok-generated prompts in non-pick slots after host-authored prompts, while retaining designated pick slots to preserve the R11 density floor. Regression verifies Grok-over-bank preference and host precedence.
-- **R16 — display-role/stage UI:** Added a broadcast-only display join path that does not create a player seat, require consent/profile, or receive private cards. Server sends sanitized public state/round, reveal, interlude, and finale events; display prompts omit personalized assignment/pass metadata. Added `/display?code=...` UI and a lobby link to launch it. Socket regression verifies public stage/finale delivery, no player credentials, no control authority, and zero secret-deck events.
-- **R17 — bundle/audit:** The player client remains lazily loaded after the intro; added `npm run bundle:check` to enforce gzip first-load caps (player ≤150 KiB, display ≤120 KiB). Latest production build measured player 145.5 KiB and display 115.8 KiB. `npm audit --audit-level=moderate` reports zero vulnerabilities. No Android/iPhone real-device pass was performed.
-- **Automated acceptance verification:** Full workspaces suites pass (server, web SSR, engine including the 11-player perf test, prompts, and narrator); additional UI component checks, mock flow, Socket.IO transport, and `npm run smoke:verified` pass. The verified bot suite covers phases, finale equality, secret ownership/deck limits, duplicate persistence, active/finale resume, dare pass, and deletion. Dedicated protocol regressions cover profiles, assigned rating/IOS targets, solo/pair dares, display privacy, prompt selection, and JSONL replay.
+### 3. The Director (`packages/engine/src/director.ts`, pure + deterministic)
+- `formHypotheses(signals, log, meta, priors?)` / `updateHypotheses(...)`: six
+  kinds (`tension`, `besties`, `secret`, `selfimage`, `onesided`, `freeagent`),
+  MID-BAND only; above band with ≥3 independent signals it GRADUATES into an
+  ordinary claim and leaves the set; a contradicted suspicion is REFUTED; below
+  band is noise. Evidence is engine-written and pseudonymous, `openedAt` comes
+  from the log (or a previous night).
+- `directNextRound(hypotheses, coverage, candidates, seed)` / `planRound(...)`:
+  the 50/30/20 mix over a **(pair × dimension)** coverage matrix, seeded by the
+  round index, with `ANTI_TELEGRAPH_MAX` and graceful lane fallthrough.
+- **One-sided rule (unchanged, hard):** one-sided material can only graduate to
+  a PRIVATE claim → a finale Secret Card on the picker's phone.
+- **Cross-night, invisible:** unresolved suspicions ride into the next night as
+  priors (accounts only, mapped back onto tonight's pseudonymous ids). Nobody is
+  told; guests carry nothing.
+- `assertNoHypothesisLeak(payload)`: the invisibility seam.
 
-## Follow-up clarifications R18–R20
+### 4. Server
+- Rounds are dealt ONE AT A TIME (`planNext` → `planRound`), so every round is
+  chosen from the freshest suspicions; the probed subjects bind into the
+  prompt's `{P1}`/`{P2}` slots; host custom prompts keep priority.
+- `refreshHypotheses()` runs after every round; graduated claims merge into the
+  finale's results as ordinary claims (subject to every existing filter).
+- `loadPriors()` / `savePriors()` around the night; `audit.directed` is an
+  in-process TEST observer only (never configured by the production entry point).
+- Every client-facing emit passes the leak guard, so a future edit that ships a
+  hypothesis fails loudly instead of quietly.
 
-- **R18 — measured-only pair scoring:** Implemented `PairSignal.componentsUsed`, renormalization over measured components only, and removed the 0.5 debrief unknown default. Measured zero is retained as data; missing components are excluded. Pair confidence counts only independent measured components. Regression covers a picks-only pair scoring 1.0 while yielding no high-confidence claim.
-- **R19 — Gemini reveal removal/model override:** Removed Gemini narration from `writeFinale`; it is deterministic template output. Gemini reveal requests are explicitly rejected before network access. `GEMINI_MODEL` is resolved by one shared helper for both provider analysis call sites and the legacy narrator transport helper. Tests assert zero Gemini network calls for finale and override coverage.
-- **R20 — deterministic runtime:** No wall-clock APIs/cutoffs exist in `packages/engine/src`. Toxic Monte Carlo is one room-level simulation over all candidates. Noise tests print one line per seed/night; same-log determinism is asserted. For an 11-player / 1,320-pick log, isolated 5-run medians were **362.2 ms before** and **424.5 ms after** the measured-component change (single-process timings were noisy); the final isolated perf test measured **308.2 ms**; a subsequent regression run measured **278.8 ms**, both below the 2 s requirement. No MC change was needed.
+### 5. What players see
+Nothing new. No `case_board` event, no interlude line, no recap, no "case
+closed" block. Freshness surfaces only through the selector's choices, the
+digest teasers and callbacks, and the finale's ordinary claims.
 
-## Validation run
+### 6. Tests (all green; each was written to fail before the feature landed)
+- `packages/engine/test/contracts.test.ts` (6): contract/tunable invariants,
+  no-email scan, no hypothesis on the wire.
+- `packages/engine/test/director.test.ts` (14): lifecycle open → strengthen →
+  graduate/refute, mid-band-only noise, one-sided privacy, mix split 50/30/20,
+  test-mix targets open-hypothesis subjects, explore only fills starved cells, a
+  12-round night, ≤2 consecutive rounds per pair, carry-over priors keep
+  `openedAt`, determinism twice, pseudonymity of hypothesis text.
+- `apps/server/test/accounts.test.ts` (8): create/login/recover/delete-wipe,
+  case-insensitive uniqueness, recovery-code rotation and replay rejection,
+  unknown-field (no-email) refusal, PIN lockout, purge survival, guest parity.
+- `apps/server/test/director.test.ts` (6): invisibility across every emit,
+  snapshot and room-log line; one-sided gives NO public claim and only the
+  picker's finale card; anti-telegraph across a whole night; graduation appears
+  as an ordinary public claim in the finale; carried suspicions keep probing
+  (selection patterns only); identical nights select identical rounds.
 
-- `npm test --workspaces --if-present` — PASS, **238 tests** across server (25), web SSR (39), engine (21, including 11-player performance), narrator (57), and prompts (96).
-- `npm run test:components` — PASS, 102 checks.
-- `npm run test:mock --workspace @reveal/web` — PASS, 53 mock-flow checks.
-- `npm run test:transport --workspace @reveal/web` — PASS, socket transport regression.
-- `npm run typecheck` — PASS; `npm run selfcheck` — PASS, 34/34 tunable/invariant checks.
-- `npm run smoke:verified` — PASS: phases, finale equality, secret ownership/deck limits, duplicate persistence, active/finale resume, dare pass, deletion.
-- `npm run build` — PASS; `npm run bundle:check` — PASS (player 145.5/150 KiB gzip, display 115.8/120 KiB gzip).
-- `npm audit --audit-level=moderate` — PASS, zero vulnerabilities.
+```
+packages/engine:  35/35 tests, tsc --noEmit clean
+apps/server:      35/35 tests, tsc --noEmit clean
+scripts/selfcheck.ts: ALL 36 CHECKS PASSED (incl. the 4 new ROUND 4 tunable checks)
+```
 
-### REQUIRES HUMAN — 10-minute real-device acceptance (Android + iPhone)
+### Known gaps / notes
+- Login/signup SCREENS are not built (helpers + REST are); see §2.
+- `savePriors` only carries suspicions whose subjects both hold accounts — a
+  guest subject dies with the night, by design.
+- Hypotheses live in memory and in the per-account prior file only; they are
+  never written to a room log (asserted in the invisibility test).
 
-Use the same Wi-Fi/hotspot and a four-player room (the two real phones plus two desktop/browser seats). Record device model, OS version, browser and result for every step.
+---
 
-1. **0:00–1:00 — join/profile:** Open the host URL on Android and the room link/QR on iPhone. Complete profile + consent on both; verify under-18 ages are blocked and neither raw profile is shown in the lobby.
-2. **1:00–2:00 — assigned rounds:** On rating and IOS prompts, verify each phone sees a named non-self subject (and rating trait), has no subject dropdown, and can submit successfully.
-3. **2:00–4:00 — solo and pair dares:** On solo dare, verify only the named performer can act. On pair dare, verify both assigned phones see the same dare; submit a pass reason on one, then confirm the other cannot mark it done and both reasons are required/recorded.
-4. **4:00–5:00 — pick privacy:** Submit picks from both phones; confirm neither phone or public display reveals picker→target identities before the finale.
-5. **5:00–6:00 — reconnect/reclaim:** Background the Android browser during a round, return and verify active resume; then clear that tab's site session storage and use alias + room code to reclaim the same seat without creating a duplicate.
-6. **6:00–8:00 — display/private separation:** Open `/display?code=ROOM` on a large screen. Verify public stage/finale beats update, display has no player controls/credentials, and secret decks/facts never appear there. Check each opt-in player's private deck only on that player's phone.
-7. **8:00–10:00 — restart/final check:** Restart the host server once the room has records; rejoin and verify the persisted log produces the same finale/results. Record any failure, screenshots only if consented, and mark Android and iPhone separately PASS/FAIL.
+# Fix & feature report — ROUND 3: LIVE GROUP MOMENTS
 
-Until this checklist is completed and recorded, status remains **NO-GO / REQUIRES HUMAN** and no merge is authorized.
+> Historical report for PR #10. Subsequent integration adds the purple shell,
+> local earlier-answer callbacks, improved rating/IOS defaults and secure resume
+> retry. Real-device, LAN, live-provider and public-proxy testing remain open.
+
+Two new round kinds — **spotlight** ("everyone look at X") and **verdict**
+("discuss it, then decide") — added to the working game. They are not more
+questions: they are MOMENTS that put the room's eyes on one person, or make
+everyone argue.
+
+---
+
+## ROUND 3 status: SHIPPED (contract + server + engine + UI + tests)
+
+### 1. Contract (approved edits, `packages/shared/src/contracts.ts`)
+
+| Change | Why |
+|---|---|
+| `RoundKind` += `"spotlight" \| "verdict"` | the two new round kinds |
+| `ROUND_TIMERS_MS.spotlight = 25_000`, `ROUND_TIMERS_MS.verdict = 105_000` (`VERDICT_DISCUSS_MS` 90s + `VERDICT_VOTE_MS` 15s) | spec timers, tunables in the contract per §14 |
+| `RoundView.voteOpensAt?: number` | verdict: open discussion until then, then the secret simultaneous pick |
+| `RoundView.expectsAnswer?: boolean` | the spotlight subject's idle cover screen offers no input |
+| `LogRecord.decoy?: boolean` | the subject's cover answer — excluded from every signal/score/claim |
+| `SPOTLIGHT_ANSWER_MAX = 80`, `SPOTLIGHT_REVEAL_MS = 8_000`, `VERDICT_REVEAL_MS = 6_000` | new tunables |
+| `RevealView` += `kind? / subject? / punchline? / slide? / celebrate?` | the caption wall (header + punchline) and the verdict Group Announcement payload; filed in `NOTES/contract-requests.md` as `AGENT-R` |
+
+`RevealView` is the one area that needed more than the brief listed: `RevealItem
+{alias, text}` cannot carry a subject header, a punchline, or vote counts, and
+nothing identified a reveal as a live moment. All five fields are optional and
+additive; nothing else in the contract changed.
+
+### 2. Bank — `packages/prompts/src/bank/live/`
+
+- `spotlight.json` — 10 seeds (the 8 from the brief + phase variants), `{S}` =
+  subject alias, name-cluster and caption rows, the spicy one behind `SPICY_TIER`.
+- `verdict.json` — 9 seeds; couple-coded ones marked `couple: true` for confetti.
+- `decoys.json` — the cover pool ("What did you eat today?", …).
+- `index.ts` — `liveSeeds()`, `livePrompt()`, `liveKindInPhase()`,
+  `SPOTLIGHT_IDLE_LINE`, `DECOYS`. **Kept out of `loadBank()`**: live moments are
+  scheduled by the server's planner, never mixed into the per-phase question pool.
+- `packages/prompts/test/live.test.ts` — 8 new checks (shapes, `{S}`, spicy
+  gating, no repeats, decoys give nothing away).
+
+### 3. Server (`apps/server/src/game.ts`)
+
+- **Spotlight rotation** — each player at most once a night, never back-to-back
+  (`room.spotlighted`, `room.lastSubject`); marked only when the moment actually
+  starts, so a heat-down or host skip never burns a player's turn.
+- **The cover round** — `roundView()` is the single place a round is rendered, so
+  it is the single place the secret is kept. The subject gets a decoy question or
+  the idle line, re-drawn every spotlight; the real prompt never rides `round`,
+  `state`, `reveal` or any other emit to that socket.
+- **Verdict** — `voteOpensAt = start + 90s`; submits before it are refused with
+  "Phones down. Argue it out first."; the pick grid is self-excluded.
+- **Reveals** — caption wall (`subject`, `items`, `punchline` = the subject's own
+  decoy answer, 8s) and Group Announcement slide (`numbers: {votes, of, share}`,
+  `celebrate` only for couple-coded verdicts, 6s). Neither reveal contains the
+  question.
+- **Decoys never score** — flagged `decoy: true` on the record; the finale
+  filters them out of `computeSignals`/`computeResults`; the engine filters again
+  defensively (see below).
+- **Bots** — spotlight: short text; verdict: wait for `voteOpensAt`, then a valid
+  pick (in-server bots and `scripts/bots.ts`).
+
+### 4. Engine (`packages/engine/src/live.ts` + digest/signals/results)
+
+- `detectNamedPlayers` / `clusterNames` — conservative same-name detection: full
+  alias, distinctive alias token (≥4 chars, not a common word), `Player N`,
+  ≥4-char nickname prefix. Ambiguous captions naming two players count for
+  neither; 2–3 character tokens never count alone.
+- `nameClusterTeaser` — fires only on ≥3 matching answers **and** a strict
+  majority, so 2 of 7 stays silent. It is a **digest teaser, never a Claim**.
+- `decoyPairings` / `decoyQuote` — *"While the room captioned X, X wrote: '…'"*
+  leads the digest quotes.
+- `computeSignals` / `computeResults` filter `decoy === true` themselves, so a
+  caller that forgets cannot score a decoy.
+
+### 5. UI (`apps/web`)
+
+- `components/CaptionWall.tsx` — new: subject header, captions stack, punchline
+  lands last and biggest; `clamp()` type (320px → tablet), staggered
+  framer-motion, fully still under `prefers-reduced-motion`.
+- `screens/RevealScreen.tsx` — routes `spotlight` → CaptionWall, `verdict` →
+  `<GroupAnnouncement celebrate={…}>`, everything else unchanged.
+- `screens/PromptScreen.tsx` — spotlight captions use the ordinary short-text
+  surface (≤80); `expectsAnswer === false` renders the idle cover; verdict shows
+  "PHONES DOWN. ARGUE IT OUT." + countdown, then the secret pick grid.
+- `components/GroupAnnouncement.tsx` — `celebrate?: boolean` (default true) so
+  non-couple verdicts land with haptics but no confetti.
+- `lib/mockTransport.ts` — the scripted demo night now includes a spotlight
+  (subject: a bot, punchline included) and a verdict (6s debate → pick → land).
+
+---
+
+## Tests (each was written to fail before the change)
+
+| Check | Command | Result |
+|---|---|---|
+| Contract/timers selfcheck (11 kinds) | `npm run selfcheck` | **ALL 32 CHECKS PASSED** |
+| Server suite incl. live moments | `npm test --workspace apps/server` | **22 pass / 0 fail** (16 before + 6 new) |
+| Engine suite | `npx tsx --test packages/engine/test/engine.test.ts` | **15 pass / 0 fail** |
+| Bank + live bank | `npx tsx --test packages/prompts/test/*.test.ts` | **102 pass / 0 fail** (incl. the 8 live-bank tests from STEP 1) |
+| Component (jsdom) suite | `npm run test:components` | **ALL 127 CHECKS PASSED** (102 before + 25 new) |
+| Mock transport flow | `npm run test:mock --workspace apps/web` | **ALL 56 CHECKS PASSED** (54 before) |
+| Typecheck (all workspaces + scripts) | `npm run typecheck` | clean |
+| Production no-key bot game | `npm run smoke:verified` | **PASS** (see below) |
+
+New: `apps/server/test/live-moments.test.ts` (6 tests) —
+1. **Spotlight rotation**: one spotlight per heat phase, no player twice, never
+   back-to-back.
+2. **Secrecy**: for every spotlight, the subject's socket is checked against the
+   WHOLE question pool for that subject (every seed, alias-substituted) across
+   every frame it ever received — round views, snapshots, reveals, interludes,
+   finale — and never sees one. The subject's round view is always a decoy or the
+   idle line.
+3. **Decoys**: flagged in the JSONL, absent from every log that reaches
+   `computeSignals`/`computeResults`, present in the digest pairing and as the
+   reveal punchline (which is the last thing on the wall).
+4. **Verdict secrecy**: an early vote is refused ("Phones down…"), every frame
+   that arrives during the debate window is tally-free (`numbers`/`slide`/`Chose`
+   all absent), and the reveal shows anonymous counts only — never a voter name.
+5. **Bots**: a host + three server bots finish a night; spotlight captions and a
+   verdict slide with real votes land.
+6. **Name clustering unit test**: same-name detection, alias variants
+   (`brian!` / `BRIAN` / `Wachuki` / `WACHUKI!`), no cluster on 2 of 7, no cluster
+   on exactly half, ambiguous captions ignored, 3-character tokens ignored.
+
+Component tests added (25 checks): caption wall at 320px (header, every caption,
+punchline last, no fixed width wider than the viewport), reduced-motion wall,
+spotlight cover (looks like a normal text round, 80-char cap), idle cover (no
+input), verdict debate → pick grid (self excluded) → submitted pick, verdict
+reveal reuses GroupAnnouncement (bars fill one per vote, the answer lands,
+haptics, **no confetti** without `celebrate`), reduced-motion verdict bars
+(instant, `transition: none`, zero confetti).
+
+## Bot run (production adapters, no API keys)
+
+`npm run smoke:verified` — five external Socket.IO players, ephemeral port,
+temporary data dir, independent oracle:
+
+```
+Smoke room 52XA: 5 players at http://127.0.0.1:38503
+PASS: phases, finale equality, secret ownership and deck limits, duplicate persistence, active and finale resume, dare pass, deletion
+PASS (ROUND 3): live moments played — spotlight + verdict; 4 cover screen(s) seen on subject phones
+```
+
+Both new kinds are exercised in the real game loop: the bots caption spotlights,
+wait out each verdict's 90-second debate, vote, and the night still reaches a
+public finale that is identical on every phone. The `4 cover screens` are the
+four spotlights of that night seen from the subject's own phone — each one
+recognised by the runner as a decoy question or the idle line, never as the real
+prompt (a cover that leaked the question would fail the assert). The run is
+slower by design — three verdicts plus their debates — so `SMOKE_TIMEOUT_MS` is
+now 420s.
+
+## Known gaps / notes
+
+- **`RevealView` additions** were needed beyond the brief's listed contract
+  edits (see §1). Filed as `AGENT-R` in `NOTES/contract-requests.md`.
+- **Reconnect mid-spotlight**: a subject who reconnects is re-sent the cover
+  round (same decoy for that round) — by design, the disguise holds. A phone
+  that reconnects during the *reveal* gets the caption wall without the round
+  context; the generic reveal fallback covers older clients.
+- **Verdict nights are long**: 90s of real debate per verdict (3 per night). This
+  is the point of the round, but it is the main length cost of ROUND 3.
+- The cover is deliberately *not* themed to the phase — a decoy that looked like
+  a spotlight question would defeat the disguise.
+- `MERGE-REPORT.md`'s NO-GO reasons (rating/IOS intent, real-device matrix) are
+  unchanged by this round; no real phone has been tested here.
+- Mock-dev timing is clamped (spotlight 20s, verdict 30s with a 6s debate) so the
+  demo stays watchable.
+
+---
+
+## R1–R20 remediation carry-forward — adapted to current `main`
+
+This section is the current branch status (the ROUND 4 report above is historical). The integration preserved the newer `main` architecture and tests; it did not resolve the merge by selecting either side wholesale.
+
+### Remediation and regression status
+
+| Item | Adapted outcome / regression evidence |
+|---|---|
+| R1 | Entry validates 18+ profile and required consent; the private-card opt-out remains available. UI and server fixtures now submit the current profile contract. |
+| R2 | Rating and IOS subjects (and rating traits) are assigned by the server, personalized in the round view, validated on submit, and no longer left to client defaults. Protocol and UI regressions cover non-self assignments and locked intent. |
+| R3 | Dare performer/pair assignment and pass-with-reason flow remain enforced; regression covers solo performer rotation and both pair pass reasons. |
+| R4 | Public display joins through its dedicated role/event path; snapshots and finals exclude player secrets and per-player decks. Server display-role regression passes. |
+| R5 | Provider-bound text is pseudonymized; Unicode NFC/NFD alias variants are covered by server and provider regressions. |
+| R6 | Reconnect uses authenticated, rotating session credentials and nonce-bound lost-ack recovery; protocol and real SocketTransport regressions pass. |
+| R7 | Public prompt selection keeps host prompts first and generated prompts ahead of bank fallback only in eligible non-pick slots; regression passes. |
+| R8 | Engine confidence/claim rules preserve mutual nomination and measured-signal gates; exact-result and no-high-confidence-on-picks-only checks pass. |
+| R9 | `tease` is accepted as a prompt coding while remaining outside negative-score coding; prompt validation and deterministic scoring suites pass. |
+| R10 | Rating/IOS intent is explicit in the current profile/round contract; SSR, transport, and server protocol tests use the assigned values. |
+| R11 | Phase schedule retains four slots per heat and now provides two pick slots per heat; full-game, bot, and phase round-count regressions pass. |
+| R12 | LAN output reports all non-loopback IPv4 addresses and QR data; automated server regression passes. |
+| R13 | Room metadata is atomically persisted beside the JSONL log and validated/replayed on restart; two-restart deep-equality regression passes. |
+| R14 | Production finale polishing uses the Grok `reveal` lane; deterministic engine copy remains the fallback. Mocked one-call Grok regression passes. |
+| R15 | Generated prompts augment rather than replace bank coverage; host prompts retain precedence and generated prompts are prioritized for eligible slots. Regression passes. |
+| R16 | Lobby exposes the public-display link; SSR and component checks pass. |
+| R17 | Web entry remains lazy-loaded/static-exported; production bundle guard passes for player and display entrypoints. |
+| R18 | Zero is measured and absence is not; measured-component weights renormalize, debrief has no 0.5 fallback, and high-confidence claims require at least three independent measured signal types. Golden fixtures and engine regressions pass. |
+| R19 | Removed the narrator package’s Gemini HTTP/reveal helper and exports. Gemini remains analysis-only; `GEMINI_MODEL` uses the shared resolver for Gemini call sites. Grok reveal integration and a negative Gemini-reveal provider regression pass. Contract and spec wording now agree. |
+| R20 | Engine code remains deterministic and wall-clock independent. Monte Carlo is bounded by `MC_SIMULATIONS`; noise tests are summarized per night. Same-log results are deeply equal, including restart replay. The 11-player/1,320-pick performance guard passes. |
+
+### Validation on this branch
+
+- `npm ci`: passed; 0 audit vulnerabilities.
+- `npm run typecheck`: passed across server, web, engine, narrator, and prompts after the final source edits.
+- Server: **57/57** tests passed, including full-game, restart replay, protocol, provider integration, account, and bot coverage.
+- Engine: **40/40** passed. Same-log results, digest and secrets are deeply equal. Latest 11-player fixture: **1,829.3 ms**, below the 2-second regression ceiling. Prior recorded baseline: **278.8 ms**; the current result is slower, though still within the guard.
+- Prompts: **104/104** passed. Narrator: **81/81** passed. Web: **39 SSR checks**, all UI/socket/mock/privacy regressions, and **1/1** transport regression passed.
+- `npm run selfcheck`: **36 checks passed**.
+- `SMOKE_FAST=1 npm run smoke:verified`: passed; phases, public finale equality, secret ownership/limits, duplicate persistence, active/finale resume, dare pass, deletion, and live moments verified with keys disabled.
+- `npm run build`: passed (Next static export). `npm run bundle:check`: player **145.2 KiB gzip / 150 KiB**; display **115.7 KiB / 120 KiB**.
+
+### Release disposition: **NO-GO / REQUIRES HUMAN**
+
+Automated coverage is green, but no real Android or iPhone device results have been recorded. Do not mark GO or treat merge authorization as release approval. Complete this 10-minute on-device script on both platforms and enter device model, OS/browser version, result, and any issue in this report:
+
+1. **0:00–1:00** — Open the hosted game on Android Chrome, then iPhone Safari. Confirm layout, 18+ profile and required consent gates; exercise the private-card opt-out.
+2. **1:00–3:00** — One phone creates a room and opens the public display; three additional phones join by code/link. Confirm the display has no player controls or private card content.
+3. **3:00–6:00** — Start the game. Submit pick, rating, IOS, text, and a dare pass with a reason. Confirm assigned rating/IOS intent cannot be changed and all phones advance without refresh.
+4. **6:00–8:00** — Background one phone, return, and verify authenticated reconnect restores the active round without duplicate submission. Rotate one device to portrait/landscape and check the display remains legible.
+5. **8:00–10:00** — Finish through the finale. Confirm all player phones show the same public finale, only each eligible owner sees their private deck, and delete-room removes the room from all clients.
+
+| Device | Model | OS + browser | Result / notes | Date |
+|---|---|---|---|---|
+| Android | _pending_ | _pending_ | **REQUIRES HUMAN** | _pending_ |
+| iPhone | _pending_ | _pending_ | **REQUIRES HUMAN** | _pending_ |

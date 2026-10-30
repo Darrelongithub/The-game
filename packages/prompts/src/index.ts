@@ -50,6 +50,23 @@ export {
   type SelectOptions,
 } from "./bank/index.ts";
 
+// Live moments (ROUND 3) — spotlight / verdict seeds + the decoy cover pool.
+// Kept OUT of loadBank(): they are scheduled by the server's live-moment
+// planner, never mixed into the per-phase prompt pool.
+export {
+  DECOYS,
+  RAW_LIVE,
+  SPOTLIGHT_IDLE_LINE,
+  liveCounts,
+  liveKindInPhase,
+  livePrompt,
+  liveSeeds,
+  type DecoySeed,
+  type LiveKind,
+  type LiveOptions,
+  type LiveSeed,
+} from "./bank/live/index.ts";
+
 export {
   BANNED_PATTERNS,
   CODINGS,

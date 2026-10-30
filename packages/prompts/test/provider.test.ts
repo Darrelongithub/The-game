@@ -45,7 +45,7 @@ test("grok lane: OpenAI-compatible request with Bearer key, JSON mode, temp 0.9"
   const call = mock.calls[0]!;
   assert.match(call.url, /^https:\/\/api\.x\.ai\/v1\/chat\/completions$/);
   assert.equal(call.headers.authorization, "Bearer xai-test");
-  assert.equal(call.body.model, "grok-4.7");
+  assert.equal(call.body.model, "grok-4-1-fast");
   assert.equal(call.body.temperature, 0.9);
   assert.deepEqual(call.body.response_format, { type: "json_object" });
   assert.equal(provider.guard.count("r1"), 1);
@@ -126,7 +126,7 @@ test("gemini lane: classic generateContent, SAFETY_OFF mapped to BLOCK_NONE, JSO
   });
   assert.equal(result.ok, true);
   const call = mock.calls[0]!;
-  assert.match(call.url, /\/models\/gemini-3\.5-flash-lite:generateContent\?key=gem-test$/);
+  assert.match(call.url, /\/models\/gemini-3\.1-pro-preview:generateContent\?key=gem-test$/);
   assert.equal(call.headers.authorization, undefined, "Gemini uses ?key=, not a bearer header");
   assert.equal(call.body.generationConfig !== undefined, true);
   const config = call.body.generationConfig as Record<string, unknown>;
@@ -234,6 +234,8 @@ test("pseudonyms only: aliases are scrubbed out of every outgoing payload", asyn
   assert.equal(containsAlias(raw, ALIASES), false, "a real alias left the server");
   assert.match(raw, /someone in the room/);
   assert.equal(redactAliases("Mo and mo again", ALIASES), "someone in the room and someone in the room again");
+  assert.equal(redactAliases("Zoe\u0308 is here", ["Zoë"]), "someone in the room is here", "NFD aliases are redacted after canonical Unicode normalization");
+  assert.equal(containsAlias("Zoe\u0308 is here", ["Zoë"]), true);
 });
 
 test("parseJsonLoose handles fences, prose and garbage; extractText reads both APIs", () => {

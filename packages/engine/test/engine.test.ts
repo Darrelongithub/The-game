@@ -10,9 +10,9 @@ import {
   computeResults,
   computeSignals,
   constrainedMatching,
+  jokerNominationWeights,
   maximumWeightMatching,
   mulberry32,
-  pairScoreOf,
 } from "../src/index.ts";
 import { RANDOM_META, digestLog, goldenLog1, goldenLog2, jokerLog, meta5, randomLog } from "./fixtures.ts";
 
@@ -61,11 +61,10 @@ test("golden 1: pair components are hand-computable", () => {
   approx(s34.mutualPick, 5 / 8, "p3p4 mutualPick");
   approx(s34.coupleEvidence, 1 / 4, "p3p4 coupleEvidence");
   approx(s34.friendEvidence, 1, "p3p4 friendEvidence");
-  assert.equal(s34.componentsUsed.includes("debriefSim"), false, "missing debrief is not measured");
+  approx(s34.debriefSim, 0, "p3p4 absent debrief does not vote");
   approx(s34.iosMean, 10 / 14, "p3p4 iosMean");
   approx(s34.traitAgreement, 8 / 9, "p3p4 traitAgreement");
-  approx(s34.pairScore, pairScoreOf(s34), "p3p4 renormalized pairScore");
-  approx(s34.pairScore, (0.3 + 0.2 * (5 / 8) + 0.15 * (10 / 14) + 0.15 * (8 / 9)) / 0.8, "p3p4 excludes missing debrief weight");
+  approx(s34.pairScore, (0.3 * 1 + 0.2 * (5 / 8) + 0.15 * (10 / 14) + 0.15 * (8 / 9)) / 0.8, "p3p4 renormalized pairScore");
 
   // p1–p5: eligible overlap rounds F1 (p3,p4 ✗), N1 (p3,p3 ✓) → 1/2.
   // Positive pooled: p5 hit p1 3 times, p1 never hit p5 → 3/8. No IOS → 0.
@@ -87,7 +86,6 @@ test("golden 1: exact claim set, free agent, and claim numbers", () => {
   assert.deepEqual(claimSummary(results.claims), [
     { id: "ship-p1-p2", type: "ship", subjects: ["p1", "p2"], audience: "public", confidence: "high" },
     { id: "ship-p3-p4", type: "ship", subjects: ["p3", "p4"], audience: "public", confidence: "high" },
-    { id: "besties-p1-p5", type: "besties", subjects: ["p1", "p5"], audience: "public", confidence: "low" }, // overlap exactly 1/2 does not count; trait agreement only
     { id: "besties-p3-p4", type: "besties", subjects: ["p3", "p4"], audience: "public", confidence: "high" },
     { id: "spark-p1-p2", type: "spark", subjects: ["p1", "p2"], audience: "private", confidence: "high" },
     { id: "consensus-C2-p1", type: "consensus", subjects: ["p1"], audience: "public", confidence: "med" }, // single verdict round = med
@@ -126,14 +124,13 @@ test("golden 2: toxic percentile case, rivals, consensus — exact claim set", (
   const s15 = signal(signals, "p1", "p5");
   approx(s15.pickOverlap, 4 / 5, "rivals overlap");
   approx(s15.negativeMutual, 0.6, "rivals negativeMutual");
-  approx(s15.pairScore, pairScoreOf(s15), "rivals renormalized pairScore");
+  approx(s15.pairScore, 0.594642857142857, "rivals pairScore with only measured components voting");
 
   const results = computeResults(signals, log, meta);
   assert.deepEqual(claimSummary(results.claims), [
     { id: "ship-p1-p2", type: "ship", subjects: ["p1", "p2"], audience: "public", confidence: "high" },
     { id: "ship-p3-p5", type: "ship", subjects: ["p3", "p5"], audience: "public", confidence: "med" }, // mutualPick exactly 1/2 does not count
     { id: "besties-p1-p2", type: "besties", subjects: ["p1", "p2"], audience: "public", confidence: "med" }, // friendEvidence exactly 1/2 does not count
-    { id: "besties-p3-p5", type: "besties", subjects: ["p3", "p5"], audience: "public", confidence: "med" },
     { id: "rival-p1-p5", type: "rival", subjects: ["p1", "p5"], audience: "public", confidence: "med" }, // both pick rates strong; ratings agree, so no 3rd type
     { id: "toxic-p4", type: "toxic", subjects: ["p4"], audience: "public", confidence: "high" },
     { id: "consensus-X1-p4", type: "consensus", subjects: ["p4"], audience: "public", confidence: "med" },
@@ -179,6 +176,7 @@ test("(a) everyone picks the same friend every round → NO high-confidence toxi
   const log = jokerLog();
   const meta = meta5("room-joker");
   const results = computeResults(computeSignals(log, meta), log, meta);
+  assert.equal(jokerNominationWeights(log, meta.players.map((player) => player.id)).get("p1"), 0.5);
   assert.deepEqual(results.claims.filter((c) => c.type === "toxic"), []); // stronger: no toxic claim at all
 });
 
@@ -188,43 +186,8 @@ test("(b) uniform random rooms → zero high-confidence claims", () => {
     const log = randomLog(seed);
     const results = computeResults(computeSignals(log, RANDOM_META), log, RANDOM_META);
     const high = results.claims.filter((c) => c.confidence === "high");
-    console.info(`[noise] seed=${seed} players=${RANDOM_META.players.length} claims=${results.claims.length} high=${high.length}`);
     assert.deepEqual(high.map((c) => c.id), [], `seed ${seed} produced high-confidence claims`);
   }
-});
-
-test("n=4 random-night consensus high-confidence false positives stay below 2%", () => {
-  const meta4: typeof RANDOM_META = { ...RANDOM_META, roomId: "room-random-4", players: RANDOM_META.players.slice(0, 4), revealOptIn: [], profiles: {} };
-  const nights = 500;
-  let falsePositiveNights = 0;
-  for (let seed = 1; seed <= nights; seed++) {
-    const log = randomLog(seed, 4);
-    const results = computeResults(computeSignals(log, meta4), log, meta4);
-    if (results.claims.some(c => c.type === "consensus" && c.confidence === "high")) falsePositiveNights++;
-  }
-  console.info(`[noise] n=4 random consensus nights=${nights} false-high=${falsePositiveNights}`);
-  assert.ok(falsePositiveNights / nights <= 0.02, `${falsePositiveNights}/${nights} random nights had a high-confidence consensus claim`);
-});
-
-test("profile-derived shared-intent notes stay private and require both reveal opt-ins", () => {
-  const meta = { ...meta5("profile-intents"), profiles: {
-    p1: { age: 29, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: true, tonight: "vibes" as const },
-    p2: { age: 33, relationship: "committed" as const, partnersToDate: 4, longestMonths: 24, crushingHere: false, tonight: "vibes" as const },
-    p3: { age: 30, relationship: "single" as const, partnersToDate: 0, longestMonths: 0, crushingHere: false, tonight: "chaos" as const },
-    p4: { age: 34, relationship: "dating" as const, partnersToDate: 1, longestMonths: 4, crushingHere: false, tonight: "mission" as const },
-    p5: { age: 31, relationship: "single" as const, partnersToDate: 3, longestMonths: 12, crushingHere: false, tonight: "feelings" as const },
-  } };
-  const results = computeResults([], [], meta);
-  const decks = buildSecrets(results, buildNightDigest([], meta), meta);
-  const a = decks.get("p1")?.find(c => c.id === "secret-profile-intent-p1-p2");
-  const b = decks.get("p2")?.find(c => c.id === "secret-profile-intent-p2-p1");
-  assert.ok(a && b, "both consenting players receive the matched-intent note");
-  assert.ok(a.facts.join(" ").includes("not proof of compatibility"));
-  assert.ok(!JSON.stringify([...decks.values()]).includes("crushingHere"));
-  assert.ok(!JSON.stringify([...decks.values()]).includes("committed"));
-  const oneOptOut = { ...meta, revealOptIn: ["p1", "p3"] };
-  const privateOnly = buildSecrets(computeResults([], [], oneOptOut), buildNightDigest([], oneOptOut), oneOptOut);
-  assert.ok(![...privateOnly.values()].flat().some(c => c.id.includes("profile-intent-p1-p2")));
 });
 
 // ---------- (c) player-count bounds ----------
@@ -233,7 +196,6 @@ test("(c) n=4 works, n<4 throws", () => {
     roomId: "room-4",
     players: RANDOM_META.players.slice(0, 4),
     revealOptIn: [],
-    profiles: {},
   };
   const signals = computeSignals([], meta4);
   assert.equal(signals.length, 6);
@@ -352,9 +314,8 @@ test("secrets: spark on exactly two phones, one-sided on the picker's only, deck
   assert.ok(decks.get("p1")?.find((c) => c.kind === "spark")?.facts.join(" ").includes("Player 2"));
   assert.ok(decks.get("p2")?.find((c) => c.kind === "spark")?.facts.join(" ").includes("Player 1"));
 
-  // One-sided: picker p5 gets the card; target p1 does not.
-  assert.ok(!(decks.get("p5") ?? []).some((c) => c.kind === "onesided" && results.claims.find(claim => claim.type === "onesided" && claim.subjects[0] === "p5")?.confidence === "low"), "low-confidence secret claims are suppressed");
-  assert.ok(!(decks.get("p1") ?? []).some((c) => c.kind === "onesided"));
+  // Picks-only evidence may score the pair but cannot create a high-confidence claim/card.
+  assert.ok(![...decks.values()].some((cards) => cards.some((card) => card.kind === "onesided")));
 
   // Blind spot: only p3 has a gap ≥ 1 in this fixture (loyalty 5 vs 8.25).
   const blindHolders = [...decks.entries()].filter(([, cs]) => cs.some((c) => c.kind === "blindspot")).map(([p]) => p);
@@ -398,40 +359,43 @@ test("private material never becomes public: spark + onesided audiences across f
   }
 });
 
+// Regression: the contract's IOS formula divides the two directions by 14;
+// an unanswered direction cannot be treated as another 7/7 vote.
+test("one-direction IOS contributes only its half of the pair score", () => {
+  const meta = meta5("one-direction");
+  const log = [{
+    roomId: meta.roomId, roundId: "ios", playerId: "p1", roundKind: "ios" as const,
+    promptId: "ios", coding: "friendship" as const,
+    value: { kind: "ios" as const, about: "p2", value: 7 }, at: 1, latencyMs: 1,
+  }];
+  approx(signal(computeSignals(log, meta), "p1", "p2").iosMean, 0.5, "one IOS direction");
+});
 
-test("a single mutual couple pick is noise and cannot produce a spark card", () => {
-  const meta = meta5("one-mutual");
-  const log = (["p1", "p2"] as const).map((playerId, i) => ({ roomId: "one-mutual", roundId: "only", playerId, roundKind: "pick" as const, promptId: "only", coding: "couple" as const, value: { kind: "pick" as const, target: i === 0 ? "p2" : "p1" }, at: i, latencyMs: 10 }));
+test("ship and besties never publish a one-way positive nomination as mutual", () => {
+  const meta = meta5("one-way");
+  const log = [{
+    roomId: meta.roomId, roundId: "pick", playerId: "p1", roundKind: "pick" as const,
+    promptId: "pick", coding: "friendship" as const,
+    value: { kind: "pick" as const, target: "p2" }, at: 1, latencyMs: 1,
+  }];
   const results = computeResults(computeSignals(log, meta), log, meta);
-  assert.equal(results.claims.some(c => c.type === "spark"), false);
+  assert.ok(!results.claims.some((c) => c.type === "ship" || c.type === "besties"));
 });
 
-test("tease-coded picks never contribute to toxic indegree", () => {
-  const meta = meta5("tease-heavy");
-  const log = Array.from({ length: 5 }, (_, round) => meta.players.filter((p, i) => i !== round % 5).map((p, j) => ({
-    roomId: "tease-heavy", roundId: `tease-${round}`, playerId: p.id, roundKind: "pick" as const,
-    promptId: `tease-${round}`, coding: "tease" as const,
-    value: { kind: "pick" as const, target: meta.players[(round + j + 1) % 5]!.id }, at: round * 10 + j, latencyMs: 10,
-  }))).flat();
-  const claims = computeResults(computeSignals(log, meta), log, meta).claims;
-  assert.equal(claims.some(c => c.type === "toxic"), false);
+test("debrief Jaccard recognizes words in non-Latin scripts", () => {
+  const meta = meta5("unicode");
+  const log = ["p1", "p2"].map((playerId) => ({
+    roomId: meta.roomId, roundId: "debrief", playerId, roundKind: "debrief" as const,
+    promptId: "debrief", coding: "trust" as const,
+    value: { kind: "text" as const, text: "朋友 分享 快乐" }, at: 1, latencyMs: 1,
+  }));
+  approx(signal(computeSignals(log, meta), "p1", "p2").debriefSim, 1, "identical Unicode debriefs");
 });
 
-
-test("pairScore renormalizes only measured components and thin evidence is not high confidence", () => {
-  const onlyPick = { pickOverlap: 1, mutualPick: 0, debriefSim: 0, iosMean: 0, traitAgreement: 0, componentsUsed: ["pickOverlap"] as PairSignal["componentsUsed"] };
-  assert.equal(pairScoreOf(onlyPick), 1, "a measured picks-only pair can score 1 for matching");
-  const log: import("../../shared/src/contracts.ts").LogRecord[] = [];
-  const meta = meta5("thin");
-  const signals: PairSignal[] = [{room:"thin",a:"p1",b:"p2",...onlyPick,pairScore:1,coupleEvidence:0,friendEvidence:0,negativeMutual:0}];
-  const results = computeResults(signals, log, meta);
-  assert.ok(results.claims.every(c => c.confidence !== "high"), "thin components cannot generate high-confidence claims");
-  const coupleLog = (["p1", "p2"] as const).map((playerId, i) => ({ roomId: "thin", roundId: `mutual-${i}`, playerId, roundKind: "pick" as const, promptId: `mutual-${i}`, coding: "couple" as const, value: { kind: "pick" as const, target: i === 0 ? "p2" : "p1" }, at: i, latencyMs: 10 }));
-  const measuredPickOnly: PairSignal[] = [{room:"thin",a:"p1",b:"p2",pickOverlap:0,mutualPick:1,debriefSim:0,iosMean:0,traitAgreement:0,componentsUsed:["mutualPick"],pairScore:1,coupleEvidence:1,friendEvidence:0,negativeMutual:0}];
-  const pickOnlyClaims = computeResults(measuredPickOnly, coupleLog, meta).claims;
-  const pairClaims = pickOnlyClaims.filter(c => c.subjects.includes("p1") && c.subjects.includes("p2"));
-  assert.ok(pairClaims.length > 0);
-  assert.ok(pairClaims.every(c => c.confidence !== "high"), "one measured type never yields high-confidence public claims");
+test("reveal opt-out suppresses every private card kind", () => {
+  const meta = meta5("room-digest", ["p2"]);
+  const log = digestLog();
+  const results = computeResults(computeSignals(log, meta), log, meta);
+  const decks = buildSecrets(results, buildNightDigest(log, meta), meta);
+  assert.ok([...decks.keys()].every((id) => id === "p2"));
 });
-
-

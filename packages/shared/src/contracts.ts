@@ -1,5 +1,6 @@
 // packages/shared/src/contracts.ts
-// Shared contract — updated for the remediation contract requests.
+// SINGLE SOURCE OF TRUTH. Agents A–G never edit this file.
+// Change requests go to NOTES/contract-requests.md; Agent Z resolves them.
 
 // ---------- Identity & rooms ----------
 export type PlayerId = string; // server-generated opaque id, e.g. "p3". NEVER the literal "self".
@@ -23,7 +24,13 @@ export const HEAT_ORDER = ["warmup", "spicy", "deep", "dare"] as const;
 
 export type RoundKind =
 | "pick" | "text" | "shout" | "rating" | "ios"
-| "minigame" | "dare" | "pair_dare" | "debrief";
+| "minigame" | "dare" | "pair_dare" | "debrief"
+// Live moments (ROUND 3). Both are group-theatre rounds, not more questions:
+//   spotlight — everyone EXCEPT one subject answers a question about the live
+//               moment; the subject gets a DECOY round and never sees it.
+//   verdict   — open discussion for VERDICT_DISCUSS_MS, then a simultaneous
+//               secret pick; the reveal is a Group Announcement mini-finale.
+| "spotlight" | "verdict";
 
 export type PromptCoding =
 | "couple" | "friendship" | "trust" | "friction" | "tease" | "rivalry" | "status" | "neutral";
@@ -63,13 +70,31 @@ export interface LogRecord {
     value: ResponseValue;
     at: number;                  // epoch ms
     latencyMs: number;           // round open → submit. Night-Digest fuel.
+    /** Spotlight decoy answer: the subject's throwaway reply to the cover
+     *  round. EXCLUDED from every signal, score and claim (data-or-dead does
+     *  not apply — it answers nothing). It is digest gold only: it pairs with
+     *  the captions ("While the room captioned X, X wrote: …") and lands last
+     *  in the caption-wall reveal. */
+    decoy?: boolean;
+    /** Solo dare performer or pair-dare respondent; persisted for accountability. */
+    performerId?: PlayerId;
 }
+
+export interface ProfileAnswers { age: number; relationship: "single" | "dating" | "committed" | "married" | "complicated"; partnersToDate: number; longestMonths: number; crushingHere: boolean; tonight: "chaos" | "vibes" | "feelings" | "mission"; }
+export const PROFILE_QUESTIONS = [
+    { field: "age", label: "How old are you?", kind: "number" },
+    { field: "relationship", label: "Your relationship status?", kind: "select" },
+    { field: "partnersToDate", label: "How many people have you dated?", kind: "number" },
+    { field: "longestMonths", label: "Longest relationship (months)?", kind: "number" },
+    { field: "crushingHere", label: "Crushing on someone here? (stays secret)", kind: "boolean", secret: true },
+    { field: "tonight", label: "What are you here for tonight?", kind: "select" },
+] as const;
 
 export interface RoomMeta {
     roomId: string;
     players: { id: PlayerId; alias: string }[];
     revealOptIn: PlayerId[];     // consented to private spark / one-sided / secret cards
-    profiles: Record<PlayerId, ProfileAnswers>;
+    profiles?: Record<PlayerId, ProfileAnswers>;
 }
 
 // ---------- Engine: pair signals ----------
@@ -79,11 +104,11 @@ export interface PairSignal {
     b: PlayerId;
     pickOverlap: number;         // 0..1
     mutualPick: number;          // 0..1
-    debriefSim: number;          // 0..1; consult componentsUsed to distinguish missing from measured 0
+    debriefSim: number;          // 0..1; componentsUsed distinguishes measured zero from missing
+    componentsUsed: ("pickOverlap" | "mutualPick" | "debriefSim" | "iosMean" | "traitAgreement")[];
     iosMean: number;             // 0..1
     traitAgreement: number;      // 0..1
-    pairScore: number;           // measured-component weighted, 0..1
-    componentsUsed: ("pickOverlap" | "mutualPick" | "debriefSim" | "iosMean" | "traitAgreement")[];
+    pairScore: number;           // weighted, 0..1
     coupleEvidence: number;      // 0..1
     friendEvidence: number;      // 0..1
     negativeMutual: number;      // 0..1
@@ -145,6 +170,12 @@ export interface RoundView {
     closesAt: number;            // epoch ms
     youSubmitted: boolean;
     onlyPlayers?: PlayerId[];    // pair_dare/debrief rounds; everyone else watches
+    /** verdict rounds: open discussion until this epoch ms, then the secret
+     *  simultaneous pick opens (closesAt = voteOpensAt + VERDICT_VOTE_MS). */
+    voteOpensAt?: number;
+    /** false for the spotlight subject's IDLE cover screen — the phone waits
+     *  the round out without offering an input. Absent means "answer me". */
+    expectsAnswer?: boolean;
     about?: PlayerId;
     trait?: TraitId;
     performer?: PlayerId;
@@ -173,6 +204,19 @@ export interface RevealView {
     summary: string;
     items?: RevealItem[];        // text answers, shout winner, dare outcomes…
     holdMs: number;
+    /** Present for live moments so the phone can render the specialised
+     *  reveal instead of the generic list. */
+    kind?: RoundKind;
+    /** spotlight: the alias being watched — the caption wall's header. The
+     *  question itself is NEVER part of the reveal payload. */
+    subject?: string;
+    /** spotlight: the subject's decoy answer. It lands LAST and biggest. */
+    punchline?: string;
+    /** verdict: the Group Announcement mini-finale (anonymous bars, count-up,
+     *  then the room's answer lands). Numbers are counts only. */
+    slide?: FinaleSlide;
+    /** verdict: couple-coded prompts get confetti on the land beat. */
+    celebrate?: boolean;
 }
 
 export type SlideBeat = "tease" | "escalate" | "land";
@@ -213,19 +257,39 @@ export interface SecretDeckView {
 export const SECRET_DECK_MAX = 6;    // cards per player, per night
 export const SECRET_HOLD_MS = 400;   // press-and-hold ramp before a card opens; release hides it again
 
+// ---------- INTERNAL: Director hypotheses (ROUND 4) ----------
+// INTERNAL — engine/server only. NEVER serialized to any client: not on
+// `state`, `round`, `reveal`, `interlude`, `finale`, `secrets`, `error`, not in
+// a room log line that leaves the process, not in any JSONL file a player can
+// read. Hypotheses are game-DIRECTION hints (what the engine privately wants
+// to probe next), never content. Players see the freshness they cause and
+// nothing else. Do not add a Hypothesis to ServerToClientEvents.
+export type HypothesisKind = "tension" | "besties" | "secret" | "selfimage" | "onesided" | "freeagent";
+export type HypothesisStatus = "open" | "supported" | "refuted" | "unresolved";
+
+export interface Hypothesis {
+    id: string;
+    kind: HypothesisKind;
+    subjects: PlayerId[];        // pseudonymous in any LLM context
+    status: HypothesisStatus;
+    strength: number;            // 0..1 — deterministic engine value
+    evidence: string[];          // engine-written, incremental
+    openedAt: number;            // epoch ms — may be a PREVIOUS night
+    lastTestedRound?: string;
+}
+
+// ---------- INTERNAL: accounts (ROUND 4) ----------
+// Server-side identity only. The client holds a token, never a hash and never
+// an email address — there is no email field anywhere in this contract, by
+// design ("store it, there is no email").
+export interface AccountInfo { username: string; createdAt: number; nightsPlayed: number; }
+// server stores: username (3–16 chars, [a-z0-9_], case-insensitive unique),
+// pinHash (scrypt), recoveryCodeHash, token seeds
+
 // ---------- Socket contract ----------
 export interface Consent { age: boolean; terms: boolean; revealOptIn: boolean; }
 
 export type JoinRole = "player" | "display";
-export interface ProfileAnswers { age: number; relationship: "single" | "dating" | "committed" | "married" | "complicated"; partnersToDate: number; longestMonths: number; crushingHere: boolean; tonight: "chaos" | "vibes" | "feelings" | "mission"; }
-export const PROFILE_QUESTIONS = [
-    { field: "age", label: "How old are you?", kind: "number" },
-    { field: "relationship", label: "Your relationship status?", kind: "select" },
-    { field: "partnersToDate", label: "How many people have you dated?", kind: "number" },
-    { field: "longestMonths", label: "Longest relationship (months)?", kind: "number" },
-    { field: "crushingHere", label: "Crushing on someone here? (stays secret)", kind: "boolean", secret: true },
-    { field: "tonight", label: "What are you here for tonight?", kind: "select" },
-] as const;
 
 export interface JoinRequest {
     roomCode: RoomCode;
@@ -248,8 +312,9 @@ export interface SubmitRequest { roundId: string; clientUuid: string; value: Res
 export interface DarePassRequest { roundId: string; reason: string; }   // reason REQUIRED, ≤140
 
 export type ClientToServerEvents = {
-    create: (p: { alias: string; consent: Consent; profile: ProfileAnswers; role?: JoinRole }, reply: (r: JoinReply & { code?: RoomCode }) => void) => void;
+    create: (p: { alias: string; consent: Consent; profile?: ProfileAnswers; role?: JoinRole }, reply: (r: JoinReply & { code?: RoomCode }) => void) => void;
     join: (p: JoinRequest, reply: (r: JoinReply) => void) => void;
+    display_join: (p: { roomCode: RoomCode }, reply: (r: { ok: boolean; state?: RoomView; error?: string }) => void) => void;
     submit: (p: SubmitRequest, reply: (r: { ok: boolean; error?: string }) => void) => void;
     dare_pass: (p: DarePassRequest) => void;
     start: () => void;                                   // host only
@@ -289,11 +354,55 @@ export const CONFIDENCE_RULES = {
 
 export const JOKER_GUARD = { sameTargetShare: 0.70, downweight: 0.5 } as const;
 
-export const MC_SIMULATIONS = 4000;   // seeded PRNG → deterministic
+export const MC_SIMULATIONS = 1000;   // seeded PRNG → deterministic, once per room
+
+/** verdict: seconds of open debate ("PHONES DOWN. ARGUE IT OUT.") */
+export const VERDICT_DISCUSS_MS = 90_000;
+/** verdict: simultaneous secret pick window after the debate */
+export const VERDICT_VOTE_MS = 15_000;
+/** spotlight: a short caption, not an essay */
+export const SPOTLIGHT_ANSWER_MAX = 80;
+/** spotlight: how long the caption wall holds (stack, then the punchline) */
+export const SPOTLIGHT_REVEAL_MS = 8_000;
+/** verdict: the room's answer lands, then the phase moves on */
+export const VERDICT_REVEAL_MS = 6_000;
+
+// ---------- Director tunables (ROUND 4 — INTERNAL, never player-visible) ----------
+/**
+ * MID-BAND FORMATION. A suspicion only becomes a hypothesis when its
+ * deterministic strength lands inside this band: strong enough to be worth
+ * probing, weak enough to be a suspicion rather than a conclusion.
+ *  - inside [lo, hi]      → the hypothesis forms / keeps updating;
+ *  - above the band WITH ≥3 independent signals (and ≥70% consensus where it
+ *    applies) → it GRADUATES to an ordinary Claim and leaves the hypothesis
+ *    set (paying off at the finale like any other claim);
+ *  - below the band       → noise. Never opens, and an existing one fades.
+ */
+export const HYPOTHESIS_FORM_BAND = { lo: 0.35, hi: 0.65 } as const;
+
+/**
+ * THE VISIBLE MAGIC — how every non-live round is chosen.
+ *   test    50% — probe an OPEN hypothesis's subjects on its dimension
+ *   explore 30% — least-covered (pair × dimension) cell of the coverage matrix
+ *   classic 20% — bank/callback rounds as before
+ * Fractions are config, not logic: retune by replaying logs (spec §14).
+ */
+export const ROUND_MIX = { test: 0.5, explore: 0.3, classic: 0.2 } as const;
+
+/**
+ * ANTI-TELEGRAPH. Never more than this many CONSECUTIVE rounds touching the
+ * same subject pair. Without it the engine machine-guns two people and the
+ * room clocks the game — which is the one thing players must never be able to
+ * do. A hidden rule that makes the hidden engine believable.
+ */
+export const ANTI_TELEGRAPH_MAX = 2;
 
 export const ROUND_TIMERS_MS: Record<RoundKind, number> = {
     pick: 45_000, text: 90_000, shout: 15_000, rating: 40_000, ios: 40_000,
     minigame: 12_000, dare: 300_000, pair_dare: 330_000, debrief: 60_000,
+    // Live moments. Spotlight = 25s of captioning. Verdict = 90s of arguing
+    // with phones face-down, then 15s of secret simultaneous picking.
+    spotlight: 25_000, verdict: VERDICT_DISCUSS_MS + VERDICT_VOTE_MS,
 };
 
 export const REVEAL_HOLD_MS = 4200;
@@ -302,16 +411,17 @@ export const GRACE_MS = 8000;         // extra wait after timer for stragglers
 export const PICK_ROUNDS_PER_PHASE = 2;
 export const SPARK_MIN_MUTUAL = 2;
 export const CONSENSUS_MIN_PICKERS = 4;
-export const ROUNDS_PER_PHASE = 4;    // warmup / spicy / deep, including both pick slots
+export const ROUNDS_PER_PHASE = 4;    // warmup / spicy / deep including pick slots
 export const DARE_ROUNDS = 2;         // solo dares before the pair dare
 
 // ---------- LLM providers ----------
 // TWO INDEPENDENT LANES — deterministic code is primary everywhere (bank
 // prompts, Jaccard similarity, lexicon tags, template finale); providers only
 // augment. Each lane checks only its own key and degrades to code silently:
-//   Grok   (XAI_API_KEY)    → prompt generation + one validated reveal polish call.
-//   Gemini (GEMINI_API_KEY) → tagging/debrief analysis only (never reveals).
-// Gemini never generates prompts or narrates. Neither key → full game, zero internet.
+//   Grok   (XAI_API_KEY)    → unhinged prompt generation ONLY.
+//   Gemini (GEMINI_API_KEY) → batched tagging and debrief analysis only; never finale narration.
+// Gemini never generates game prompts (it soft-refuses spicy); Grok never
+// analyzes or narrates. Neither key → full game, zero internet.
 export const PROVIDERS = {
     grok: {
         // OpenAI-compatible REST: POST {baseUrl}/chat/completions with Bearer XAI_API_KEY.
@@ -325,27 +435,24 @@ export const PROVIDERS = {
         // knobs — our deterministic filter (banned patterns, length, placeholders)
         // is the guardrail.
         baseUrl: "https://api.x.ai/v1",
-        generate: "grok-4.7",
-        reveal: "grok-4.7", // narration and secret-card copy
+        generate: "grok-4-1-fast", // unhinged generation + callbacks — Grok's only job
     },
     gemini: {
-        // Analysis + narration lane — the higher tier. All calls BATCHED:
-        // tags once per night (all texts), debrief-similarity once (all pairs),
-        // reveal+secrets copy ONCE per night. SAFETY_OFF attached (see below) so
-        // it can analyze spicy text without refusing.
+        // Analysis-only lane. Batched tags and debrief similarity are local
+        // analysis aids; finale copy is deterministic/Grok and never Gemini.
         tag: "gemini-3.5-flash-lite",       // cheap classification, one batch call
-        analyze: "gemini-3.5-flash-lite",  // tagging and debrief analysis only
+        analyze: "gemini-3.1-pro-preview",  // pair-dare debrief judgment
     },
 } as const;
-
-/** One GEMINI_MODEL override is shared by every Gemini analysis call site. */
-export const resolveGeminiModel = (override?: string): string =>
-    typeof override === "string" && override.trim() ? override.trim() : PROVIDERS.gemini.analyze;
 
 // Hard API budget: generation 4 (one per phase) + tag 1 + debrief 1 +
 // reveal+secrets 1 = 7. "Most things are done through code" — the cap is
 // enforced in code, not vibes.
 export const MAX_PROVIDER_CALLS_PER_NIGHT = 8;
+
+/** Shared resolver for every Gemini API call site. */
+export const resolveGeminiModel = (override?: string): string =>
+    typeof override === "string" && override.trim() ? override.trim() : PROVIDERS.gemini.analyze;
 
 // Gemini-only request field: set all four adjustable filters to the most
 // permissive threshold the current API accepts ("OFF" on the new interactions

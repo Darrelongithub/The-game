@@ -4,11 +4,12 @@ export interface AliasEntry { alias: string; id: string; }
 
 /** Build a stable room-order crosswalk; replacement order handles contained names deterministically. */
 export function aliasTable(players: AliasEntry[]): { alias: string; token: string }[] {
-  return players.map((p, i) => ({ alias: p.alias, token: pseudonym(i) }));
+  return players.map((p, i) => ({ alias: p.alias.normalize("NFC"), token: pseudonym(i) }));
 }
 
 /** Replace whole alias tokens only. Unicode letters/digits/underscore count as word characters. */
 export function pseudonymizeText(text: string, players: AliasEntry[]): string {
+  text = text.normalize("NFC");
   const table = aliasTable(players).sort((a, b) => b.alias.length - a.alias.length || a.token.localeCompare(b.token));
   for (const entry of table) {
     const escaped = entry.alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

@@ -47,7 +47,7 @@ export function GlowButton({
       {ripple && (
         <motion.span
           className="absolute inset-0 rounded-2xl"
-          style={{ background: 'radial-gradient(circle, rgba(182,255,60,0.4), transparent 70%)' }}
+          style={{ background: 'radial-gradient(circle, rgba(255,195,255,0.4), transparent 70%)' }}
           initial={{ opacity: 0.5, scale: 0.5 }}
           animate={{ opacity: 0, scale: 1.8 }}
           transition={{ duration: 0.4 }}

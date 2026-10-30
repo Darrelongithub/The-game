@@ -66,8 +66,10 @@ export function clientUuid(): string {
   return `u-${Date.now().toString(36)}-${uuidCounter}`;
 }
 
-export function useRoom(): UseRoom {
+/** Factory injection lets tests exercise slow chunk/network initialization. */
+export function useRoom(factory: typeof createTransport = createTransport): UseRoom {
   const transportRef = useRef<Transport | null>(null);
+  const transportReady = useRef<Promise<Transport> | null>(null);
   const [mode, setMode] = useState<"socket" | "mock">(transportMode);
   const [view, setView] = useState<RoomView | null>(null);
   const [you, setYou] = useState<PlayerId | null>(null);
@@ -82,10 +84,6 @@ export function useRoom(): UseRoom {
   const [secrets, setSecrets] = useState<SecretDeckView | null>(null);
   const [hasSession, setHasSession] = useState(false);
 
-  // Latest values for handlers that outlive a render.
-  const youRef = useRef<PlayerId | null>(null);
-  youRef.current = you;
-
   useEffect(() => {
     const stored = loadSession();
     setHasSession(Boolean(stored));
@@ -97,6 +95,7 @@ export function useRoom(): UseRoom {
     const handlers: TransportHandlers = {
       onState: (next) => {
         setView(next);
+        setRound(next.round ?? null);
         setCode(next.code);
         // Server-authoritative: a snapshot always wins over local guesses.
         setHasSession(true);
@@ -129,26 +128,34 @@ export function useRoom(): UseRoom {
         resetLocal();
         setError("The room was deleted.");
       },
-      onError: (e) => setError(e.message),
+      onError: (e) => {
+        if (e.code === "resume_failed") resetLocal();
+        setError(e.message);
+      },
       onConnection: (ok, info) => {
         setConnected(ok);
-        if (info?.resuming !== undefined) setResuming(Boolean(ok && info.resuming));
+        setResuming(Boolean(ok && info?.resuming));
       },
     };
 
     let disposed = false;
-    void createTransport(handlers).then((transport) => {
-      if (disposed) { transport.disconnect(); return; }
+    const ready = factory(handlers).then((transport) => {
+      if (disposed) { transport.disconnect(); throw new Error("Room screen unmounted"); }
       transportRef.current = transport;
       setMode(transport.mode);
       if (stored) transport.resume();
-    }).catch(() => {
+      return transport;
+    });
+    transportReady.current = ready;
+    void ready.catch(() => {
       if (!disposed) { setConnected(false); setError("Could not start the connection. Please reload."); }
     });
 
-    // Belt and braces for mobile Safari: it does not always fire `online`.
+    // The real transport owns its visibility listener. Keep the mock's
+    // snapshot refresh without issuing a second real rejoin on the same token.
     const onVisible = () => {
-      if (document.visibilityState === "visible") transportRef.current?.resume();
+      const current = transportRef.current;
+      if (document.visibilityState === "visible" && current?.mode === "mock") current.resume();
     };
     document.addEventListener("visibilitychange", onVisible);
 
@@ -157,11 +164,13 @@ export function useRoom(): UseRoom {
       document.removeEventListener("visibilitychange", onVisible);
       transportRef.current?.disconnect();
       transportRef.current = null;
+      if (transportReady.current === ready) transportReady.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const resetLocal = useCallback(() => {
+    transportRef.current?.forgetSession();
     clearSession();
     setYou(null);
     setCode(null);
@@ -175,8 +184,8 @@ export function useRoom(): UseRoom {
   }, []);
 
   const createRoom = useCallback(async (alias: string, consent: Consent, profile: ProfileAnswers) => {
-    const t = transportRef.current;
-    if (!t) return { ok: false, error: "Not connected yet." } satisfies JoinReply;
+    const t = transportRef.current ?? await transportReady.current?.catch(() => null);
+    if (!t) return { ok: false, error: "Not connected yet. Please retry." } satisfies JoinReply;
     setError(null);
     const reply = await t.create(alias, consent, profile);
     if (reply.ok && reply.you) {
@@ -195,8 +204,8 @@ export function useRoom(): UseRoom {
   }, []);
 
   const joinRoom = useCallback(async (roomCode: RoomCode, alias: string, consent: Consent, profile: ProfileAnswers) => {
-    const t = transportRef.current;
-    if (!t) return { ok: false, error: "Not connected yet." } satisfies JoinReply;
+    const t = transportRef.current ?? await transportReady.current?.catch(() => null);
+    if (!t) return { ok: false, error: "Not connected yet. Please retry." } satisfies JoinReply;
     setError(null);
     const reply = await t.join({ roomCode, alias, consent, profile });
     if (reply.ok && reply.you) {
@@ -259,7 +268,7 @@ export function useRoom(): UseRoom {
     connected,
     resuming,
     error,
-    round: view?.round ?? round,
+    round,
     interlude,
     reveal,
     finale,

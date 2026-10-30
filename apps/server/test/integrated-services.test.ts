@@ -14,7 +14,7 @@ import { createGameServer } from "../src/server.ts";
 const empty: NightDigest = { quotes: [], stats: {}, runningGags: [], pickTeasers: [], dodges: [], selfVsRoom: [] };
 const offline = () => createIntegratedServices(new Provider({ env: {}, guard: new CallGuard() }));
 
-test("production adapter uses the full bank, golden scoring and public narrator offline", async () => {
+test("injectable adapter uses the full bank, golden scoring and public narrator offline", async () => {
   const services = offline(), prompts = services.createPromptProvider("room");
   await prompts.prepare!({ playerCount: 5, usedIds: [], digest: empty });
   for (const phase of ["warmup", "spicy", "deep", "dare"] as const) {
@@ -88,10 +88,10 @@ test("mock Grok lobby work is nonblocking, per-room budgeted, and falls back on 
   refused.dispose?.();
 });
 
-test("integrated no-key server completes a game on the production adapters", { timeout: 12000 }, async t => {
+test("integrated no-key server completes a game on the injectable adapter", { timeout: 12000 }, async t => {
   const dataDir = mkdtempSync(join(tmpdir(), "reveal-integrated-"));
   const services = offline();
-  const server = createGameServer({ dataDir, services, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2 });
+  const server = createGameServer({ dataDir, services, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, graceMs: 0, verdictDiscussMs: 0, roundTimers: { spotlight: 300, verdict: 300 } });
   const port = await server.listen(0, "127.0.0.1", false);
   const socket = io(`http://127.0.0.1:${port}`, { reconnection: false });
   t.after(async () => { socket.disconnect(); await server.close(); rmSync(dataDir, { recursive: true, force: true }); });
@@ -100,9 +100,12 @@ test("integrated no-key server completes a game on the production adapters", { t
   assert.equal(created.ok, true);
   for (let i = 0; i < 3; i++) socket.emit("add_bot");
   const seen = new Set<string>();
+  const allRounds = new Map<string, RoundView>();
+  const submissionErrors: string[] = [];
   const finale = new Promise<any>((resolve, reject) => { const timer = setTimeout(() => reject(new Error("finale timeout")), 10000); socket.once("finale", value => { clearTimeout(timer); resolve(value); }); });
   socket.on("round", (round: RoundView) => {
-    if (round.youSubmitted || seen.has(round.roundId) || (round.onlyPlayers && !round.onlyPlayers.includes(created.you))) return;
+    if (!allRounds.has(round.roundId)) allRounds.set(round.roundId, round);
+    if (round.youSubmitted || round.expectsAnswer === false || seen.has(round.roundId) || (round.onlyPlayers && !round.onlyPlayers.includes(created.you))) return;
     seen.add(round.roundId);
     let value: ResponseValue;
     switch (round.kind) {
@@ -114,12 +117,18 @@ test("integrated no-key server completes a game on the production adapters", { t
       case "ios": value = { kind: "ios", about: round.about!, value: 5 }; break;
       case "minigame": value = { kind: "minigame", score: 20 }; break;
       case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
+      case "spotlight": value = { kind: "text", text: "Watching the room right now." }; break;
+      case "verdict": value = { kind: "pick", target: "p2" }; break;
     }
-    socket.emit("submit", { roundId: round.roundId, clientUuid: `integrated-${round.roundId}`, value }, () => {});
+    socket.emit("submit", { roundId: round.roundId, clientUuid: `integrated-${round.roundId}`, value }, (reply: { ok: boolean; error?: string }) => { if (!reply.ok) submissionErrors.push(reply.error ?? "rejected"); });
   });
   socket.emit("start");
   const result = await finale;
   assert.ok(result.slides.length > 5);
-  assert.ok(seen.size >= 12);
+  assert.equal(allRounds.size, 24, "the host observes every question, live moment and spectator-only pair/debrief");
+  const expected = [...allRounds.values()].filter((round) => round.expectsAnswer !== false && (!round.onlyPlayers || round.onlyPlayers.includes(created.you))).length;
+  assert.ok(expected >= 17, "the host participates in every unrestricted round except an idle cover");
+  assert.equal(seen.size, expected, "the host answered every round they could participate in");
+  assert.deepEqual(submissionErrors, [], "eligible answers were accepted");
   assert.ok(!JSON.stringify(result).includes("We had a great conversation together tonight."), "private debrief must not appear verbatim in finale");
 });

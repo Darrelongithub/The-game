@@ -4,8 +4,8 @@
 import {
   CONFIDENCE_RULES,
   CONSENSUS_MIN_PICKERS,
+  JOKER_GUARD,
   MIN_PLAYERS,
-  SPARK_MIN_MUTUAL,
   pseudonym,
   type Confidence,
   type LogRecord,
@@ -32,7 +32,7 @@ export const ENGINE_TUNING = {
     pickOverlap: 0.5,
     mutualPick: 0.5,
     evidence: 0.5,
-    debriefSim: 0.6, // measured similarity must clear this evidence bar
+    debriefSim: 0.6, // a measured similarity must clear this evidence bar
     iosMean: 0.65,
     traitAgreement: 0.8, // uniform-random ratings average ~0.633; 0.8 means mean |self-peer| <= 1.8
   },
@@ -51,7 +51,6 @@ export const ENGINE_TUNING = {
 
 export const POSITIVE_CODINGS: ReadonlySet<PromptCoding> = new Set(["couple", "friendship"]);
 export const NEGATIVE_CODINGS: ReadonlySet<PromptCoding> = new Set(["friction", "rivalry"]);
-export { SPARK_MIN_MUTUAL };
 
 export const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 
@@ -141,6 +140,25 @@ export const getPicks = (log: readonly LogRecord[]): PickRec[] => {
   }
   return out;
 };
+
+/** Exact per-picker weights used by toxic scoring, also observable in tests. */
+export function jokerNominationWeights(log: readonly LogRecord[], ids: readonly PlayerId[]): Map<PlayerId, number> {
+  const pickerTargets = new Map<PlayerId, Map<PlayerId, number>>();
+  for (const p of getPicks(log)) {
+    let targets = pickerTargets.get(p.picker);
+    if (!targets) { targets = new Map(); pickerTargets.set(p.picker, targets); }
+    targets.set(p.target, (targets.get(p.target) ?? 0) + 1);
+  }
+  const weights = new Map<PlayerId, number>();
+  for (const id of ids) {
+    const targets = pickerTargets.get(id);
+    const counts = targets ? [...targets.values()] : [];
+    const total = counts.reduce((sum, count) => sum + count, 0);
+    const maxShare = total ? Math.max(...counts) / total : 0;
+    weights.set(id, maxShare > JOKER_GUARD.sameTargetShare ? JOKER_GUARD.downweight : 1);
+  }
+  return weights;
+}
 
 /**
  * Pooled directed-pick rate between a pair for a coding filter:
@@ -251,9 +269,9 @@ export function buildIosIndex(log: readonly LogRecord[]): Map<PlayerId, Map<Play
 // ---------- debrief similarity (token-Jaccard is PRIMARY, spec §5) ----------
 
 export const tokenize = (text: string): Set<string> =>
-  new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 0));
+  new Set(text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length > 0));
 
-/** Jaccard over lowercase alphanumeric token sets. Both empty → 0 (measured absence). */
+/** Jaccard over lowercase alphanumeric token sets. Both empty score 0; missing pairs are omitted upstream. */
 export function tokenJaccard(a: string, b: string): number {
   const sa = tokenize(a);
   const sb = tokenize(b);
@@ -271,7 +289,7 @@ export function tokenJaccard(a: string, b: string): number {
  *  2. else debrief records sharing a promptId with exactly 2 distinct players
  *     (pair not already found in step 1);
  *  3. else, if exactly 2 players in the whole log have debrief texts, them.
- * Missing debrief data produces no component value; it never invents a midpoint.
+ * Pairs with no determination get debriefSim 0.5 ("unknown") upstream.
  */
 export function buildDebriefSims(log: readonly LogRecord[]): Map<string, number> {
   const textsByPlayer = new Map<PlayerId, string[]>();

@@ -58,8 +58,11 @@ function traitAgreementDirection(index: RatingIndex, of: PlayerId, by: PlayerId)
   return scores.length === 0 ? undefined : meanOf(scores);
 }
 
-export function computeSignals(log: LogRecord[], meta: RoomMeta): PairSignal[] {
+export function computeSignals(allRecords: LogRecord[], meta: RoomMeta): PairSignal[] {
   assertScorableMeta(meta);
+  // Spotlight decoys answer a cover question, not the moment: they can never
+  // move a signal. (The server also filters them out before calling us.)
+  const log = allRecords.filter((rec) => rec.decoy !== true);
   const ids = playerIdsSorted(meta);
   const picks = getPicks(log);
   const ratings = buildRatingIndex(log);
@@ -101,14 +104,11 @@ export function computeSignals(log: LogRecord[], meta: RoomMeta): PairSignal[] {
 
       const debriefSim = debriefSims.get(pairKey(a, b)) ?? 0;
 
-      // iosMean: (ios(a→b) + ios(b→a)) / 14 — i.e. mean of directional means / 7.
-      // A direction with no IOS records simply doesn't vote; none at all → 0.
-      const iosDirs: number[] = [];
-      const iab = ios.get(a)?.get(b);
-      const iba = ios.get(b)?.get(a);
-      if (iab !== undefined) iosDirs.push(iab);
-      if (iba !== undefined) iosDirs.push(iba);
-      const iosMean = iosDirs.length === 0 ? 0 : meanOf(iosDirs) / 7;
+      // Each direction contributes at most half: (ios(a→b) + ios(b→a)) / 14.
+      // Missing responses contribute zero, rather than doubling one person's vote.
+      const iab = ios.get(a)?.get(b) ?? 0;
+      const iba = ios.get(b)?.get(a) ?? 0;
+      const iosMean = (iab + iba) / 14;
 
       // traitAgreement: 1 − |self − peer|/9 per shared trait, both directions.
       const dirs: number[] = [];

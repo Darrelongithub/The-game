@@ -7,7 +7,8 @@ import {
 } from "../packages/shared/src/validate.ts";
 import {
     ROUND_TIMERS_MS, TRAITS, HEAT_ORDER, SECRET_DECK_MAX, SECRET_HOLD_MS,
-    MAX_PROVIDER_CALLS_PER_NIGHT, PICK_ROUNDS_PER_PHASE, SPARK_MIN_MUTUAL, CONSENSUS_MIN_PICKERS, type RoundKind,
+    MAX_PROVIDER_CALLS_PER_NIGHT, VERDICT_DISCUSS_MS, VERDICT_VOTE_MS, type RoundKind,
+    HYPOTHESIS_FORM_BAND, ROUND_MIX, ANTI_TELEGRAPH_MAX,
 } from "../packages/shared/src/contracts.ts";
 
 let pass = 0, fail = 0;
@@ -59,15 +60,22 @@ ok("ios about yourself rejected", !targetsOther({ kind: "ios", about: "p1", valu
 ok("validSubmit combo", validSubmit({ kind: "pick", target: "p2" }, "p1") && !validSubmit({ kind: "pick", target: "p1" }, "p1"));
 
 // contracts invariants
-const kinds: RoundKind[] = ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare", "debrief"];
-ok("timers cover all 9 round kinds", kinds.every((k) => typeof ROUND_TIMERS_MS[k] === "number" && ROUND_TIMERS_MS[k] > 0));
+const kinds: RoundKind[] = ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare", "debrief", "spotlight", "verdict"];
+ok("timers cover all 11 round kinds", kinds.length === 11 && kinds.every((k) => typeof ROUND_TIMERS_MS[k] === "number" && ROUND_TIMERS_MS[k] > 0));
+ok("live-moment timers match the spec", ROUND_TIMERS_MS.spotlight === 25_000 && ROUND_TIMERS_MS.verdict === 105_000 &&
+  VERDICT_DISCUSS_MS + VERDICT_VOTE_MS === ROUND_TIMERS_MS.verdict);
 ok("6 traits defined", TRAITS.length === 6);
 ok("4 heat phases in order", HEAT_ORDER.length === 4 && HEAT_ORDER[0] === "warmup" && HEAT_ORDER[3] === "dare");
 ok("secret deck config sane", SECRET_DECK_MAX >= 3 && SECRET_DECK_MAX <= 8 && SECRET_HOLD_MS >= 200 && SECRET_HOLD_MS <= 1000);
 ok("provider call cap sane", MAX_PROVIDER_CALLS_PER_NIGHT >= 5 && MAX_PROVIDER_CALLS_PER_NIGHT <= 12);
-ok("pick rounds per phase >= 2", PICK_ROUNDS_PER_PHASE >= 2);
-ok("spark requires at least 2 mutuals", SPARK_MIN_MUTUAL >= 2);
-ok("consensus picker threshold in 3..6", CONSENSUS_MIN_PICKERS >= 3 && CONSENSUS_MIN_PICKERS <= 6);
+
+// ROUND 4 — the Director's tunables must stay tunable, never broken.
+ok("hypothesis band has lo < hi (mid-band, both inside 0..1)",
+   HYPOTHESIS_FORM_BAND.lo < HYPOTHESIS_FORM_BAND.hi &&
+   HYPOTHESIS_FORM_BAND.lo > 0 && HYPOTHESIS_FORM_BAND.hi < 1);
+ok("round mix sums to 1", Math.abs(ROUND_MIX.test + ROUND_MIX.explore + ROUND_MIX.classic - 1) < 1e-9);
+ok("round mix stays test-heavy", ROUND_MIX.test > ROUND_MIX.explore && ROUND_MIX.explore > ROUND_MIX.classic);
+ok("anti-telegraph cap is at least 2", ANTI_TELEGRAPH_MAX >= 2);
 
 console.log(fail === 0 ? `\nALL ${pass} CHECKS PASSED ✅ — safe to spawn agents` : `\n${fail} FAILED / ${pass} passed ❌ — fix before spawning`);
 process.exit(fail === 0 ? 0 : 1);

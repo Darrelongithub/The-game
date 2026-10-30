@@ -12,16 +12,16 @@ export default {
   theme: {
     extend: {
       colors: {
-        base: '#0d0617',
-        purple: { primary: '#8b2fe0', deep: '#4c1d95' },
-        blue: { secondary: '#2f5fe0', glow: '#3b82f6' },
-        lime: { accent: '#b6ff3c' },
+        base: '#100019',
+        purple: { primary: '#9f2cd4', deep: '#4b1266' },
+        blue: { secondary: '#cf2ba9', glow: '#d988ff' },
+        lime: { accent: '#efb4ff' },
         // game layer (spec §12 / FIXES notes)
         alert: '#ff4d6d',
         heat: {
-          warmup: '#3b82f6',
-          spicy: '#b6ff3c',
-          deep: '#8b2fe0',
+          warmup: '#d9a6ff',
+          spicy: '#f0a8e6',
+          deep: '#a14ce3',
           dare: '#ff4d6d',
         },
       },

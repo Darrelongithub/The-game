@@ -11,8 +11,9 @@ only.
 ## 0. Non-negotiables
 1. **Deterministic scoring.** The LLM never produces a number.
 2. **Fully playable with NO API keys** — handwritten bank carries the whole night.
-3. **Two LLM lanes; code carries the night.** Grok (xAI) generates unhinged prompts and may narrate when enabled (`XAI_API_KEY`).
-   Gemini analyzes data only (`GEMINI_API_KEY`); deterministic templates narrate offline. Everything else — bank, similarity,
+3. **Two LLM lanes; code carries the night.** Grok (xAI) generates the
+   unhinged prompts (`XAI_API_KEY`). Higher-tier Gemini analyzes the data and
+   narrates the finale (`GEMINI_API_KEY`). Everything else — bank, similarity,
    tags, digest, every number — is deterministic code. Lanes are independent
    and optional: no keys at all = a fully playable night on the bank, offline.
 4. **18+ only.** Private friend group, self-hosted by the host.
@@ -31,9 +32,21 @@ only.
   Server authoritative; rounds auto-advance when all required players submit or
   timer + `GRACE_MS` expires. `add_bot` fills a seat with a server bot (alias
   "🤖 Bot N") so the host can test solo.
-- Join = alias (2–14 chars) + profile (age 18+, relationship context, dating history, private crush opt-in, tonight intent) + consent (terms, reveal opt-in). Display-role sockets are broadcast-only: they occupy no player seat, require no player profile/consent, receive sanitized public state/round/reveal/interlude/finale beats, cannot control the room, and never receive private decks.
+- Join = alias (2–14 chars) + consent (age 18+, terms, reveal opt-in).
 - Reconnect: session secret in sessionStorage; `visibilitychange` → re-join →
   full `RoomView` snapshot + seq. No diff replay.
+- **Accounts (optional, ROUND 4).** `POST /api/account` with a username and a
+  4–6 digit PIN returns a **one-time recovery code** — shown once, "store it,
+  there is no email". `POST /api/account/login`, `POST /api/account/recover`
+  (code rotates on use), `POST /api/account/night` (binds tonight's room to the
+  account using the player's own session secret), `GET /api/account`,
+  `DELETE /api/account` (hard wipe: identity, night links, carried suspicions).
+  The server stores scrypt hashes of the PIN, the recovery code and the token
+  seeds — never an email address, because no email field exists anywhere.
+  Token lives in `localStorage`; login pre-fills the alias suggestion (still
+  editable per night). **Guest parity is absolute:** an account is never
+  required, never gates a room, and never changes a round, a score or a claim.
+  Identity outlives the 48h room purge; a night's data does not.
 
 ## 2. Session flow
 `lobby → warmup → spicy → deep → dare → debrief → finale → closed`
@@ -55,22 +68,59 @@ unlocks (§7) — only if they have cards.
 | dare | 300s | done, or passed + REQUIRED reason ≤140 |
 | pair_dare | 330s | two players leave together, questioned separately after |
 | debrief | 60s | private text from each pair member, compared at the finale |
+| spotlight | 25s | short text ≤80 about the LIVE moment (the subject gets a cover) |
+| verdict | 105s | 90s of open debate (`voteOpensAt`) then a simultaneous secret pick |
 
-`dare` rounds assign exactly one rotating performer; only their phone can submit and their log record carries `performerId`. `pair_dare` is one shared instruction prefixed “You two:” delivered identically to both participants; either can pass, and each participant records their own required reason. `pair_dare` and `debrief` carry `onlyPlayers` — everyone else gets a spectator screen ("They're talking…"). Each response records `latencyMs`.
+`pair_dare` and `debrief` rounds carry `onlyPlayers` — everyone else gets a
+spectator screen ("They're talking…"). Each response records `latencyMs`.
+
+### 3a. Live moments — spotlight & verdict
+
+Not more questions: MOMENTS that put the room's eyes on one person, or make
+everyone argue. **~1 spotlight per phase from warmup on; ~1 verdict per phase
+from spicy on.** Both close their phase (the room ends on a moment, not a
+question); together they are the phase's mini-finale.
+
+- **spotlight — "everyone look at X."** The server picks a subject (rotation:
+  each player spotlighted at most once a night, never back-to-back). Everyone
+  except the subject answers a name-cluster or caption question about the live
+  moment (bank `live/spotlight.json`, `{S}` = subject alias).
+  - **The subject never sees the question.** Their round view is a COVER: a
+    random decoy from `live/decoys.json` ("What did you eat today?"), or an
+    idle screen ("Nothing for you right now. Soak it in." — `expectsAnswer:
+    false`), re-drawn every spotlight so a repeat subject cannot pattern-match.
+    The real prompt never rides `round`, `state`, `reveal` or any other emit to
+    that socket, and the reveal payload carries captions only.
+  - Their answer is logged with `decoy: true`. **Decoys never score** — no
+    signal, no claim, no secret: they answer nothing. They are digest gold
+    (see §15) and the punchline of the reveal.
+  - **Reveal** (~8s hold): a RAPID CAPTION WALL — the room's one-liners stack
+    live in big type under the subject's alias, and the subject's own decoy
+    answer lands LAST, biggest.
+- **verdict — "discuss it, then decide."** The prompt lands on every phone with
+  "PHONES DOWN. ARGUE IT OUT." and a 90-second countdown (`voteOpensAt` = round
+  start + 90s). Then 15 seconds of SIMULTANEOUS SECRET pick (normal pick grid,
+  self excluded, no early votes: "Phones down. Argue it out first.").
+  - **Reveal** (~6s hold): anonymous vote bars fill one per vote, numbers count
+    up, then the room's answer LANDS full-screen with haptics — the
+    Group Announcement component, i.e. the round's mini-finale. Confetti only
+    for couple-coded verdicts (`celebrate`).
+  - Verdict picks are normal coded picks and feed consensus / one-sided / pick
+    overlap. Post-deliberation conformity is the room's choice, not a bug.
 
 ## 4. Signals (engine inputs)
 Directed picks, self+peer trait ratings, IOS, shout words, minigame scores, dare
 compliance + verbatim pass reasons, pair debrief texts, response latencies.
 
 ## 5. Scoring (deterministic; every component 0..1)
-pair_score(i,j) = weighted mean over measured components only; weights renormalize
-  when a component is missing (measured zero remains a real zero).
+pair_score(i,j) = 0.30*pickOverlap + 0.20*mutualPick + 0.20*debriefSim
+                + 0.15*iosMean     + 0.15*traitAgreement
 - `pickOverlap`: share of pick rounds where i and j chose the same target
   (excluding rounds where they chose each other).
 - `mutualPick`: normalized mutual couple/friend-coded picks between i and j.
 - `debriefSim`: pair-dare transcript similarity 0..1 — token-Jaccard is
-  PRIMARY; one batched Gemini analysis call may refine it. Missing data is
-  omitted from `componentsUsed`, never replaced by a midpoint.
+  PRIMARY; one batched higher-tier Gemini call refines it when
+  `GEMINI_API_KEY` exists; 0.5 = unknown.
 - `iosMean`: (ios(i→j) + ios(j→i)) / 14.
 - `traitAgreement`: i's self-ratings vs j's peer-ratings of i (and vice versa).
 - **ship** = maximum-weight matching over `pair_score` (brute-force enumeration;
@@ -93,6 +143,19 @@ pair_score(i,j) = weighted mean over measured components only; weights renormali
   `revealOptIn` → PRIVATE Secret Card for EACH of the two.
 - **Confidence:** high = ≥3 independent signal types (and ≥70% consensus where
   applicable); med = 2; low = 1. Low-confidence negative claims are NEVER public.
+- **Formation band & graduation (ROUND 4).** The engine also keeps PRIVATE
+  suspicions — `Hypothesis` objects, INTERNAL, see §6a. A suspicion only forms
+  when its deterministic strength lands inside `HYPOTHESIS_FORM_BAND`
+  (`{lo: .35, hi: .65}`): strong enough to be worth probing, weak enough to stay
+  a suspicion. Above the band, with ≥3 independent signals meeting
+  `CONFIDENCE_RULES.high`, it **graduates**: it leaves the hypothesis set and
+  becomes an ORDINARY claim (subject to every rule above — the finale pays it
+  off like any other claim, with no memory of why the room was asking). A
+  suspicion the latest round contradicts is **refuted**; below the band is
+  noise. **One-sided material is unchanged and absolute:** it can only ever
+  graduate to a PRIVATE claim → a Secret Card on the picker's phone.
+  With accounts, unresolved suspicions survive the night as priors and are
+  quietly probed again next time (§6a). Nobody is told this is happening.
 
 ## 6. Prompt engine — providers & the code-first rule
 - **Code-first, LLM-garnish.** Deterministic code is the PRIMARY
@@ -106,7 +169,7 @@ pair_score(i,j) = weighted mean over measured components only; weights renormali
   `reference/unhinged-tier.md` (u1–u27) behind `SPICY_TIER=true`. The bank makes
   a full night playable with zero API calls.
 - **Two independent lanes:**
-  - **Grok (xAI) = unhinged generation plus one validated reveal polish call** (`XAI_API_KEY`).
+  - **Grok (xAI) = unhinged generation ONLY** (`XAI_API_KEY`).
     OpenAI-compatible REST `POST https://api.x.ai/v1/chat/completions`,
     Bearer key, model `grok-4-1-fast` ($0.20/$0.50 per 1M, verified Oct
     2026 — verify the id at docs.x.ai/docs/models). Grok's envelope ≈
@@ -114,17 +177,19 @@ pair_score(i,j) = weighted mean over measured components only; weights renormali
     sexual acts, minors, real-person sexual content, non-consent are
     hard-blocked — the unhinged tier lives inside that. No safety knobs
     exist; the deterministic filter is the guardrail.
-  - **Gemini = analysis only** (`GEMINI_API_KEY`):
-    `gemini-3.5-flash-lite` handles tagging and debrief analysis only (ONE batch call); Grok narrates the finale and secret-card copy. Gemini model is overridable with GEMINI_MODEL. `SAFETY_OFF`
-    attached — it must analyze spicy text without refusing. Gemini NEVER
-    generates game prompts (it soft-refuses them).
+  - **Gemini = analysis only** (`GEMINI_API_KEY`, higher tier):
+    `GEMINI_MODEL` resolves once for Gemini calls; it tags public text and
+    judges paired debrief similarity in bounded batches. Gemini is never used
+    to write the finale or secret cards. `SAFETY_OFF` applies to analysis.
+    Gemini NEVER generates game prompts (it soft-refuses them).
 - **Lane independence:** each lane checks only its own key and degrades to
-  code silently. No XAI key → bank-only generation. No Gemini key → lexicon
-  tags + Jaccard similarity + template-backed fallback reveal. Neither → full game, zero
-  internet needed after install.
+  code silently. No XAI key → bank-only generation and deterministic finale.
+  No Gemini key → lexicon tags + Jaccard similarity. Neither → full game,
+  zero internet needed after install.
 - **Batching (the call budget):** generation = ONE call per phase (~15
   candidates per call, JSON array) in the lobby background — never in the
-  gameplay loop; tag = ONE call; debrief = ONE call; reveal narration uses one Grok call for public slides and private cards, validated before use. ≈7 calls worst case, cap 8.
+  gameplay loop; tag = ONE call; debrief = ONE call; Grok reveal+secrets = ONE
+  call. ≈7 calls worst case, cap 8.
 - **Generation:** the deterministic filter (schema, dedupe vs
   bank+usedIds+within-batch, banned patterns, 20–160 chars, valid
   `{P1}..{P11}` placeholders) picks the best of the batch. Generated
@@ -141,6 +206,47 @@ pair_score(i,j) = weighted mean over measured components only; weights renormali
   extract a signal: directed at someone in the room (or a pair), coded, with
   non-empty `measures` that feed the engine. A dare that targets no one and
   measures nothing is random spectacle and is banned.
+
+### 6a. The Director — the invisible selector (ROUND 4)
+The engine develops suspicions about the room and quietly interrogates them.
+**Players never see hypotheses.** No board, no event, no interlude line, no
+recap, no "what the game suspected" beat — nothing. The only player-visible
+effect of the Director is that rounds keep feeling fresh, relevant and slightly
+uncanny.
+
+- **Formation.** After EVERY round `formHypotheses(signals, log, meta, priors?)`
+  re-reads the log (mid-band rule, §5) across six kinds: `tension`, `besties`,
+  `secret`, `selfimage`, `onesided`, `freeagent`. Strength and evidence are
+  deterministic code; subjects are pseudonymous in any LLM context; `openedAt`
+  is the epoch ms of the first supporting answer (or a previous night).
+- **Selection.** `directNextRound(hypotheses, coverage, candidates, seed)` deals
+  one round at a time, seeded by the round index (replay = identical choices):
+  - **50% TEST** (`ROUND_MIX.test`) — an OPEN suspicion's subjects on its
+    dimension (`couple`/`friendship`/`trust`/`status`/`friction`/`neutral`),
+    bound into the prompt's `{P1}`/`{P2}` slots. Grok may generate targeted
+    candidates, pseudonymized and never telegraphing: "a spicy prompt that would
+    reveal whether Player 3 is into Player 5" is fine; "is Player 3 into Player
+    5?" is not. A targeted prompt must read as organic.
+  - **30% EXPLORE** (`ROUND_MIX.explore`) — the least-covered **(pair ×
+    dimension)** cell of the coverage matrix, so fresh material begets fresh
+    suspicions. `coverage` is a plain count map that never leaves the server.
+  - **20% CLASSIC** (`ROUND_MIX.classic`) — bank/callback rounds as before.
+  Lanes fall through gracefully: a test slot with nothing testable becomes
+  explore, a covered matrix becomes classic.
+- **Anti-telegraph.** Never more than `ANTI_TELEGRAPH_MAX` (2) CONSECUTIVE
+  rounds touching the same subject pair. Without it the engine machine-guns two
+  people, the room clocks it, and the invisibility breaks.
+- **Cross-night (accounts only).** Unresolved suspicions are stored per account
+  and re-mapped onto tonight's player ids as priors; the game keeps probing old
+  suspects, silently. Guests carry nothing.
+- **What players see: nothing new.** Freshness surfaces only through existing
+  channels — the selector's choices, digest teasers, callbacks — and the
+  finale's CLAIMS, which is where graduated suspicions pay off as ordinary
+  claims. The one-sided rule (§5) is untouched.
+- **Invisibility is an assertion, not a hope:** `assertNoHypothesisLeak()` runs
+  over every client-facing emit, `Hypothesis` never appears in any
+  `ServerToClientEvents` payload, and no room-log line or client-side log ever
+  contains one.
 
 ## 7. Narrator, Group Announcements & Secret decks
 - Input: `Results` + `NightDigest`. Output: public slide copy ("Player N"
@@ -181,9 +287,8 @@ pair_score(i,j) = weighted mean over measured components only; weights renormali
 - Reconnect = full snapshot. Payloads <5KB, JSON only.
 
 ## 9. Persistence & retention
-- v1: in-memory + one JSONL answer log per room (`apps/server/data/`) and an atomic mode-0600 metadata sidecar for room/player identity, consent, profiles, and resume credentials (inside a mode-0700 directory).
-- On restart, valid JSONL records are replayed through deterministic engine services; interrupted rounds are not resumed, and rooms with recorded answers recover as a replayed finale. Corrupt metadata/records are ignored safely.
-- Hourly purge: rooms older than 48h hard-deleted (log + sidecar included).
+- v1: in-memory + one JSONL log per room (`apps/server/data/`).
+- Hourly purge: rooms older than 48h hard-deleted (files included).
 - `delete_room` by ANY player → immediate hard delete + `deleted` broadcast.
 
 ## 10. Front-end stack & UI system
@@ -263,7 +368,14 @@ words (running gags), minigame champions, pick clusters, self-vs-room gaps.
 contradictions ("Self-rated honesty 9/10. Passed on the honesty dare. Twice.").
 Every joke must trace to digest/claims data — the narrator never invents.
 
-## Remediation contract additions
-PromptCoding includes `tease`, which is excluded from toxic scoring. RoundView may carry personalized `about`, `trait`, and `performer`, plus `submitted` IDs. LogRecord may carry `performerId`. JoinRequest supports player/display roles and ProfileAnswers; first-time player joins and room creation require a complete profile while credential resume/reclaim retains the stored profile. RoomMeta stores profiles for downstream game analysis; profile answers are not sent in public RoomView snapshots. The engine may derive a private shared-intent note from matching `tonight` answers only when both players opted into reveal cards; relationship history and private-crush answers are excluded, and the note must not imply compatibility. PROFILE_QUESTIONS is the join UI source of truth and collects age (18+), relationship, dating history, private crush status, and tonight intent. Server validation bounds all numeric values and checks enumerated answers. Consent remains separately required. Tunables: PICK_ROUNDS_PER_PHASE=2 (two pick rounds in each warmup, spicy, and deep phase), ROUNDS_PER_PHASE=4, SPARK_MIN_MUTUAL=2, CONSENSUS_MIN_PICKERS=4.
-
-Pair scores renormalize `DEFAULT_WEIGHTS` across `PairSignal.componentsUsed`; absence is distinct from measured zero. A high-confidence pair claim still requires at least three independent measured signal types. Finale narration is template-backed; Gemini has no reveal lane. `GEMINI_MODEL` overrides every Gemini analysis call site.
+**Live moments are digest fuel (ROUND 3).**
+- **Caption walls** are quote material: every spotlight caption is a normal
+  text answer and competes for Quote of the Night.
+- **Decoy pairing** is the best line of the night: the digest leads its quotes
+  with *"While the room captioned {S}, {S} wrote: '<decoy answer>'"* — the
+  subject answered a throwaway cover question while the room described them.
+- **Name clusters** are ONE teaser per spotlight round — *"6 of 7 wrote the same
+  name for {S}"*. Fires only on ≥3 matching answers AND a strict majority, so
+  2 of 7 is silence. A cluster is **never** a formal engine claim: live
+  observation is fun, not evidence. Ambiguous captions that name two players
+  count for neither.

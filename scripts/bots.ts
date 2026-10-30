@@ -3,6 +3,7 @@ import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { io, type Socket } from 'socket.io-client';
+import { DECOYS, SPOTLIGHT_IDLE_LINE } from '../packages/prompts/src/bank/live/index.ts';
 import {
   MAX_PLAYERS, MIN_PLAYERS, SECRET_DECK_MAX,
   type ClientToServerEvents, type ServerToClientEvents, type RoomView,
@@ -35,6 +36,11 @@ const phases = new Set<Phase>(['lobby']);
 const pending = new Set<Promise<void>>();
 const errors: string[] = [];
 let code = '';
+// ROUND 3 live moments: the night must actually run both kinds.
+const liveKinds = new Set<string>();
+// A cover is counted once per spotlight round: the server re-sends the round on
+// every state change, and the same phone can legitimately see it twice.
+const coverRounds = new Set<string>();
 let reconnectStarted = false;
 let reconnectDone = false;
 let duplicate: { roundId: string; playerId: string; clientUuid: string } | undefined;
@@ -74,6 +80,11 @@ function install(bot: Bot, socket: GameSocket): void {
   socket.on('state', state => { bot.state = state; phases.add(state.phase); });
   socket.on('round', round => {
     phases.add(round.phase);
+    if (round.kind === 'spotlight' || round.kind === 'verdict') liveKinds.add(round.kind);
+    // A spotlight cover screen is either the idle line or a decoy question —
+    // never the question the rest of the room is answering.
+    const cover = round.kind === 'spotlight' && (round.expectsAnswer === false || round.promptText === SPOTLIGHT_IDLE_LINE || DECOYS.some(decoy => decoy.text === round.promptText));
+    if (cover) coverRounds.add(round.roundId);
     if (stopping || bot.seenRounds.has(round.roundId)) return;
     bot.seenRounds.add(round.roundId);
     track(answer(bot, round));
@@ -123,6 +134,10 @@ function valueFor(bot: Bot, round: RoundView): ResponseValue {
     case 'ios': return { kind: 'ios', about: round.about!, value: 5 };
     case 'minigame': return { kind: 'minigame', score: 30 + index };
     case 'dare': case 'pair_dare': return { kind: 'dare', status: 'done' };
+    // Live moments (ROUND 3): a spotlight caption is a short text, a verdict is
+    // a normal pick — the server opens the pick window only after the debate.
+    case 'spotlight': return { kind: 'text', text: `Caption from ${bot.alias}.` };
+    case 'verdict': return { kind: 'pick', target: target.id };
   }
 }
 async function answer(bot: Bot, round: RoundView): Promise<void> {
@@ -140,6 +155,11 @@ async function answer(bot: Bot, round: RoundView): Promise<void> {
   // the others finish. Remaining players have staggered human-ish delays.
   await sleep(index === 2 ? 100 : index === 0 ? 250 : 900 + index * 150);
   if (stopping) return;
+  // Verdict rounds are phones-down first: wait for the secret pick window.
+  if (round.voteOpensAt && round.voteOpensAt > Date.now()) {
+    await waitFor(() => Date.now() >= round.voteOpensAt!, 'verdict vote window', Math.max(timeoutMs, round.voteOpensAt - Date.now() + 10000));
+    if (stopping) return;
+  }
   if (index === 1 && round.kind === 'dare' && !passDone) {
     passDone = true;
     bot.socket.emit('dare_pass', { roundId: round.roundId, reason: 'My mother is watching.' });
@@ -214,19 +234,25 @@ async function main(): Promise<void> {
   for (const phase of ['lobby', 'warmup', 'spicy', 'deep', 'dare', 'debrief', 'finale'] as const) {
     check(phases.has(phase), `phase not reached: ${phase}`);
   }
+  check(liveKinds.has('spotlight'), 'no spotlight live moment was played');
+  check(liveKinds.has('verdict'), 'no verdict live moment was played');
+  check(coverRounds.size > 0, 'no spotlight subject ever received a cover screen');
   check(reconnectDone, 'active disconnect/rejoin was not exercised');
   check(passDone, 'dodger never passed a dare');
   check(speedDone, 'speed demon did not submit in under one second');
   check(duplicate, 'duplicate submit was not exercised');
   for (const bot of bots) for (const finale of bot.finales) assert.deepStrictEqual(finale, bots[0].finales[0], 'finale differs across sockets');
-  // Give asynchronous per-socket secret frames time to arrive, then resume a
-  // player with a deck. If none has one, use the last player and verify the
-  // absence against the independent oracle instead.
+  // Select a real owner from the independent oracle, not from observed client
+  // frames: an accidental leak must not make a non-owner look like an owner.
   await sleep(1500);
-  const resuming = bots.find(bot => bot.decks.length > 0) ?? bots[bots.length - 1];
+  check(oraclePath, 'SMOKE_ORACLE is required: see RUNBOOK.md');
+  const resumeOracle = JSON.parse(await readFile(oraclePath, 'utf8')) as Oracle;
+  check(resumeOracle.roomCode === code && resumeOracle.decks, 'resume oracle is malformed or for a different room');
+  const resuming = bots.find(bot => resumeOracle.decks[bot.id] != null) ?? bots[bots.length - 1];
+  const expectedDeck = resumeOracle.decks[resuming.id];
   const before = resuming.decks.length;
   await reconnect(resuming, 'finale');
-  if (before > 0) await waitFor(() => resuming.decks.length > before, 'post-finale secrets redelivery', 10000);
+  if (expectedDeck) await waitFor(() => resuming.decks.length > before, 'post-finale secrets redelivery', 10000);
   else await sleep(1500);
   for (const finale of resuming.finales) assert.deepStrictEqual(finale, bots[0].finales[0], 'finale changed on resume');
   await verifyOracle();
@@ -242,7 +268,8 @@ async function main(): Promise<void> {
     check(!afterDelete.ok, 'deleted room accepted a resumed player');
   } finally { probe.disconnect(); }
   stopping = true;
-  console.log('PASS: phases, finale equality, secret ownership and deck limits, duplicate persistence, active and finale resume, dare pass, deletion');
+  console.log(`PASS: phases, finale equality, secret ownership and deck limits, duplicate persistence, active and finale resume, dare pass, deletion`);
+  console.log(`PASS (ROUND 3): live moments played — spotlight + verdict; ${coverRounds.size} cover screen(s) seen on subject phones`);
 }
 main().catch(async error => {
   console.error(`SMOKE FAILED: ${error instanceof Error ? error.message : String(error)}`);

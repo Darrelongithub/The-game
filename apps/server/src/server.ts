@@ -8,6 +8,8 @@ import qrcode from "qrcode-terminal";
 import { Server as SocketServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "../../../packages/shared/src/contracts.ts";
 import { RoomManager, type GameOptions } from "./game.ts";
+import { AccountStore } from "./accounts.ts";
+import { mountAccountRoutes } from "./account-routes.ts";
 
 type SocketData = { roomCode?: string; playerId?: string };
 export interface ServerOptions extends Omit<GameOptions, "dataDir"> { dataDir?: string; webDir?: string; }
@@ -51,6 +53,8 @@ export interface GameServer {
   http: HttpServer;
   io: SocketServer<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
   rooms: RoomManager;
+  /** ROUND 4 identity store (no email, ever). Separate from room retention. */
+  accounts: AccountStore;
   listen(port?: number, host?: string, banner?: boolean): Promise<number>;
   close(): Promise<void>;
 }
@@ -58,7 +62,17 @@ export function createGameServer(options: ServerOptions = {}): GameServer {
   const dataDir = options.dataDir ?? fileURLToPath(new URL("../data/", import.meta.url));
   const webDir = resolve(options.webDir ?? fileURLToPath(new URL("../../web/out/", import.meta.url)));
   const app = express(); app.disable("x-powered-by");
+  // Same-origin only for the account API (the page is served from here too).
+  app.use("/api", (req, res, next) => {
+    if (!sameOrigin(req.headers.origin, req.headers.host, req.headers["x-forwarded-host"])) { res.status(403).json({ ok: false, error: "Cross-origin request refused." }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  });
+  app.use("/api", express.json({ limit: "8kb", type: "application/json" }));
   app.use(express.static(webDir, { extensions: ["html"], index: "index.html" }));
+  // Account API is mounted BEFORE the SPA catch-all so /api never serves HTML.
+  const accounts = options.accounts ?? new AccountStore({ file: resolve(dataDir, "accounts.json"), now: options.now });
+  mountAccountRoutes(app, { store: accounts, bindPlayer: (input) => rooms.bindAccount(input) });
   app.get("*", (req, res) => {
     if (/\.[a-z\d]+$/i.test(req.path)) { res.status(404).type("text/plain").send("Not found."); return; }
     const index = resolve(webDir, "index.html");
@@ -71,9 +85,9 @@ export function createGameServer(options: ServerOptions = {}): GameServer {
     transports: ["polling", "websocket"], maxHttpBufferSize: 65_536,
     allowRequest: (req, callback) => callback(null, sameOrigin(req.headers.origin, req.headers.host, req.headers["x-forwarded-host"])),
   });
-  const rooms = new RoomManager(io, { ...options, dataDir });
+  const rooms = new RoomManager(io, { ...options, dataDir, accounts });
   return {
-    http, io, rooms,
+    http, io, rooms, accounts,
     listen: (port = 3001, host = "0.0.0.0", banner = true) => new Promise((resolvePromise, reject) => {
       const onError = (error: Error): void => reject(error);
       http.once("error", onError);

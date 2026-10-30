@@ -56,6 +56,29 @@ current pricing and availability). Do not use Supabase realtime: the kit notes
 that it has no Africa region. Remote deployment requires internet; the
 no-keys/offline guarantee applies to a local LAN after installation.
 
+## Accounts (optional — guest play is unchanged)
+
+Accounts are **optional**. A room full of guests plays exactly the same game; an
+account never gates a room, a round, a score or a claim.
+
+- **Create:** username (3–16 chars, letters/numbers/underscore, case-insensitive
+  unique) + a 4–6 digit PIN. The server shows a **one-time recovery code**.
+  Write it down when you see it: **there is no email and no reset link** — that
+  code is the only way back into the account. It rotates every time it is used.
+- **Sign in:** username + PIN. Sessions are opaque tokens kept in the browser's
+  `localStorage`; the server stores only scrypt hashes and hashed token seeds.
+  Repeated wrong PINs lock the door for a few minutes.
+- **Lost the PIN:** `recover` with the recovery code.
+- **Delete:** the in-app delete-account action (`DELETE /api/account`, which
+  requires an explicit confirmation) hard-wipes the identity, its night links and
+  any carried-over suspicions. There is nothing left to restore.
+- **Retention:** identity lives in `apps/server/data/accounts.json` (mode 0600)
+  and is deliberately **not** touched by the 48-hour room purge — rooms are
+  data, accounts are identity. Back up that file if you care about the accounts;
+  delete it to wipe every account at once.
+- Accounts never require a network: the whole API is served by the game server
+  on the same origin.
+
 ## Logs, deletion and retention
 
 Server room logs are specified as JSONL files under `apps/server/data/`; server
@@ -68,48 +91,118 @@ substitute for deleting room logs.
 
 ## Verified no-key smoke game
 
+The following independent in-process oracle exercises the actual production
+adapter, using synthetic players, no API keys, a temporary data directory and
+no public debug endpoint:
+
 ```sh
-npm ci
 npm run smoke:verified
 ```
 
 This command starts its **own isolated local server** with the production
 adapters, keys disabled, an ephemeral port and a temporary data directory. It
-runs five external Socket.IO players through a full game, reconnects and deletes
-the room. A local test-only oracle independently records expected engine decks,
+runs five external Socket.IO players through a full game — including the
+spotlight and verdict live moments (the bots wait out each verdict's 90-second
+debate) — reconnects and deletes the room. It takes several minutes by design. A local test-only oracle independently records expected engine decks,
 actual outgoing socket recipients, persisted submission counts, dare passes,
 and joker weights. It is never exposed through HTTP or game events and is
 removed after the run. Do not use this harness against a real game or commit
 its temporary data.
 
-Check the checker (expected: the underlying smoke fails with
-`secret frame delivered to a non-owner`):
+To verify that the oracle catches a deliberately misdelivered secret frame, run
+`SMOKE_INJECT_LEAK=1 npm run smoke:verified`; the underlying smoke must fail.
+The injection is confined to that test harness. For a quicker synthetic check,
+`SMOKE_FAST=1` shortens spotlight and verdict timers only in the two isolated
+harnesses; it leaves the assertions unchanged and does not test production
+90-second debate timing. `MERGE-REPORT.md` is the historical QA report for the
+earlier integration; real device and LAN testing is still required before a
+game night.
+
+## External smoke bots
+
+For a second self-contained, synthetic local smoke test with no provider keys, run:
 
 ```sh
-SMOKE_INJECT_LEAK=1 npm run smoke:verified
+npm run smoke:oracle
 ```
 
-The deliberate leak exists only in this local test harness, not in the
-production server. A generic `npm run smoke` against an independently started
-server still requires a separately supplied private `SMOKE_ORACLE` file; the
-public wire alone cannot establish ownership or persistence. The verified
-harness is the recommended repeatable command.
+This starts an isolated server on a loopback port with a private temporary data
+folder, runs the unchanged five-player smoke test with an independent server-side
+oracle, and removes the files afterward. Do not use this fixture with real players.
 
-## Additional checks
+## Round list (what a night actually runs)
+
+Each heat phase opens with its normal rounds and closes with its live moments:
+
+| phase | rounds | live moments |
+|---|---|---|
+| warmup | 3 questions (pick / shout / text …) | 1 spotlight |
+| spicy | 3 questions (pick / rating / ios …) | 1 spotlight, 1 verdict |
+| deep | 3 questions (text / minigame / pick …) | 1 spotlight, 1 verdict |
+| dare | 2 dares + the pair dare | 1 spotlight, 1 verdict |
+| debrief | 2 private pair texts (onlyPlayers) | — |
+
+**spotlight (25s):** one player is watched; everyone else captions them in ≤80
+characters. The subject's own phone shows a decoy question or an idle screen and
+never the real prompt. The reveal is a caption wall that ends on the subject's
+own decoy answer (~8s).
+
+**verdict (105s):** the room argues for 90 seconds with phones face-down, then
+everyone secretly picks at the same time (15s, self excluded). The reveal is a
+Group Announcement — anonymous vote bars, count-up, then the answer lands
+(~6s). Couple-coded verdicts get confetti.
+
+Expect a full night to take noticeably longer than the question-only game:
+verdicts alone add ~90s of real debate each, and the external smoke now allows
+seven minutes (`SMOKE_TIMEOUT_MS`).
+
+## Target a separately started server
+
+To target a separately started server, first run `npm run host` or `npm start`
+and then supply a suitable private oracle as described below. The default is
+five external Socket.IO players at `http://localhost:3001`; for a different
+server/count/timeout:
 
 ```sh
-npm run selfcheck
-npm run typecheck
-npm test --workspace apps/server
-npm run test:transport --workspace apps/web
-npm run test:components
-npm run test:mock --workspace apps/web
-npm audit --omit=dev
-# After npm run build and npm start in another terminal:
-node scripts/jsdom-export-smoke.mjs
+SMOKE_URL=http://localhost:3001 SMOKE_BOTS=5 SMOKE_TIMEOUT_MS=480000 npm run smoke
 ```
 
-The jsdom test exercises the exported bundle and creates and deletes a test
-room. It is not a browser, phone, or LAN test. Test on actual iOS and Android
-devices and the target desktop browsers before game night. See
-`MERGE-REPORT.md` for known gaps, test results and bundle measurement.
+The test creates and deletes a real room, exercises rounds and resume, and
+fails on any failed assertion. To pass, it also requires an **independent,
+local-only test oracle** produced by the integrated server/test harness:
+
+```sh
+SMOKE_ORACLE=/absolute/path/to/private-oracle.json npm run smoke
+```
+
+The frozen public socket contract cannot establish which player's private deck
+was intended for a frame, whether a duplicate actually persisted twice, or the
+joker's scoring weight. The `smoke:oracle` fixture captures these facts from
+server room state, persisted log entries, recipient emissions and the engine's
+scoring helper. A separately started server needs its own equivalent oracle.
+Do not serve it over HTTP, expose it to game clients, or commit it. It must
+reflect independently captured server-side facts for the *current* smoke room,
+not facts reconstructed from the bots' received messages. Write it atomically
+once the finale is ready, and update it after a finale reconnect.
+The smoke test expects this JSON shape:
+
+```json
+{
+  "roomCode": "AB2C",
+  "decks": { "player-id": { "cards": [] }, "player-without-deck": null },
+  "secretFrames": [{ "recipient": "player-id", "owner": "player-id", "deck": { "cards": [] } }],
+  "submissions": [{ "roundId": "round-id", "playerId": "player-id", "clientUuid": "uuid", "count": 1 }],
+  "darePasses": [{ "playerId": "dodger-id", "reason": "My mother is watching." }],
+  "joker": { "playerId": "joker-id", "target": "target-id", "pickRounds": 3, "sameTargetPicks": 3, "negativeNominations": 1, "nominationWeight": 0.5, "victimToxicConfidence": null }
+}
+```
+
+Use actual generated IDs, the complete expected deck for every player (or
+`null` for no deck), and actual per-delivery frames in order, including after
+reconnect. A non-null deck must contain at least one real card. `count` is the
+number actually persisted for the specified UUID. The trace must identify the
+actual recipient and intended owner at emission, including unintended
+broadcast recipients. The joker weight, negative nomination count and victim toxic-claim confidence
+must be actual engine results, not assumptions. At least one negative nomination
+is required to exercise the guard. Without this oracle the test deliberately fails rather than
+claiming to have proved privacy or idempotence.

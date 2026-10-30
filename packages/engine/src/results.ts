@@ -7,7 +7,6 @@ import {
   CONFIDENCE_RULES,
   SPARK_MIN_MUTUAL,
   DEFAULT_WEIGHTS,
-  JOKER_GUARD,
   MC_SIMULATIONS,
   TOXIC_WEIGHTS,
   TRAITS,
@@ -30,6 +29,7 @@ import {
   confidenceFromCount,
   directedPicks,
   getPicks,
+  jokerNominationWeights,
   logRecordId,
   meanOf,
   pairKey,
@@ -39,7 +39,7 @@ import {
   pseudoOf,
   sortedPair,
 } from "./internal.ts";
-import { constrainedMatching } from "./matching.ts";
+import { maximumWeightMatching } from "./matching.ts";
 import { mulberry32 } from "./rng.ts";
 import { pairScoreOf, type PairWeights } from "./signals.ts";
 
@@ -74,13 +74,15 @@ function pairEvidenceLines(meta: RoomMeta, s: PairSignal): string[] {
 
 export function computeResults(
   signals: PairSignal[],
-  log: LogRecord[],
+  allRecords: LogRecord[],
   meta: RoomMeta,
   config: PairWeights = DEFAULT_WEIGHTS,
   tagOf: (recordId: string) => string[] = () => [],
   onJokerWeights?: (weights: ReadonlyMap<PlayerId, number>) => void,
 ): Results {
   assertScorableMeta(meta);
+  // Decoy answers (spotlight cover rounds) are not evidence about anyone.
+  const log = allRecords.filter((rec) => rec.decoy !== true);
   const weights: PairWeights = { ...DEFAULT_WEIGHTS, ...config };
   const ids = playerIdsSorted(meta);
   const idsInOrder = playerIdsInOrder(meta);
@@ -159,15 +161,20 @@ export function computeResults(
   }
 
   // ---------- ship & besties: maximum-weight matchings ----------
-  const shipMatching = constrainedMatching(
+  // A one-way positive pick is private evidence, not a mutual public match.
+  // If the eligible graph has no complete matching, keep it partial instead
+  // of silently rerunning without the constraint and inventing pairings.
+  const mutual = (a: PlayerId, b: PlayerId, include: (coding: PromptCoding) => boolean): boolean =>
+    directedPicks(picks, a, b, include).hits > 0 && directedPicks(picks, b, a, include).hits > 0;
+  const shipMatching = maximumWeightMatching(
     ids,
     (a, b) => signalFor(a, b).pairScore,
-    (a, b) => signalFor(a, b).coupleEvidence > 0 || signalFor(a, b).friendEvidence > 0,
+    (a, b) => mutual(a, b, (coding) => POSITIVE_CODINGS.has(coding)),
   );
-  const bestiesMatching = constrainedMatching(
+  const bestiesMatching = maximumWeightMatching(
     ids,
     (a, b) => signalFor(a, b).friendEvidence,
-    (a, b) => signalFor(a, b).friendEvidence > 0,
+    (a, b) => mutual(a, b, (coding) => coding === "friendship"),
   );
 
   const shipClaims: Claim[] = [];
@@ -283,20 +290,7 @@ export function computeResults(
     if (negPicks.length > 0) {
       // Joker guard: a picker naming the same target in >70% of ALL their
       // pick rounds gets every nomination downweighted.
-      const pickerTargets = new Map<PlayerId, Map<PlayerId, number>>();
-      for (const p of picks) {
-        let m = pickerTargets.get(p.picker);
-        if (!m) { m = new Map(); pickerTargets.set(p.picker, m); }
-        m.set(p.target, (m.get(p.target) ?? 0) + 1);
-      }
-      const pickerWeight = new Map<PlayerId, number>();
-      for (const id of idsInOrder) {
-        const m = pickerTargets.get(id);
-        if (!m) { pickerWeight.set(id, 1); continue; }
-        const total = [...m.values()].reduce((s, x) => s + x, 0);
-        const maxShare = total === 0 ? 0 : Math.max(...m.values()) / total;
-        pickerWeight.set(id, maxShare > JOKER_GUARD.sameTargetShare ? JOKER_GUARD.downweight : 1);
-      }
+      const pickerWeight = jokerNominationWeights(log, idsInOrder);
 
       // Optional in-process QA observer; never part of Results or socket data.
       onJokerWeights?.(new Map(pickerWeight));

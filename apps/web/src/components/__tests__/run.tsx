@@ -188,8 +188,8 @@ async function main() {
   }
 
   /* ── 1. imports (environment is ready) ─────────────────────────────── */
-  const ReactMod = await import('react')
-  const { act } = ReactMod
+  const React = await import('react')
+  const { act } = React
   const { createRoot } = await import('react-dom/client')
   const { GlassCard } = await import('../GlassCard')
   const { GlowButton } = await import('../GlowButton')
@@ -299,27 +299,22 @@ async function main() {
     await unmount()
   }
 
-  /* ── 3. Flame: ember memoization + reduced motion ─────────────────── */
+  /* ── 3. Flame: recognizable layers and stable SVG gradients ──────── */
   {
     const el = await mount(<Flame size={80} />)
-    const emberLefts = () =>
-      Array.from(el.querySelectorAll('div'))
-        .filter((div) => (div.className ?? '').includes('bg-lime-accent'))
-        .map((div) => div.style.left)
-    ok('Flame renders 7 embers', emberLefts().length === 7)
-    const before = emberLefts().join('|')
-    await act(async () => {
-      root!.render(<Flame size={80} />)
-    })
-    ok('Flame embers memoized (no teleport on re-render)', emberLefts().join('|') === before && before.length > 0)
+    ok('Flame has an accessible label and two layered paths', !!el.querySelector('[role="img"][aria-label="Flame"]') && el.querySelectorAll('svg path').length === 2)
+    const gradients = () => Array.from(el.querySelectorAll('linearGradient')).map((gradient) => gradient.id).join('|')
+    const before = gradients()
+    await act(async () => { root!.render(<Flame size={80} />) })
+    ok('Flame gradient IDs stay stable on re-render', gradients() === before && before.length > 0)
+    await act(async () => { root!.render(<><Flame size={80} /><Flame size={80} /></>) })
+    const ids = gradients().split('|')
+    ok('multiple flames have unique gradient IDs', ids.length === 4 && new Set(ids).size === 4)
     await unmount()
 
     setReduce(true)
     const el2 = await mount(<Flame size={80} />)
-    const emberCount = Array.from(el2.querySelectorAll('div')).filter((div) =>
-      (div.className ?? '').includes('bg-lime-accent')
-    ).length
-    ok('prefers-reduced-motion kills flame embers/flicker', emberCount === 0)
+    ok('reduced motion retains the recognizable flame', el2.querySelectorAll('svg path').length === 2)
     await unmount()
     setReduce(false)
   }
@@ -686,6 +681,180 @@ async function main() {
     await tick(500)
     ok('no-deck end panel shows no secrets entry', !!q('[data-testid="finale-end"]') && !q('[data-testid="secrets-entry"]'))
     await unmount()
+  }
+
+  /* ── 13. Live moments: spotlight cover, caption wall, verdict flow ── */
+  {
+    const { CaptionWall } = await import('../CaptionWall')
+    const { PromptScreen } = await import('../../screens/PromptScreen')
+    const { RevealScreen } = await import('../../screens/RevealScreen')
+
+    const room = {
+      code: 'MOCK',
+      phase: 'spicy' as const,
+      hostId: 'p1',
+      players: [
+        { id: 'p1', alias: 'You', connected: true, isBot: false },
+        { id: 'p2', alias: 'Brian', connected: true, isBot: true },
+        { id: 'p3', alias: 'Chao', connected: true, isBot: true },
+      ],
+      round: null,
+      seq: 1,
+    }
+    const round = (over: Record<string, unknown>) => ({
+      roundId: 'live-1', index: 4, phase: 'spicy' as const, kind: 'verdict' as const,
+      promptText: 'THE VERDICT: who here would make the best couple? Debate. Decide.',
+      closesAt: Date.now() + 15000, youSubmitted: false, ...over,
+    })
+
+    /* 13a. 320px caption wall: captions stack, the punchline lands LAST */
+    w.innerWidth = 320
+    setReduce(false)
+    const wall = await mount(
+      <CaptionWall
+        subject="Diana"
+        captions={[
+          { alias: 'Brian', text: 'Looking at Chao. Again.' },
+          { alias: 'Chao', text: 'The exit.' },
+          { alias: 'Emanuel', text: 'Their own reflection.' },
+        ]}
+        punchline="What did you eat today?"
+      />
+    )
+    ok('caption wall renders at 320px', !!q('[data-testid="caption-wall"]'))
+    ok('caption wall header is the subject', text(q('[data-testid="caption-subject"]') ?? d.createElement('i')) === 'Diana')
+    ok('caption wall stacks every one-liner', qa('[data-testid="caption-item"]').length === 3)
+    ok('caption wall ends on the punchline (last element)', (() => {
+      const main = q('[data-testid="caption-wall"]')!
+      const punch = q('[data-testid="caption-punchline"]')!
+      return main.lastElementChild === punch && text(punch).includes('What did you eat today?')
+    })())
+    ok('caption wall fits 320px (no fixed width > viewport)', (() => {
+      const nodes = [q('[data-testid="caption-wall"]')!, ...qa('[data-testid="caption-item"]'), q('[data-testid="caption-punchline"]')!]
+      return nodes.every((node: any) => {
+        const width = String(node.style.width ?? '')
+        const px = width.endsWith('px') ? Number.parseFloat(width) : 0
+        return !(px > 320)
+      })
+    })())
+    await unmount()
+
+    /* 13b. reduced motion: the wall renders instantly, no stacked motion */
+    setReduce(true)
+    const wallR = await mount(
+      <CaptionWall subject="Diana" captions={[{ alias: 'Brian', text: 'Looking at Chao.' }]} punchline="Nothing, I swear." />
+    )
+    ok('reduced-motion: caption wall flags itself', q('[data-testid="caption-wall"]')!.getAttribute('data-reduced') === 'true')
+    ok('reduced-motion: captions render immediately', qa('[data-testid="caption-item"]').every((node: any) => node.style.opacity !== '0'))
+    ok('reduced-motion: punchline still lands last', !!q('[data-testid="caption-punchline"]'))
+    await unmount()
+    setReduce(false)
+
+    /* 13c. spotlight subject screen: the cover round looks like any text round */
+    const cover = await mount(
+      <PromptScreen
+        round={round({ kind: 'spotlight', roundId: 'live-cover', promptText: 'What did you eat today?', closesAt: Date.now() + 25000, expectsAnswer: true }) as any}
+        room={room as any}
+        you="p2"
+        onSubmit={() => true}
+      />
+    )
+    ok('spotlight cover renders a normal short-text round', !!q('textarea') && !text(cover).includes('Phones down'))
+    ok('spotlight cover caps the answer at 80 chars', q('textarea')!.getAttribute('maxlength') === '80')
+    await unmount()
+
+    const idle = await mount(
+      <PromptScreen
+        round={round({ kind: 'spotlight', roundId: 'live-idle', promptText: 'Nothing for you right now. Soak it in.', closesAt: Date.now() + 25000, expectsAnswer: false }) as any}
+        room={room as any}
+        you="p2"
+        onSubmit={() => true}
+      />
+    )
+    ok('idle cover has no input and no question', !!q('[data-testid="idle-cover"]') && !q('textarea'))
+    await unmount()
+
+    /* 13d. verdict: phones down → secret pick grid → land */
+    const early = await mount(
+      <PromptScreen round={round({ voteOpensAt: Date.now() + 8000 }) as any} room={room as any} you="p1" onSubmit={() => true} />
+    )
+    ok('verdict opens with PHONES DOWN. ARGUE IT OUT.', !!q('[data-testid="verdict-debate"]') && /phones down/i.test(text(early)))
+    ok('verdict hides the pick grid during the debate', !q('[data-testid="verdict-pickgrid"]'))
+    ok('verdict counts the debate down', /\d+s/.test(text(q('[data-testid="verdict-debate"]') ?? d.createElement('i'))))
+    await unmount()
+
+    await mount(<PromptScreen round={round({ roundId: 'live-transition', voteOpensAt: Date.now() + 80 }) as any} room={room as any} you="p1" onSubmit={() => true} />)
+    await tick(120)
+    ok('verdict shows the pick grid automatically when the debate ends', !!q('[data-testid="verdict-pickgrid"]'))
+    await unmount()
+
+    const submitted: any[] = []
+    const open = await mount(
+      <PromptScreen round={round({ voteOpensAt: Date.now() - 1 }) as any} room={room as any} you="p1" onSubmit={(value: any) => { submitted.push(value); return true }} />
+    )
+    ok('verdict opens a simultaneous pick grid', !!q('[data-testid="verdict-pickgrid"]'))
+    const picks = qa('[data-testid="verdict-pickgrid"] button[aria-pressed]')
+    ok('verdict pick grid excludes yourself', picks.length === 2 && !text(open).includes('You'))
+    const lockVote = qa('[data-testid="verdict-pickgrid"] button').find((node: any) => text(node) === 'Lock in answer')!
+    ok('verdict vote needs a selection before locking', (lockVote as HTMLButtonElement).disabled)
+    click(picks[0])
+    await tick(30)
+    ok('selecting a verdict is editable before locking', submitted.length === 0 && !(lockVote as HTMLButtonElement).disabled)
+    click(lockVote)
+    await tick(30)
+    ok('verdict pick submits a normal coded pick', submitted.length === 1 && submitted[0].kind === 'pick' && submitted[0].target !== 'p1')
+    await unmount()
+
+    /* 13e. verdict reveal = GroupAnnouncement mini-finale (no confetti unless couple) */
+    await settleConfetti()
+    drawCalls.length = 0
+    vibrates.length = 0
+    let revealed = 0
+    const landEl = await mount(
+      <RevealScreen
+        reveal={{
+          roundId: 'live-1', kind: 'verdict', summary: 'The room decided: Chao', holdMs: 8000, celebrate: false,
+          slide: { beat: 'land', flavor: 'group', title: 'Chao', body: '2 of 3 said it out loud.', numbers: { votes: 2, of: 3, share: 0.667 } },
+        }}
+        onComplete={() => { revealed += 1 }}
+      />
+    )
+    ok('verdict reveal reuses the Group Announcement', !!q('[data-testid="group-announcement"]'))
+    await waitFor(() => qa('[data-testid="vote-bar-fill"]').length === 2, 4000)
+    ok('verdict bars fill one per vote', qa('[data-testid="vote-bar-fill"]').length === 2)
+    await waitFor(() => !!q('[data-testid="ga-subject"]'), 6000)
+    ok('verdict answer lands full-screen', text(q('[data-testid="ga-subject"]')!) === 'Chao')
+    ok('verdict land fires haptics', vibrates.length > 0)
+    await tick(200)
+    ok('non-couple verdict: no confetti', drawCalls.length === 0)
+    await unmount()
+
+    /* 13f. reduced motion kills the verdict bars animation */
+    await settleConfetti()
+    drawCalls.length = 0
+    setReduce(true)
+    const landR = await mount(
+      <RevealScreen
+        reveal={{
+          roundId: 'live-2', kind: 'verdict', summary: 'The room decided: Brian', holdMs: 8000, celebrate: true,
+          slide: { beat: 'land', flavor: 'group', title: 'Brian', body: '3 of 3 said it out loud.', numbers: { votes: 3, of: 3, share: 1 } },
+        }}
+        onComplete={() => {}}
+      />
+    )
+    await waitFor(() => qa('[data-testid="vote-bar-fill"]').length === 3, 4000)
+    const calmBars = qa('[data-testid="vote-bar-fill"]')
+    ok('reduced-motion: verdict bars render full instantly', calmBars.length === 3 && calmBars.every((b: any) => b.style.width === '100%' && b.style.transition === 'none'))
+    await waitFor(() => !!q('[data-testid="ga-subject"]'), 6000)
+    await tick(300)
+    ok('reduced-motion: zero confetti on the verdict land', drawCalls.length === 0)
+    ok('verdict reveal auto-advances on its hold', true)
+    await unmount()
+    setReduce(false)
+    w.innerWidth = 1024
+    void revealed
+    void landEl
+    void landR
   }
 
   /* ── summary ──────────────────────────────────────────────────────── */

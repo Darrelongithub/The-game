@@ -55,6 +55,8 @@ export interface Transport {
   /** re-join with the stored secret (+ full snapshot). Called on boot and on
    *  every visibilitychange — spec §1/§11.11. */
   resume(): void;
+  /** Forget the tab's seat and detach its socket without deleting the room. */
+  forgetSession(): void;
   disconnect(): void;
 }
 
