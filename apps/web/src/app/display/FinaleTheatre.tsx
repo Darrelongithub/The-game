@@ -47,7 +47,7 @@ export function FinaleTheatre({ reveals, finale }: { reveals: readonly RevealVie
     <section className="glass-card mx-auto max-w-4xl p-10 text-center" role="status">The finale is being assembled…</section>
   );
 
-  return <div className="mx-auto w-full max-w-5xl" data-testid="finale-theatre">
+  return <div className="mx-auto w-full max-w-5xl" data-testid="finale-theatre" data-round-id={reveals[index]!.roundId}>
     <div aria-live="polite" aria-atomic="true">
       <p className="mb-5 text-center text-sm font-bold uppercase tracking-[0.25em] text-white/70">Reveal {index + 1} / {reveals.length}</p>
       <DisplayReveal reveal={reveals[index]!} />
