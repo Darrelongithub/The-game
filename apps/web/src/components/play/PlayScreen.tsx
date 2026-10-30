@@ -19,6 +19,7 @@ import { PromptScreen } from "@/screens/PromptScreen";
 import { InterludeScreen } from "@/screens/InterludeScreen";
 import { RevealScreen } from "@/screens/RevealScreen";
 import { FinaleScreen } from "@/components/FinaleScreen";
+import { ReadyScreen } from "@/components/ReadyScreen";
 import { Flame } from "@/components/Flame";
 
 export function PlayScreen({ room }: { room: UseRoom }) {
@@ -64,6 +65,20 @@ function PlayContent({ room }: { room: UseRoom }) {
     return <RevealScreen reveal={reveal} onComplete={() => setWatchedReveal(reveal.roundId)} />;
   }
 
+  // ROUND 4 — the reveal waits for everyone. The snapshot carries `ready`
+  // only while a moment is pending, so this screen owns that gap.
+  if (view.ready) {
+    return (
+      <ReadyScreen
+        players={view.players}
+        you={you}
+        youAreReady={room.youAreReady}
+        awaiting={room.awaitingReady ?? []}
+        onReady={room.ready}
+      />
+    );
+  }
+
   if (round) {
     // PromptScreen needs a resolved PlayerId for `you`; a resumed tab has it
     // from sessionStorage before the first snapshot lands.
@@ -92,7 +107,7 @@ function PlayControls({ room }: { room: UseRoom }) {
   return (
     <>
       <div className="fixed bottom-2 right-2 z-[60] flex gap-2" role="group" aria-label="Room controls">
-        {room.isHost && room.round && !room.finale && (
+        {room.isHost && (room.round || room.view?.ready) && !room.finale && (
           <button type="button" onClick={room.skipRound} className="min-h-[48px] rounded-xl border border-white/20 bg-[#0d0617]/95 px-3 text-xs text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent">
             Skip round
           </button>

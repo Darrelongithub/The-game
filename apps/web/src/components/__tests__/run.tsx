@@ -200,6 +200,7 @@ async function main() {
   const { FinaleScreen } = await import('../FinaleScreen')
   const { SecretDeck } = await import('../SecretDeck')
   const { HoldToReveal } = await import('../HoldToReveal')
+  const { ReadyScreen } = await import('../ReadyScreen')
   const { SoundToggle } = await import('../SoundToggle')
   const sound = await import('../sound')
   const { demoFinale } = await import('../__demo__/demoFinale')
@@ -855,6 +856,36 @@ async function main() {
     void revealed
     void landEl
     void landR
+  }
+
+  /* ── ROUND 4: the ready gate (reveals wait for everyone) ──────────── */
+  {
+    const crew = [
+      { id: 'p1', alias: 'You', connected: true, isBot: false },
+      { id: 'p2', alias: 'Brian', connected: true, isBot: false },
+      { id: 'p3', alias: 'Gone', connected: false, isBot: false },
+    ]
+    let taps = 0
+    await mount(
+      <ReadyScreen players={crew} you="p1" youAreReady={false} awaiting={['p2']} onReady={() => { taps++ }} />
+    )
+    const readyButton = q('button')!
+    ok('ready screen offers one big tap target', !!readyButton && (readyButton.className ?? '').includes('min-h-[48px]'))
+    ok('ready screen is not tappable before the beat', (readyButton as any).disabled === true)
+    await tick(600)
+    ok('ready screen arms after the beat', (q('button') as any)?.disabled === false)
+    click(q('button')!)
+    ok('the ready tap is forwarded to the transport', taps === 1)
+    ok('ready screen waits only on connected phones', !text(host!).includes('Gone'))
+    ok('ready screen leaks nothing about what is coming', !/suspi|hypothes|claim|evidence/i.test(text(host!)))
+    await unmount()
+
+    await mount(
+      <ReadyScreen players={crew} you="p1" youAreReady awaiting={['p2']} onReady={() => {}} />
+    )
+    ok('once you are ready it lists who is still looking up', text(host!).includes('Brian'))
+    ok('once you are ready there is no second button to press', qa('button').length === 0)
+    await unmount()
   }
 
   /* ── summary ──────────────────────────────────────────────────────── */

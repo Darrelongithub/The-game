@@ -41,10 +41,15 @@ export interface TransportHandlers {
 export interface Transport {
   readonly mode: "socket" | "mock";
   setHandlers(handlers: TransportHandlers): void;
-  create(alias: string, consent: Consent): Promise<JoinReply & { code?: RoomCode }>;
+  /** `options.demo` creates a host-only demo room (every seat puppeted from
+   *  this laptop). Omitted = an ordinary room. */
+  create(alias: string, consent: Consent, options?: { demo?: boolean }): Promise<JoinReply & { code?: RoomCode }>;
   join(req: JoinRequest): Promise<JoinReply>;
   submit(req: SubmitRequest): Promise<{ ok: boolean; error?: string }>;
   darePass(req: DarePassRequest): Promise<{ ok: boolean; error?: string }> | void;
+  /** "I'm ready for the pending reveal" — the reveal waits for every phone
+   *  (spec ROUND 4), so this is what releases the moment. */
+  ready(): void;
   start(): void;
   addBot(): void;
   skipRound(): void;

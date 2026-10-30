@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Server, Socket } from "socket.io";
 import {
   DARE_ROUNDS, GRACE_MS, HEAT_ORDER, IDLE_TTL_HOURS, INTERLUDE_HOLD_MS,
-  MAX_PLAYERS, MIN_PLAYERS, RETENTION_HOURS, REVEAL_HOLD_MS, ROOM_CODE_ALPHABET,
+  MAX_PLAYERS, MIN_PLAYERS, RETENTION_HOURS, REVEAL_HOLD_MS, REVEAL_READY_GRACE_MS, ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH, ROUNDS_PER_PHASE, ROUND_TIMERS_MS, SECRET_DECK_MAX, SPOTLIGHT_ANSWER_MAX,
   SPOTLIGHT_REVEAL_MS, TRAITS, VERDICT_DISCUSS_MS, VERDICT_REVEAL_MS, pseudonym,
   type ClientToServerEvents, type Consent, type FinaleSlide, type FinaleView, type InterludeView,
@@ -28,13 +28,17 @@ import {
 type SocketData = { roomCode?: string; playerId?: string };
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 type GameIO = Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
-type Stage = "lobby" | "round" | "reveal" | "interlude" | "finale-building" | "finale" | "deleted";
+type Stage = "lobby" | "round" | "ready" | "reveal" | "interlude" | "finale-building" | "finale" | "deleted";
 interface Player {
   id: string; alias: string; consent: Consent; secret: string; isBot: boolean; connected: boolean; socketId?: string;
   /** A pending versioned resume is bound to a client-generated secret nonce. */
   resumeRetry?: { secret: string; socketId: string; nonce?: string };
   /** ROUND 4: bound account (never emitted). */
   accountId?: string;
+  /** ROUND 4 demo room: a seat the host puppets from their own laptop. It has
+   *  no socket, never appears in `secrets`, and answers through `demo_answer_as`
+   *  (manual) or the ordinary scheduler (auto). */
+  puppet?: { mode: "auto" | "manual" };
 }
 interface Definition {
   prompt: Prompt; phase: Phase; kind: RoundKind; text: string; onlyPlayers?: string[];
@@ -86,6 +90,15 @@ interface Room {
   plan?: PhasePlan;
   /** hypothesis the round in flight was built to test (cleared each round) */
   testedHypothesisId?: string;
+  /**
+   * ROUND 4 — THE READY GATE. A closed round's reveal is PENDING here until
+   * every connected player has pressed ready (or the grace expires), so a
+   * phone in a pocket never costs anyone the moment. `ready` only ever
+   * contains player ids — nothing private.
+   */
+  pendingReveal?: RevealView; ready: Set<string>; readyClosesAt?: number;
+  /** ROUND 4 demo room: the host plays every seat from one laptop. */
+  demo: boolean; demoSpeed: number;
   timer?: ReturnType<typeof setTimeout>; botTimers: Set<ReturnType<typeof setTimeout>>;
 }
 export interface GameOptions {
@@ -100,6 +113,8 @@ export interface GameOptions {
   verdictDiscussMs?: number;
   graceMs?: number;
   revealHoldMs?: number;
+  /** Testing seam for the ready gate (production: REVEAL_READY_GRACE_MS). */
+  readyGraceMs?: number;
   interludeHoldMs?: number;
   botDelayMs?: [number, number];
   writerTimeoutMs?: number;
@@ -206,6 +221,7 @@ export class RoomManager {
     room.players.forEach((p) => { p.secret = ""; p.alias = ""; p.resumeRetry = undefined; }); room.players.length = 0;
     room.round = null; room.queue = []; room.custom = []; room.pair = undefined; room.reveal = undefined; room.interlude = undefined; room.finale = undefined;
     room.currentHeat = undefined; room.pendingHeatDown = undefined; room.spotlighted.clear(); room.lastSubject = undefined;
+    room.ready.clear(); room.pendingReveal = undefined; room.readyClosesAt = undefined;
     room.hypotheses.length = 0; room.priors.length = 0; room.director = emptyDirectorState(); room.plan = undefined; room.testedHypothesisId = undefined;
     room.provider = new BankPromptProvider();
   }
@@ -276,7 +292,12 @@ export class RoomManager {
   private view(room: Room, playerId: string): RoomView {
     return { code: room.code, phase: room.phase, hostId: room.hostId,
       players: room.players.map(({ id, alias, connected, isBot }) => ({ id, alias, connected, isBot })),
-      round: room.round ? this.roundView(room.round, playerId) : null, seq: room.seq };
+      round: room.round ? this.roundView(room.round, playerId) : null, seq: room.seq,
+      // Demo rooms say so (the host's puppet controls are gated on it); a real
+      // room's snapshot stays byte-identical to before.
+      ...(room.demo ? { demo: true } : {}),
+      // Present ONLY while a reveal is pending — who has pressed ready for it.
+      ...(room.stage === "ready" ? { ready: room.players.filter((p) => room.ready.has(p.id)).map((p) => p.id) } : {}) };
   }
   /**
    * The ONLY place a round is rendered for a phone, which makes it the only
@@ -336,7 +357,8 @@ export class RoomManager {
       try { provider = this.services.createPromptProvider({ roomId: id }); } catch { provider = new BankPromptProvider(); }
       const room: Room = { id, code, createdAt: now, lastActivity: now, file, hostId: player.id, players: [player], phase: "lobby", stage: "lobby", seq: 1, nextPlayer: 2, roundIndex: 0,
         provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set(),
-        hypotheses: [], priors: [], director: emptyDirectorState() };
+        hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(),
+        demo: (input as { demo?: unknown }).demo === true, demoSpeed: 1 };
       this.rooms.set(code, room); socket.data = { roomCode: code, playerId: player.id }; void socket.join(code);
       ack({ ok: true, code, you: player.id, secret: player.secret, state: this.view(room, player.id) });
       this.states(room);
@@ -387,6 +409,15 @@ export class RoomManager {
       room.seq++;
       ack({ ok: true, you: player.id, secret: player.secret, state: this.view(room, player.id) });
       this.states(room); this.replay(room, socket, player); this.prepare(room);
+    });
+    socket.on("ready", () => {
+      const found = this.identify(socket); if (!found) return;
+      const { room, player } = found;
+      // A late tap from a phone that already saw the reveal is harmless.
+      if (room.stage !== "ready" || room.ready.has(player.id)) return;
+      room.ready.add(player.id);
+      this.changed(room);
+      if (this.everyoneReady(room)) this.showReveal(room);
     });
     socket.on("start", () => {
       const found = this.host(socket); if (!found) return;
@@ -439,6 +470,7 @@ export class RoomManager {
       const found = this.host(socket); if (!found) return;
       const { room } = found;
       if (room.stage === "round") this.finishRound(room);
+      else if (room.stage === "ready") this.showReveal(room);
       else if (room.stage === "reveal") this.afterReveal(room);
       else if (room.stage === "interlude") this.afterInterlude(room);
       else this.err(socket, "BAD_PHASE", "No round to skip.");
@@ -446,7 +478,7 @@ export class RoomManager {
     socket.on("vote_heat_down", () => {
       const found = this.identify(socket); if (!found) return;
       const { room, player } = found;
-      if (!room.currentHeat || !["round", "reveal"].includes(room.stage) || room.pendingHeatDown) return this.err(socket, "BAD_PHASE", "Heat cannot be lowered here.");
+      if (!room.currentHeat || !["round", "ready", "reveal"].includes(room.stage) || room.pendingHeatDown) return this.err(socket, "BAD_PHASE", "Heat cannot be lowered here.");
       const i = HEAT_ORDER.indexOf(room.currentHeat);
       if (i <= 0) return this.err(socket, "MIN_HEAT", "The room is already at the lowest heat.");
       room.votes.add(player.id);
@@ -466,6 +498,8 @@ export class RoomManager {
       if (!player.resumeRetry?.nonce) player.resumeRetry = undefined;
       room.votes.delete(player.id); room.lastActivity = this.now();
       this.changed(room); this.checkVotes(room); this.maybeComplete(room);
+      // A pending reveal waits for everyone who is still here — and only them.
+      if (room.stage === "ready" && this.everyoneReady(room)) this.showReveal(room);
     });
   }
   private prepare(room: Room): void {
@@ -476,13 +510,15 @@ export class RoomManager {
     } catch { /* Bank remains available. */ }
   }
   private checkVotes(room: Room): void {
-    if (!room.currentHeat || room.pendingHeatDown || !["round", "reveal"].includes(room.stage)) return;
+    if (!room.currentHeat || room.pendingHeatDown || !["round", "ready", "reveal"].includes(room.stage)) return;
     const active = room.players.filter((p) => p.connected);
     const votes = active.filter((p) => room.votes.has(p.id)).length;
     const index = HEAT_ORDER.indexOf(room.currentHeat);
     if (index > 0 && votes > active.length / 2) {
       room.pendingHeatDown = HEAT_ORDER[index - 1]; room.votes.clear();
-      if (room.stage === "round") this.finishRound(room); else this.afterReveal(room);
+      if (room.stage === "round") this.finishRound(room);
+      else if (room.stage === "ready") this.showReveal(room);
+      else this.afterReveal(room);
     }
   }
   /** Round kinds a heat phase deals, in order (spec §3). */
@@ -679,7 +715,7 @@ export class RoomManager {
       room.spotlighted.add(definition.subjectId); room.lastSubject = definition.subjectId;
     }
     const startedAt = this.now();
-    const lengthMs = this.options.roundTimers?.[definition.kind] ?? ROUND_TIMERS_MS[definition.kind];
+    const lengthMs = this.scale(room, this.options.roundTimers?.[definition.kind] ?? ROUND_TIMERS_MS[definition.kind]);
     // Use a function replacement: aliases can contain `$&` or other special characters.
     // `{S}` is the subject's alias — substituted for display only, exactly like `{P1}`.
     // A director-chosen round binds its probed subjects into the first slots.
@@ -688,10 +724,10 @@ export class RoomManager {
       : this.replacePlaceholders(room, definition.text, definition.subjects ?? definition.onlyPlayers);
     const round: LiveRound = { ...definition, text: this.withCallback(room, definition, question), id: `${room.id}-${++room.roundIndex}`, index: room.roundIndex, startedAt,
       closesAt: startedAt + lengthMs, responses: new Map(),
-      ...(definition.kind === "verdict" ? { voteOpensAt: startedAt + Math.min(this.options.verdictDiscussMs ?? VERDICT_DISCUSS_MS, lengthMs) } : {}) };
+      ...(definition.kind === "verdict" ? { voteOpensAt: startedAt + Math.min(this.scale(room, this.options.verdictDiscussMs ?? VERDICT_DISCUSS_MS), lengthMs) } : {}) };
     room.round = round; room.usedIds.add(definition.prompt.id); this.changed(room);
     this.eachSocket(room, (socket, player) => socket.emit("round", this.guard(this.roundView(round, player.id))));
-    this.schedule(room, round.closesAt - startedAt + (this.options.graceMs ?? GRACE_MS), () => this.finishRound(room));
+    this.schedule(room, round.closesAt - startedAt + this.scale(room, this.options.graceMs ?? GRACE_MS), () => this.finishRound(room));
     for (const player of room.players) if (player.isBot && (!round.onlyPlayers || round.onlyPlayers.includes(player.id))) this.scheduleBot(room, player, round);
     this.maybeComplete(room);
   }
@@ -741,7 +777,7 @@ export class RoomManager {
     const previous = room.seen.get(key);
     if (previous) return previous.roundId === r.roundId && previous.fingerprint === fingerprint ? { ok: true } : { ok: false, error: "Submission id was already used." };
     const round = room.round;
-    if (room.stage !== "round" || !round || r.roundId !== round.id || this.now() > round.closesAt + (this.options.graceMs ?? GRACE_MS)) return { ok: false, error: "This round is closed." };
+    if (room.stage !== "round" || !round || r.roundId !== round.id || this.now() > round.closesAt + this.scale(room, this.options.graceMs ?? GRACE_MS)) return { ok: false, error: "This round is closed." };
     if (!player.connected || (round.onlyPlayers && !round.onlyPlayers.includes(player.id))) return { ok: false, error: "You are spectating this round." };
     if (round.responses.has(player.id)) return { ok: false, error: "You already answered this round." };
     // Verdict: the phones stay face-down until the debate window closes.
@@ -783,10 +819,16 @@ export class RoomManager {
   }
   private finishRound(room: Room): void {
     const round = room.round; if (room.stage !== "round" || !round) return;
-    this.clearTimers(room); room.round = null; room.stage = "reveal";
+    this.clearTimers(room); room.round = null;
     // ROUND 4: the engine re-reads the room after EVERY round. Pure deterministic
     // code decides what it suspects; nothing here is emitted.
     this.refreshHypotheses(room, round.id);
+    // ROUND 4: the reveal is PENDING, not shown. Nobody misses the moment.
+    this.beginReady(room, this.buildReveal(room, round));
+  }
+  /** The reveal payload for a round that just closed. Pure formatting — the
+   *  only side effect is the (internal) hypothesis refresh, done by the caller. */
+  private buildReveal(room: Room, round: LiveRound): RevealView {
     const items: NonNullable<RevealView["items"]> = [];
     if (round.kind === "shout") {
       const counts = new Map<string, { word: string; count: number }>();
@@ -817,13 +859,9 @@ export class RoomManager {
       }
       const cover = round.subjectId ? round.responses.get(round.subjectId) : undefined;
       const punchline = cover?.kind === "text" ? cover.text : undefined;
-      const holdMs = this.options.revealHoldMs ?? SPOTLIGHT_REVEAL_MS;
-      const reveal: RevealView = { roundId: round.id, kind: "spotlight", summary: `Live on ${subjectAlias}`,
+      const holdMs = this.scale(room, this.options.revealHoldMs ?? SPOTLIGHT_REVEAL_MS);
+      return { roundId: round.id, kind: "spotlight", summary: `Live on ${subjectAlias}`,
         ...(items.length ? { items } : {}), subject: subjectAlias, ...(punchline ? { punchline } : {}), holdMs };
-      room.reveal = { value: reveal, endsAt: this.now() + holdMs }; this.changed(room);
-      this.io.to(room.code).emit("reveal", this.guard(reveal));
-      this.schedule(room, holdMs, () => this.afterReveal(room));
-      return;
     }
     if (round.kind === "verdict") {
       // Anonymous tallies only — never a voter's name (spec §7). The winner is
@@ -837,20 +875,49 @@ export class RoomManager {
         beat: "land", flavor: "group", title: alias(winner[0]),
         body: `${winner[1]} of ${total} said it out loud.`, numbers: { votes: winner[1], of: total, share: winner[1] / total },
       } : undefined;
-      const holdMs = this.options.revealHoldMs ?? VERDICT_REVEAL_MS;
-      const reveal: RevealView = { roundId: round.id, kind: "verdict",
+      const holdMs = this.scale(room, this.options.revealHoldMs ?? VERDICT_REVEAL_MS);
+      return { roundId: round.id, kind: "verdict",
         summary: winner ? `The room decided: ${alias(winner[0])}` : "Nobody voted. The room argued for nothing.",
         ...(slide ? { slide } : {}), celebrate: round.couple ?? round.prompt.coding === "couple", holdMs };
-      room.reveal = { value: reveal, endsAt: this.now() + holdMs }; this.changed(room);
-      this.io.to(room.code).emit("reveal", this.guard(reveal));
-      this.schedule(room, holdMs, () => this.afterReveal(room));
-      return;
     }
-    const holdMs = this.options.revealHoldMs ?? REVEAL_HOLD_MS;
-    const reveal: RevealView = { roundId: round.id, summary: round.kind === "debrief" ? "Their answers are private." : round.kind === "shout" ? "The room has spoken." : round.kind === "minigame" ? "Tap-war leaderboard" : "Round complete.", ...(items.length ? { items } : {}), holdMs };
-    room.reveal = { value: reveal, endsAt: this.now() + holdMs }; this.changed(room);
-    this.io.to(room.code).emit("reveal", reveal);
-    this.schedule(room, holdMs, () => this.afterReveal(room));
+    const holdMs = this.scale(room, this.options.revealHoldMs ?? REVEAL_HOLD_MS);
+    return { roundId: round.id, summary: round.kind === "debrief" ? "Their answers are private." : round.kind === "shout" ? "The room has spoken." : round.kind === "minigame" ? "Tap-war leaderboard" : "Round complete.", ...(items.length ? { items } : {}), holdMs };
+  }
+  // ---------------------------------------------------------------------------
+  // THE READY GATE (ROUND 4)
+  // A closed round's reveal is pending until every connected player has pressed
+  // ready, so nobody misses the moment (a reconnecting phone still gets it).
+  // The grace timer fires the reveal anyway — one AFK phone never stalls the
+  // night. Bots and auto-puppeted demo seats are always ready: they have no
+  // phone to look at.
+  // ---------------------------------------------------------------------------
+  private beginReady(room: Room, reveal: RevealView): void {
+    room.stage = "ready"; room.ready.clear(); room.pendingReveal = reveal;
+    for (const player of room.players) if (player.isBot || player.puppet?.mode === "auto") room.ready.add(player.id);
+    const grace = this.scale(room, this.options.readyGraceMs ?? REVEAL_READY_GRACE_MS);
+    room.readyClosesAt = this.now() + grace;
+    this.changed(room);
+    if (this.everyoneReady(room)) return this.showReveal(room);
+    this.schedule(room, grace, () => { if (room.stage === "ready") this.showReveal(room); });
+  }
+  /** A connected seat that has not pressed ready yet is the only thing a reveal waits for. */
+  private everyoneReady(room: Room): boolean {
+    return room.players.every((p) => !p.connected || room.ready.has(p.id));
+  }
+  private showReveal(room: Room): void {
+    const reveal = room.pendingReveal;
+    if (!reveal || room.stage !== "ready") return;
+    this.clearTimers(room);
+    room.pendingReveal = undefined; room.readyClosesAt = undefined; room.ready.clear();
+    room.stage = "reveal";
+    room.reveal = { value: reveal, endsAt: this.now() + reveal.holdMs };
+    this.changed(room);
+    this.io.to(room.code).emit("reveal", this.guard(reveal));
+    this.schedule(room, reveal.holdMs, () => this.afterReveal(room));
+  }
+  /** Timer scale: 1 everywhere except a demo room, where the host can speed up. */
+  private scale(room: Room, ms: number): number {
+    return room.demo ? Math.max(1, Math.round(ms * room.demoSpeed)) : ms;
   }
   private afterReveal(room: Room): void {
     if (room.stage !== "reveal") return;
@@ -868,7 +935,7 @@ export class RoomManager {
       try { void room.provider.prepareAnalysis(this.redactedLog(room)).catch(() => {}); } catch { /* local tags remain available */ }
     }
     const teaser = digest.pickTeasers[0] ? displayText(digest.pickTeasers[0], room.players) : undefined;
-    const holdMs = this.options.interludeHoldMs ?? INTERLUDE_HOLD_MS;
+    const holdMs = this.scale(room, this.options.interludeHoldMs ?? INTERLUDE_HOLD_MS);
     const view: InterludeView = { headline: cooled ? "Cooling things down" : next === "finale" ? "The room has spoken" : `Next: ${next}`, sub: cooled ? "The room chose a gentler level." : "Take a breath before the next chapter.", ...(teaser ? { teaser } : {}), holdMs };
     room.interlude = { value: view, endsAt: this.now() + holdMs };
     // Store the transition independently of the label exposed to clients.

@@ -38,7 +38,13 @@ export interface UseRoom {
   secrets: SecretDeckView | null;
   mustAnswer: boolean;
   /** lobby actions */
-  createRoom: (alias: string, consent: Consent) => Promise<JoinReply & { code?: RoomCode }>;
+  createRoom: (alias: string, consent: Consent, options?: { demo?: boolean }) => Promise<JoinReply & { code?: RoomCode }>;
+  /** "I'm ready for the pending reveal" (reveals wait for everyone) */
+  ready: () => void;
+  /** players still to press ready for the pending reveal; null when none is pending */
+  awaitingReady: PlayerId[] | null;
+  /** this phone has already pressed ready for the pending reveal */
+  youAreReady: boolean;
   joinRoom: (code: RoomCode, alias: string, consent: Consent) => Promise<JoinReply>;
   start: () => void;
   addBot: () => void;
@@ -182,11 +188,11 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
     setHasSession(false);
   }, []);
 
-  const createRoom = useCallback(async (alias: string, consent: Consent) => {
+  const createRoom = useCallback(async (alias: string, consent: Consent, options?: { demo?: boolean }) => {
     const t = transportRef.current ?? await transportReady.current?.catch(() => null);
     if (!t) return { ok: false, error: "Not connected yet. Please retry." } satisfies JoinReply;
     setError(null);
-    const reply = await t.create(alias, consent);
+    const reply = await t.create(alias, consent, options);
     if (reply.ok && reply.you) {
       setYou(reply.you);
       if (reply.state) setView(reply.state);
@@ -244,6 +250,7 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
     [round]
   );
 
+  const ready = useCallback(() => transportRef.current?.ready(), []);
   const start = useCallback(() => transportRef.current?.start(), []);
   const addBot = useCallback(() => transportRef.current?.addBot(), []);
   const skipRound = useCallback(() => transportRef.current?.skipRound(), []);
@@ -257,6 +264,14 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
 
   const isHost = Boolean(view && you && view.hostId === you);
   const mustAnswer = useMemo(() => roundTargetsMe(round, you), [round, you]);
+  // A reveal is pending while the snapshot carries a `ready` list: whoever is
+  // not on it has not looked up yet, and the moment waits for them.
+  const awaitingReady = useMemo<PlayerId[] | null>(() => {
+    if (!view?.ready) return null;
+    const readyIds = new Set(view.ready);
+    return view.players.filter((p) => p.connected && !readyIds.has(p.id)).map((p) => p.id);
+  }, [view]);
+  const youAreReady = Boolean(view?.ready && you && view.ready.includes(you));
 
   return {
     mode,
@@ -275,6 +290,9 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
     mustAnswer,
     createRoom,
     joinRoom,
+    ready,
+    awaitingReady,
+    youAreReady,
     start,
     addBot,
     skipRound,
