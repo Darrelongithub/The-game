@@ -29,7 +29,84 @@ type SocketData = { roomCode?: string; playerId?: string; display?: boolean };
 const displayChannel = (code: string): string => `display:${code}`;
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 type GameIO = Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
-type Stage = "lobby" | "round" | "ready" | "reveal" | "interlude" | "finale-building" | "finale" | "deleted";
+/**
+ * `queued` is REVEAL_MODE=finale's mid-game beat: the round closed, its reveal
+ * went to the night queue instead of a screen, and the night advances on the
+ * gate's grace timer exactly as if the reveal had fired. Nothing is emitted.
+ */
+type Stage = "lobby" | "round" | "ready" | "queued" | "reveal" | "interlude" | "finale-building" | "finale" | "deleted";
+
+// ---------------------------------------------------------------------------
+// REVEAL_MODE (env, DEFAULT-OFF)
+//   "round"  — today's night, byte-for-byte: every round closes into the ready
+//              gate and its reveal plays on every phone and the display.
+//   "finale" — per-round reveals are SUPPRESSED and QUEUED; the night's whole
+//              reveal reel plays on the DISPLAY role at the finale. Phones are
+//              untouched: no per-round reveals, and the phone finale is
+//              identical to a "round" night.
+// ---------------------------------------------------------------------------
+export type RevealMode = "round" | "finale";
+
+/** One night-queue line: the reveal a round WOULD have shown, in round order. */
+export interface QueuedReveal {
+  /** 1-based round index within the night — the queue's sort key. */
+  index: number;
+  roundId: string;
+  reveal: RevealView;
+}
+
+let warnedRevealMode = false;
+/**
+ * Parse the REVEAL_MODE env value. Anything unusable — unset, empty, a typo —
+ * falls back to "round", so a bad env line can never change a game night.
+ */
+export function resolveRevealMode(value: unknown): RevealMode {
+  if (typeof value !== "string" || value.trim() === "") return "round";
+  const mode = value.trim().toLowerCase();
+  if (mode === "finale") return "finale";
+  if (mode !== "round" && !warnedRevealMode) {
+    warnedRevealMode = true;
+    console.warn(`REVEAL_MODE="${value}" is not "round" or "finale"; using "round".`);
+  }
+  return "round";
+}
+
+/** The night queue lives beside the room log, 0600, append-only JSON lines.
+ *  It deliberately does NOT use the `.jsonl` room-log suffix: only room logs
+ *  are room logs, and every purge/scan in this file must stay unambiguous. */
+export const revealQueueFile = (file: string): string => file.replace(/\.jsonl$/u, ".reveals.log");
+
+const isQueuedReveal = (value: unknown): value is QueuedReveal => {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as QueuedReveal;
+  const reveal = entry.reveal as RevealView | undefined;
+  return typeof entry.roundId === "string" && entry.roundId.length > 0 &&
+    Number.isInteger(entry.index) && entry.index > 0 &&
+    !!reveal && typeof reveal === "object" &&
+    reveal.roundId === entry.roundId && typeof reveal.summary === "string" &&
+    typeof reveal.holdMs === "number" && Number.isFinite(reveal.holdMs) && reveal.holdMs >= 0;
+};
+
+/**
+ * DETERMINISM: the queue is a pure function of its own log. Lines are
+ * re-ordered into round order, an interrupted/doubled append is de-duplicated
+ * by roundId (first index wins) and unreadable lines are dropped. Feeding the
+ * same file in twice — or in a different line order — yields the same queue,
+ * which is what makes a mid-night restart and a replay agree.
+ */
+export function canonicalQueuedReveals(lines: readonly string[]): QueuedReveal[] {
+  const byRound = new Map<string, QueuedReveal>();
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let parsed: unknown;
+    try { parsed = JSON.parse(trimmed); } catch { continue; }
+    if (!isQueuedReveal(parsed)) continue;
+    const previous = byRound.get(parsed.roundId);
+    if (!previous || parsed.index < previous.index) byRound.set(parsed.roundId, parsed);
+  }
+  return [...byRound.values()].sort((a, b) => a.index - b.index || a.roundId.localeCompare(b.roundId));
+}
 interface Player {
   id: string; alias: string; consent: Consent; profile: ProfileAnswers; secret: string; isBot: boolean; connected: boolean; socketId?: string;
   /** A pending versioned resume is bound to a client-generated secret nonce. */
@@ -99,6 +176,12 @@ interface Room {
    * contains player ids — nothing private.
    */
   pendingReveal?: RevealView; ready: Set<string>; readyClosesAt?: number;
+  /**
+   * REVEAL_MODE=finale: tonight's suppressed reveals, in round order, exactly
+   * as they would have played. Backed one-for-one by an append-only JSON line
+   * in `.reveals.log`, so a restart re-loads the same reel.
+   */
+  revealQueue: QueuedReveal[];
   /** ROUND 4 demo room: the host plays every seat from one laptop. */
   demo: boolean; demoSpeed: number;
   timer?: ReturnType<typeof setTimeout>; botTimers: Set<ReturnType<typeof setTimeout>>;
@@ -106,6 +189,12 @@ interface Room {
 export interface GameOptions {
   dataDir: string;
   services?: GameServices;
+  /**
+   * REVEAL_MODE. "round" (default, also what an unset/invalid `REVEAL_MODE`
+   * env value means) is today's night; "finale" suppresses and queues every
+   * per-round reveal and plays the reel on the display at the finale.
+   */
+  revealMode?: RevealMode;
   /** ROUND 4 identity store. Absent = guest-only night, identical gameplay. */
   accounts?: AccountStore;
   now?: () => number;
@@ -212,9 +301,15 @@ export class RoomManager {
   private readonly services: GameServices;
   private readonly now: () => number;
   private readonly sweepTimer: ReturnType<typeof setInterval>;
+  /**
+   * REVEAL_MODE for this process. An explicit option wins (tests, embeddings);
+   * otherwise the env var decides, and an unusable value is "round".
+   */
+  readonly revealMode: RevealMode;
   constructor(private readonly io: GameIO, private readonly options: GameOptions) {
     this.services = options.services ?? integratedServices;
     this.now = options.now ?? Date.now;
+    this.revealMode = resolveRevealMode(options.revealMode ?? process.env.REVEAL_MODE);
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
     this.restore();
     this.purge();
@@ -235,7 +330,7 @@ export class RoomManager {
     room.players.forEach((p) => { p.secret = ""; p.alias = ""; p.resumeRetry = undefined; }); room.players.length = 0;
     room.round = null; room.queue = []; room.custom = []; room.pair = undefined; room.reveal = undefined; room.interlude = undefined; room.finale = undefined;
     room.currentHeat = undefined; room.pendingHeatDown = undefined; room.spotlighted.clear(); room.lastSubject = undefined;
-    room.ready.clear(); room.pendingReveal = undefined; room.readyClosesAt = undefined;
+    room.ready.clear(); room.pendingReveal = undefined; room.readyClosesAt = undefined; room.revealQueue.length = 0;
     room.hypotheses.length = 0; room.priors.length = 0; room.director = emptyDirectorState(); room.plan = undefined; room.testedHypothesisId = undefined;
     room.provider = new BankPromptProvider();
   }
@@ -267,7 +362,10 @@ export class RoomManager {
         const provider = this.services.createPromptProvider({ roomId: state.id });
         const room: Room = { id: state.id, code: state.code, createdAt, lastActivity, file, hostId: state.hostId, players,
           phase: "lobby", stage: "lobby", seq: records.length + 1, nextPlayer: Math.max(Number(state.nextPlayer) || 2, players.length + 1), roundIndex: records.reduce((max, r) => Math.max(max, Number(r.roundId.match(/(\d+)$/u)?.[1] ?? 0)), 0), dareCount: records.filter(r => r.roundKind === "dare").length,
-          provider, prepared: false, usedIds: new Set(records.map(r => r.promptId)), custom: [], log: records, queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(state.id), botTimers: new Set(), hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), demo: false, demoSpeed: 1 };
+          provider, prepared: false, usedIds: new Set(records.map(r => r.promptId)), custom: [], log: records, queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(state.id), botTimers: new Set(), hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), revealQueue: [], demo: false, demoSpeed: 1 };
+        // REVEAL_MODE=finale: the night queue is restored BEFORE the finale runs,
+        // so a restart mid-night replays the reel intact rather than losing it.
+        room.revealQueue = this.loadRevealQueue(file);
         this.rooms.set(room.code, room);
         if (records.length > 0) void this.finale(room);
       } catch { /* Invalid metadata or partial logs are ignored. */ }
@@ -426,6 +524,10 @@ export class RoomManager {
       if (room.round) socket.emit("round", this.guard(this.displayView(room).round!));
       if (room.reveal) socket.emit("reveal", this.guard({ ...room.reveal.value, holdMs: Math.max(0, room.reveal.endsAt - this.now()) }));
       if (room.interlude) socket.emit("interlude", this.guard({ ...room.interlude.value, holdMs: Math.max(0, room.interlude.endsAt - this.now()) }));
+      // REVEAL_MODE=finale: a display that joins mid-finale (or reconnects after
+      // a restart) still gets the whole night's reel, in round order, before
+      // the finale. Display-only, exactly like the live delivery.
+      if (room.stage === "finale-building" || room.stage === "finale") this.deliverQueuedReveals(room, socket);
       if (room.finale) socket.emit("finale", this.guard(room.finale));
     });
     socket.on("create", (input, reply) => {
@@ -441,7 +543,7 @@ export class RoomManager {
       const demo = (input as { demo?: unknown }).demo === true;
       const room: Room = { id, code, createdAt: now, lastActivity: now, file, hostId: player.id, players: [player], phase: "lobby", stage: "lobby", seq: 1, nextPlayer: 2, roundIndex: 0, dareCount: 0,
         provider, prepared: false, usedIds: new Set(), custom: [], log: [], queue: [], round: null, interactions: new Map(), seen: new Map(), votes: new Set(), callbackPhases: new Set(), callbackQuotes: new Set(), spotlighted: new Set(), decks: new Map(), rng: seedRng(id), botTimers: new Set(),
-        hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), demo, demoSpeed: 1 };
+        hypotheses: [], priors: [], director: emptyDirectorState(), ready: new Set(), revealQueue: [], demo, demoSpeed: 1 };
       this.rooms.set(code, room); this.persistRoom(room); socket.data = { roomCode: code, playerId: player.id }; void socket.join(code);
       ack({ ok: true, code, you: player.id, secret: player.secret, state: this.view(room, player.id) });
       this.states(room);
@@ -560,13 +662,15 @@ export class RoomManager {
       if (room.stage === "round") this.finishRound(room);
       else if (room.stage === "ready") this.showReveal(room);
       else if (room.stage === "reveal") this.afterReveal(room);
+      // finale mode's suppressed beat: the host can always move the night on.
+      else if (room.stage === "queued") this.afterReveal(room);
       else if (room.stage === "interlude") this.afterInterlude(room);
       else this.err(socket, "BAD_PHASE", "No round to skip.");
     });
     socket.on("vote_heat_down", () => {
       const found = this.identify(socket); if (!found) return;
       const { room, player } = found;
-      if (!room.currentHeat || !["round", "ready", "reveal"].includes(room.stage) || room.pendingHeatDown) return this.err(socket, "BAD_PHASE", "Heat cannot be lowered here.");
+      if (!room.currentHeat || !["round", "ready", "queued", "reveal"].includes(room.stage) || room.pendingHeatDown) return this.err(socket, "BAD_PHASE", "Heat cannot be lowered here.");
       const i = HEAT_ORDER.indexOf(room.currentHeat);
       if (i <= 0) return this.err(socket, "MIN_HEAT", "The room is already at the lowest heat.");
       room.votes.add(player.id);
@@ -684,7 +788,7 @@ export class RoomManager {
     } catch { /* Bank remains available. */ }
   }
   private checkVotes(room: Room): void {
-    if (!room.currentHeat || room.pendingHeatDown || !["round", "ready", "reveal"].includes(room.stage)) return;
+    if (!room.currentHeat || room.pendingHeatDown || !["round", "ready", "queued", "reveal"].includes(room.stage)) return;
     const active = room.players.filter((p) => p.connected);
     const votes = active.filter((p) => room.votes.has(p.id)).length;
     const index = HEAT_ORDER.indexOf(room.currentHeat);
@@ -692,7 +796,7 @@ export class RoomManager {
       room.pendingHeatDown = HEAT_ORDER[index - 1]; room.votes.clear();
       if (room.stage === "round") this.finishRound(room);
       else if (room.stage === "ready") this.showReveal(room);
-      else this.afterReveal(room);
+      else this.afterReveal(room); // "queued" (finale mode) included
     }
   }
   /** Round kinds a heat phase deals, in order (spec §3). */
@@ -1021,8 +1125,52 @@ export class RoomManager {
     // ROUND 4: the engine re-reads the room after EVERY round. Pure deterministic
     // code decides what it suspects; nothing here is emitted.
     this.refreshHypotheses(room, round.id);
+    const reveal = this.buildReveal(room, round);
+    // REVEAL_MODE=finale: nothing is emitted. The reveal goes to the night
+    // queue and the night advances on the gate's grace timer, exactly as if the
+    // reveal had played — the ready gate is bypassed mid-game only.
+    if (this.revealMode === "finale") return this.queueReveal(room, round, reveal);
     // ROUND 4: the reveal is PENDING, not shown. Nobody misses the moment.
-    this.beginReady(room, this.buildReveal(room, round));
+    this.beginReady(room, reveal);
+  }
+  // ---------------------------------------------------------------------------
+  // REVEAL_MODE=finale — THE NIGHT QUEUE
+  // The reveal a round would have shown is appended to `.reveals.log` (one
+  // JSON object per line, 0600, exactly the room log's discipline) and kept in
+  // memory in round order. Nothing rides a socket here: phones see nothing and
+  // the display sees nothing until the finale.
+  // ---------------------------------------------------------------------------
+  private queueReveal(room: Room, round: LiveRound, reveal: RevealView): void {
+    const entry: QueuedReveal = { index: round.index, roundId: reveal.roundId, reveal };
+    // Persist first: the file is the source of truth a restart replays.
+    try { appendFileSync(revealQueueFile(room.file), `${JSON.stringify(entry)}\n`, { encoding: "utf8", mode: 0o600 }); }
+    catch { /* Unwritable queue: the night still plays, the reel is memory-only. */ }
+    room.revealQueue.push(entry);
+    room.stage = "queued";
+    this.changed(room);
+    // The gate's grace is reused as the mid-game beat so the night keeps the
+    // same rhythm it would have had if the reveal had fired. The reveal's own
+    // hold is skipped: there is nothing on screen to hold for.
+    const beat = this.scale(room, this.options.readyGraceMs ?? REVEAL_READY_GRACE_MS);
+    this.schedule(room, beat, () => this.afterReveal(room));
+  }
+  private loadRevealQueue(file: string): QueuedReveal[] {
+    try { return canonicalQueuedReveals(readFileSync(revealQueueFile(file), "utf8").split(/\r?\n/u)); }
+    catch { return []; }
+  }
+  /**
+   * FINALE MODE: the whole night's reel, in round order, to the DISPLAY role
+   * only — immediately before the finale. Phones never receive these, and the
+   * phone finale is untouched. A display that joins mid-finale is caught up by
+   * the same call.
+   */
+  private deliverQueuedReveals(room: Room, socket?: GameSocket): void {
+    if (this.revealMode !== "finale" || room.revealQueue.length === 0) return;
+    for (const entry of room.revealQueue) {
+      const payload = this.guard({ ...entry.reveal });
+      if (socket) socket.emit("reveal", payload);
+      else this.io.to(displayChannel(room.code)).emit("reveal", payload);
+    }
   }
   /** The reveal payload for a round that just closed. Pure formatting — the
    *  only side effect is the (internal) hypothesis refresh, done by the caller. */
@@ -1119,7 +1267,8 @@ export class RoomManager {
     return room.demo ? Math.max(1, Math.round(ms * room.demoSpeed)) : ms;
   }
   private afterReveal(room: Room): void {
-    if (room.stage !== "reveal") return;
+    // "queued" is finale mode's suppressed reveal: same continuation, no screen.
+    if (room.stage !== "reveal" && room.stage !== "queued") return;
     this.clearTimers(room); room.reveal = undefined;
     if (room.pendingHeatDown) { const next = room.pendingHeatDown; room.pendingHeatDown = undefined; room.queue = []; return this.beginInterlude(room, next, true); }
     this.nextRound(room);
@@ -1249,6 +1398,9 @@ export class RoomManager {
   private async finale(room: Room): Promise<void> {
     if (room.stage === "deleted" || room.stage === "finale" || room.stage === "finale-building") return;
     this.clearTimers(room); room.stage = "finale-building"; room.phase = "finale"; room.round = null; room.currentHeat = undefined; this.changed(room);
+    // REVEAL_MODE=finale: the night's reel plays on the host screen from here.
+    // Phones get nothing extra; their finale below is identical to "round".
+    this.deliverQueuedReveals(room);
     const meta = this.meta(room), log = this.redactedLog(room);
     // Spotlight decoy answers answer nothing: they never reach signals, scores,
     // claims or secrets. (The engine also defends itself — see computeSignals.)
@@ -1373,6 +1525,7 @@ export class RoomManager {
   private deleteRoom(room: Room): boolean {
     try { unlinkSync(room.file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false; }
     try { unlinkSync(metadataFile(room.file)); } catch { /* Metadata may not exist for legacy rooms. */ }
+    try { unlinkSync(revealQueueFile(room.file)); } catch { /* No queued reveals: round mode never writes one. */ }
     room.stage = "deleted"; room.phase = "closed"; this.transitions.delete(room.id); this.rooms.delete(room.code);
     this.io.to(room.code).emit("deleted"); this.io.to(displayChannel(room.code)).emit("deleted");
     this.eachSocket(room, (socket) => { socket.data = {}; void socket.leave(room.code); });
@@ -1383,15 +1536,22 @@ export class RoomManager {
   purge(): void {
     const now = this.now();
     for (const room of this.rooms.values()) if (this.expired(room)) this.deleteRoom(room);
-    const live = new Set([...this.rooms.values()].map((r) => r.file));
+    // A live room keeps its log AND its REVEAL_MODE night queue;
+    // everything else in the data dir is reaped on the same clock.
+    const live = new Set([...this.rooms.values()].flatMap((r) => [r.file, revealQueueFile(r.file)]));
     try {
       for (const entry of readdirSync(this.options.dataDir, { withFileTypes: true })) {
-        const match = entry.name.match(/^(\d{13})-[0-9a-f]{32}\.jsonl$/);
+        const roomLog = entry.name.match(/^(\d{13})-[0-9a-f]{32}\.jsonl$/);
+        const nightQueue = entry.name.match(/^(\d{13})-[0-9a-f]{32}\.reveals\.log$/);
+        const match = roomLog ?? nightQueue;
         if (!entry.isFile() || !match) continue;
         const file = join(this.options.dataDir, entry.name); if (live.has(file)) continue;
         try {
           const modified = statSync(file).mtimeMs;
-          if (now - Number(match[1]) >= RETENTION_HOURS * HOUR || now - modified >= IDLE_TTL_HOURS * HOUR) { unlinkSync(file); try { unlinkSync(metadataFile(file)); } catch { /* Legacy log without metadata. */ } }
+          if (now - Number(match[1]) >= RETENTION_HOURS * HOUR || now - modified >= IDLE_TTL_HOURS * HOUR) {
+            unlinkSync(file);
+            if (roomLog) try { unlinkSync(metadataFile(file)); } catch { /* Legacy log without metadata. */ }
+          }
         } catch { /* Retry next sweep; never delete unrelated files. */ }
       }
     } catch { /* Retry next sweep. */ }

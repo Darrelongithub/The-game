@@ -8,6 +8,8 @@ if (!/^\d+$/.test(rawPort) || !Number.isInteger(port) || port < 0 || port > 6553
   process.exit(1);
 }
 const server = createGameServer(); // the default production integration
+// REVEAL_MODE is optional and off by default; say so when it is on.
+if (server.rooms.revealMode === "finale") console.log("REVEAL_MODE=finale — per-round reveals are queued for the display's finale reel.");
 let closing = false;
 const shutdown = (): void => {
   if (closing) return;
