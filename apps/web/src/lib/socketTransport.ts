@@ -47,7 +47,7 @@ export class SocketTransport implements Transport {
   private socket: GameSocket | null = null;
   private handlers: TransportHandlers = {};
   private lastSeq = -1;
-  private lastJoin: { code: RoomCode; alias: string; playerId: PlayerId; secret: string; resumeNonce?: string } | null = null;
+  private lastJoin: { code: RoomCode; alias: string; playerId: PlayerId; secret: string; consent?: Consent; profile?: ProfileAnswers; resumeNonce?: string } | null = null;
   private resuming = false;
   private resumeWanted = false;
   private boundVisibility = false;
@@ -63,7 +63,7 @@ export class SocketTransport implements Transport {
   };
 
   constructor(private readonly ackTimeoutMs = ACK_TIMEOUT_MS) {
-    // sessionStorage is the source of truth for a reloaded tab.
+    // The persisted seat survives reloads; legacy tab sessions are migrated.
     const stored = loadSession();
     if (stored) {
       this.lastJoin = {
@@ -71,6 +71,8 @@ export class SocketTransport implements Transport {
         alias: stored.alias ?? "",
         playerId: stored.you,
         secret: stored.secret,
+        consent: stored.consent,
+        profile: stored.profile,
         ...(stored.resumeNonce && NONCE_PATTERN.test(stored.resumeNonce) && TOKEN_PATTERN.test(stored.secret) ? { resumeNonce: stored.resumeNonce } : {}),
       };
       this.resumeWanted = true;
@@ -204,7 +206,7 @@ export class SocketTransport implements Transport {
         } else resolve(r && typeof r.ok === "boolean" ? r : { ok: false, error: "Invalid server reply." });
       });
     });
-    this.remember(reply, alias);
+    this.remember(reply, alias, consent, profile);
     return reply;
   }
 
@@ -218,18 +220,18 @@ export class SocketTransport implements Transport {
         } else resolve(r && typeof r.ok === "boolean" ? r : { ok: false, error: "Invalid server reply." });
       });
     });
-    this.remember(reply, req.alias);
+    this.remember(reply, req.alias, req.consent, req.profile);
     return reply;
   }
 
-  private remember(reply: JoinReply & { code?: RoomCode }, alias: string): void {
+  private remember(reply: JoinReply & { code?: RoomCode }, alias: string, consent: Consent, profile?: ProfileAnswers): void {
     if (!reply?.ok || !reply.you || !reply.secret) return;
     const code = reply.code ?? reply.state?.code ?? this.lastJoin?.code;
     if (!code) return;
-    this.lastJoin = { code, alias, playerId: reply.you, secret: reply.secret };
+    this.lastJoin = { code, alias, playerId: reply.you, secret: reply.secret, consent, profile };
     this.resumeWanted = false;
     if (reply.state?.seq !== undefined) this.lastSeq = reply.state.seq;
-    saveSession({ code, you: reply.you, secret: reply.secret, alias });
+    saveSession({ code, you: reply.you, secret: reply.secret, alias, consent, profile });
   }
 
   async submit(req: SubmitRequest): Promise<{ ok: boolean; error?: string }> {
@@ -306,7 +308,7 @@ export class SocketTransport implements Transport {
     // never send a nonce that a reload cannot reproduce.
     if (!this.lastJoin.resumeNonce && TOKEN_PATTERN.test(this.lastJoin.secret)) {
       const nonce = resumeNonce();
-      if (nonce && saveSession({ code: this.lastJoin.code, you: this.lastJoin.playerId, secret: this.lastJoin.secret, alias: this.lastJoin.alias, resumeNonce: nonce })) {
+      if (nonce && saveSession({ code: this.lastJoin.code, you: this.lastJoin.playerId, secret: this.lastJoin.secret, alias: this.lastJoin.alias, consent: this.lastJoin.consent, profile: this.lastJoin.profile, resumeNonce: nonce })) {
         this.lastJoin.resumeNonce = nonce;
       }
     }
@@ -320,7 +322,8 @@ export class SocketTransport implements Transport {
       {
         roomCode: this.lastJoin.code,
         alias: this.lastJoin.alias || "Player",
-        consent: { age: true, terms: true, revealOptIn: true },
+        consent: this.lastJoin.consent ?? { age: true, terms: true, revealOptIn: false },
+        profile: this.lastJoin.profile,
         resume: { playerId: this.lastJoin.playerId, secret: proof },
       },
       (error, reply) => {
@@ -355,6 +358,8 @@ export class SocketTransport implements Transport {
             you: this.lastJoin.playerId,
             secret: reply.secret,
             alias: this.lastJoin.alias,
+            consent: this.lastJoin.consent,
+            profile: this.lastJoin.profile,
           });
         }
         this.handlers.onConnection?.(true, { resuming: false });

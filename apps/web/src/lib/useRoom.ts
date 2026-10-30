@@ -206,7 +206,7 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
       const roomCode = reply.code ?? reply.state?.code ?? null;
       if (roomCode) setCode(roomCode);
       if (reply.secret && roomCode) {
-        saveSession({ code: roomCode, you: reply.you, secret: reply.secret, alias });
+        saveSession({ code: roomCode, you: reply.you, secret: reply.secret, alias, consent, profile });
       }
       setHasSession(true);
     } else if (reply.error) {
@@ -224,7 +224,7 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
       setYou(reply.you);
       if (reply.state) setView(reply.state);
       setCode(roomCode);
-      if (reply.secret) saveSession({ code: roomCode, you: reply.you, secret: reply.secret, alias });
+      if (reply.secret) saveSession({ code: roomCode, you: reply.you, secret: reply.secret, alias, consent, profile });
       setHasSession(true);
     } else if (reply.error) {
       setError(reply.error);

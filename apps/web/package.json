@@ -16,7 +16,7 @@
     "test": "npm run typecheck && npm run test:ssr && npm run test:regressions && npm run test:transport",
     "test:live": "node scripts/live-socket-smoke.mjs",
     "test:browser": "node scripts/browser-flow.test.mjs",
-    "test:transport": "tsx --tsconfig scripts/tsconfig.test.json --test scripts/socket-transport.test.ts"
+    "test:transport": "tsx --tsconfig scripts/tsconfig.test.json --test scripts/socket-transport.test.ts scripts/r24-session.test.ts"
   },
   "dependencies": {
     "canvas-confetti": "1.9.4",
