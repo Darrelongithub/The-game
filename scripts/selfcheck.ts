@@ -7,7 +7,7 @@ import {
 } from "../packages/shared/src/validate.ts";
 import {
     ROUND_TIMERS_MS, TRAITS, HEAT_ORDER, SECRET_DECK_MAX, SECRET_HOLD_MS,
-    MAX_PROVIDER_CALLS_PER_NIGHT, type RoundKind,
+    MAX_PROVIDER_CALLS_PER_NIGHT, PICK_ROUNDS_PER_PHASE, SPARK_MIN_MUTUAL, CONSENSUS_MIN_PICKERS, type RoundKind,
 } from "../packages/shared/src/contracts.ts";
 
 let pass = 0, fail = 0;
@@ -65,6 +65,9 @@ ok("6 traits defined", TRAITS.length === 6);
 ok("4 heat phases in order", HEAT_ORDER.length === 4 && HEAT_ORDER[0] === "warmup" && HEAT_ORDER[3] === "dare");
 ok("secret deck config sane", SECRET_DECK_MAX >= 3 && SECRET_DECK_MAX <= 8 && SECRET_HOLD_MS >= 200 && SECRET_HOLD_MS <= 1000);
 ok("provider call cap sane", MAX_PROVIDER_CALLS_PER_NIGHT >= 5 && MAX_PROVIDER_CALLS_PER_NIGHT <= 12);
+ok("pick rounds per phase >= 2", PICK_ROUNDS_PER_PHASE >= 2);
+ok("spark requires at least 2 mutuals", SPARK_MIN_MUTUAL >= 2);
+ok("consensus picker threshold in 3..6", CONSENSUS_MIN_PICKERS >= 3 && CONSENSUS_MIN_PICKERS <= 6);
 
 console.log(fail === 0 ? `\nALL ${pass} CHECKS PASSED ✅ — safe to spawn agents` : `\n${fail} FAILED / ${pass} passed ❌ — fix before spawning`);
 process.exit(fail === 0 ? 0 : 1);
