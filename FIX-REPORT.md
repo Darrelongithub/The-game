@@ -317,6 +317,7 @@ This section records the R1–R20 status after reconciling with the latest `main
 - Prompts: **104/104** passed. Narrator: **81/81** passed. Web: **39 SSR checks**, all UI/socket/mock/privacy regressions, and **1/1** transport regression passed.
 - `npm run selfcheck`: **36 checks passed**.
 - `SMOKE_FAST=1 npm run smoke:verified`: passed; phases, public finale equality, secret ownership/limits, duplicate persistence, active/finale resume, dare pass, deletion, and live moments verified with keys disabled.
+- `npm run smoke:demo`: passed against the live server — 44 round events, 24 reveals, 48 ready-gate snapshots, and an 11-slide finale.
 - `npm run build`: passed (Next static export). `npm run bundle:check`: player **145.2 KiB gzip / 150 KiB**; display **115.7 KiB / 120 KiB**.
 
 ### Release disposition: **NO-GO / REQUIRES HUMAN**

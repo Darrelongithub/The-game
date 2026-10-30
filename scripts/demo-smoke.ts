@@ -21,6 +21,7 @@ type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 const address = process.env.SMOKE_URL ?? "http://localhost:3001";
 const timeoutMs = Number(process.env.SMOKE_TIMEOUT_MS ?? "180000");
 const consent = { age: true, terms: true, revealOptIn: true };
+const profile = { age: 28, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" as const };
 const timers: ReturnType<typeof setTimeout>[] = [];
 const later = (fn: () => void, ms: number): void => { const timer = setTimeout(fn, ms); timer.unref?.(); timers.push(timer); };
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => { const timer = setTimeout(resolve, ms); timer.unref?.(); timers.push(timer); });
@@ -44,7 +45,7 @@ async function connect(): Promise<GameSocket> {
 
 async function main(): Promise<void> {
   const host = await connect();
-  const demo = await new Promise<JoinReply & { code?: string }>((resolve) => host.emit("create", { alias: "Host", consent, demo: true }, resolve));
+  const demo = await new Promise<JoinReply & { code?: string }>((resolve) => host.emit("create", { alias: "Host", consent, profile, demo: true }, resolve));
   assert.equal(demo.ok, true, "demo room created");
   assert.equal(demo.state?.demo, true, "the room is a demo room");
 
@@ -82,8 +83,8 @@ async function main(): Promise<void> {
     if (round.youSubmitted || round.expectsAnswer === false) return;
     const value = round.kind === "pick" || round.kind === "verdict" ? { kind: "pick" as const, target: seats[0]! }
       : round.kind === "shout" ? { kind: "shout" as const, word: "solo" }
-      : round.kind === "rating" ? { kind: "rating" as const, trait: "warmth" as const, about: "self" as const, value: 7 }
-      : round.kind === "ios" ? { kind: "ios" as const, about: seats[0]!, value: 5 }
+      : round.kind === "rating" ? { kind: "rating" as const, trait: round.trait!, about: round.about!, value: 7 }
+      : round.kind === "ios" ? { kind: "ios" as const, about: round.about!, value: 5 }
       : round.kind === "minigame" ? { kind: "minigame" as const, score: 22 }
       : round.kind === "dare" || round.kind === "pair_dare" ? { kind: "dare" as const, status: "done" as const }
       : { kind: "text" as const, text: "One laptop, whole night." };
@@ -101,7 +102,7 @@ async function main(): Promise<void> {
 
   // A plain room must refuse the demo console outright.
   const plain = await connect();
-  const real = await new Promise<JoinReply & { code?: string }>((resolve) => plain.emit("create", { alias: "Plain", consent }, resolve));
+  const real = await new Promise<JoinReply & { code?: string }>((resolve) => plain.emit("create", { alias: "Plain", consent, profile }, resolve));
   assert.equal(real.ok, true);
   const refused = await new Promise<{ ok: boolean }>((resolve) => plain.emit("demo_add_player", { alias: "Nope" }, resolve));
   assert.equal(refused.ok, false, "demo controls do not exist in a real room");
