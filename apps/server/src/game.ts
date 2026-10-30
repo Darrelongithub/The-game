@@ -1042,7 +1042,8 @@ export class RoomManager {
         const alias = room.players.find((p) => p.id === id)?.alias ?? "Player";
         if (value.kind === "text") items.push({ alias, text: value.text });
         if (value.kind === "dare") items.push({ alias, text: value.status === "done" ? "Done" : `Passed: ${value.reason}` });
-        if (value.kind === "pick") items.push({ alias, text: "Submitted a pick." });
+        // R21: picks remain scoring/digest evidence, never generic reveal lines.
+        // Verdicts have their own anonymous aggregate reveal above.
       }
     }
     const alias = (id: string | undefined): string => room.players.find((p) => p.id === id)?.alias ?? "Player";
