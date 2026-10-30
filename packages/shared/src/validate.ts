@@ -1,6 +1,7 @@
 // packages/shared/src/validate.ts
 // Minimal runtime guards shared by server, engine, mock transport, and selfcheck.
 import {
+  CONFESS_NOTE_MAX,
   ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, MIN_PLAYERS, MAX_PLAYERS,
   TRAITS, type ResponseValue, type TraitId, type PlayerId,
 } from "./contracts.ts";
@@ -37,6 +38,12 @@ export function isResponseValue(v: unknown): v is ResponseValue {
       return typeof r.about === "string" && intInRange(r.value, 1, 7);
     case "minigame":
       return typeof r.score === "number" && Number.isFinite(r.score) && r.score >= 0 && r.score < 1000;
+    case "confess":
+      // A private self-report: yes/no, optional target, optional one-line note.
+      // No "skip": a non-answer never reaches the server at all.
+      return typeof r.yes === "boolean" &&
+        (r.target === undefined || (typeof r.target === "string" && r.target.length > 0)) &&
+        (r.note === undefined || (typeof r.note === "string" && r.note.trim().length > 0 && r.note.length <= CONFESS_NOTE_MAX));
     case "dare":
       return r.status === "done" ||
         (r.status === "passed" &&
@@ -53,6 +60,9 @@ export function isResponseValue(v: unknown): v is ResponseValue {
 export function targetsOther(v: ResponseValue, self: PlayerId): boolean {
   switch (v.kind) {
     case "pick":   return v.target !== self;
+    // A confession may name someone in the room or stay unaimed — but never
+    // yourself: the question is about your own life, not your own name.
+    case "confess": return v.target === undefined || v.target !== self;
     case "ios":    return v.about !== self;
     case "rating": return v.about === "self" ? true : v.about !== self;
     default:       return true; // text / shout / minigame / dare are not directed

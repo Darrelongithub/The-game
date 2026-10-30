@@ -9,7 +9,9 @@
       "room perception"
     ],
     "coding": "trust",
-    "asksTarget": false
+    "asksTarget": false,
+    "style": "group",
+    "twinId": "dc1"
   },
   {
     "id": "d2",
@@ -20,20 +22,22 @@
       "trust map"
     ],
     "coding": "trust",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "d3",
     "phase": "deep",
     "kind": "rating",
-    "text": "How honest have you been tonight? 1–10.",
+    "text": "How honest have you been tonight? 1\u201310.",
     "measures": [
       "trait:honesty",
       "honesty self-check",
       "blind-spot fuel"
     ],
     "coding": "neutral",
-    "asksTarget": false
+    "asksTarget": false,
+    "style": "group"
   },
   {
     "id": "d4",
@@ -44,7 +48,8 @@
       "hidden pride"
     ],
     "coding": "trust",
-    "asksTarget": false
+    "asksTarget": false,
+    "style": "group"
   },
   {
     "id": "d5",
@@ -55,7 +60,8 @@
       "growth witness"
     ],
     "coding": "friendship",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "d6",
@@ -67,20 +73,23 @@
       "vulnerability"
     ],
     "coding": "trust",
-    "asksTarget": false
+    "asksTarget": false,
+    "style": "group",
+    "twinId": "dc2"
   },
   {
     "id": "d7",
     "phase": "deep",
     "kind": "rating",
-    "text": "Rate {P4}'s warmth 1–10. They'll see it eventually.",
+    "text": "Rate {P4}'s warmth 1\u201310. They'll see it eventually.",
     "measures": [
       "trait:warmth",
       "peer warmth read",
       "trait agreement"
     ],
     "coding": "friction",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "d8",
@@ -91,7 +100,8 @@
       "group history"
     ],
     "coding": "friendship",
-    "asksTarget": false
+    "asksTarget": false,
+    "style": "group"
   },
   {
     "id": "d9",
@@ -102,7 +112,8 @@
       "trajectory"
     ],
     "coding": "couple",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "d10",
@@ -114,7 +125,8 @@
       "affection tags"
     ],
     "coding": "friendship",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "d11",
@@ -126,7 +138,8 @@
       "values reveal"
     ],
     "coding": "trust",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "d12",
@@ -138,20 +151,22 @@
       "quote material"
     ],
     "coding": "trust",
-    "asksTarget": false
+    "asksTarget": false,
+    "style": "group"
   },
   {
     "id": "d13",
     "phase": "deep",
     "kind": "rating",
-    "text": "Rate {P6}'s honesty, 1–10. They'll see your guess at the finale.",
+    "text": "Rate {P6}'s honesty, 1\u201310. They'll see your guess at the finale.",
     "measures": [
       "trait:honesty",
       "trait agreement",
       "blind-spot fuel"
     ],
     "coding": "trust",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "d14",
@@ -163,7 +178,8 @@
       "honesty read"
     ],
     "coding": "trust",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "d15",
@@ -175,6 +191,87 @@
       "room perception"
     ],
     "coding": "friendship",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
+  },
+  {
+    "id": "dc1",
+    "phase": "deep",
+    "kind": "confess",
+    "text": "Have you ever pretended to be fine in this room when you weren't?",
+    "measures": [
+      "self-report",
+      "mask signal"
+    ],
+    "coding": "trust",
+    "asksTarget": false,
+    "style": "confess",
+    "twinId": "d1"
+  },
+  {
+    "id": "dc2",
+    "phase": "deep",
+    "kind": "confess",
+    "text": "Have you ever cried alone after leaving a night with this group?",
+    "measures": [
+      "self-report",
+      "loneliness signal"
+    ],
+    "coding": "trust",
+    "asksTarget": false,
+    "style": "confess",
+    "twinId": "d6"
+  },
+  {
+    "id": "dc3",
+    "phase": "deep",
+    "kind": "confess",
+    "text": "Have you ever felt lonelier in this room than outside it?",
+    "measures": [
+      "self-report",
+      "belonging signal"
+    ],
+    "coding": "trust",
+    "asksTarget": false,
+    "style": "confess"
+  },
+  {
+    "id": "dc4",
+    "phase": "deep",
+    "kind": "confess",
+    "text": "Have you ever kept a secret from everyone here because you were scared of the answer?",
+    "measures": [
+      "self-report",
+      "secret signal"
+    ],
+    "coding": "trust",
+    "asksTarget": false,
+    "style": "confess"
+  },
+  {
+    "id": "dc5",
+    "phase": "deep",
+    "kind": "confess",
+    "text": "Have you ever wanted to tell someone here the truth and didn't?",
+    "measures": [
+      "self-report",
+      "honesty signal"
+    ],
+    "coding": "trust",
+    "asksTarget": true,
+    "style": "confess"
+  },
+  {
+    "id": "dc6",
+    "phase": "deep",
+    "kind": "confess",
+    "text": "Have you ever felt like you care more about this group than it cares about you?",
+    "measures": [
+      "self-report",
+      "reciprocity signal"
+    ],
+    "coding": "trust",
+    "asksTarget": false,
+    "style": "confess"
   }
 ]

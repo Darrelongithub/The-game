@@ -97,6 +97,9 @@ function PromptRound({ round, room, you, onSubmit, onVoteHeatDown }: PromptScree
   const trait = round.trait ?? '';
   const about = round.about ?? '';
 
+  // CONFESS: yes / no about YOURSELF. No skip — the timer takes "unanswered".
+  const [confessYes, setConfessYes] = useState<boolean | null>(null);
+  const [confessNote, setConfessNote] = useState('');
   const [taps, setTaps] = useState(0);
   const [voted, setVoted] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
@@ -158,6 +161,27 @@ function PromptRound({ round, room, you, onSubmit, onVoteHeatDown }: PromptScree
       {round.kind === 'verdict' && (votingOpen
         ? <div data-testid="verdict-pickgrid" className="answer-arrival space-y-4"><p className="text-sm text-white/70">Choose one person, then lock in your private vote.</p><div className="grid grid-cols-2 gap-3">{others.map(p => <GlowButton key={p.id} aria-pressed={selected === p.id} onClick={() => setSelected(p.id)} className={selected === p.id ? 'ring-2 ring-white ring-offset-2 ring-offset-[#100019]' : 'opacity-80'}>{p.alias}</GlowButton>)}</div><GlowButton className="w-full" disabled={!selected} onClick={() => void submit({ kind: 'pick', target: selected })}>Lock in answer</GlowButton></div>
         : <GlassCard data-testid="verdict-debate" className="text-center"><p className="font-display font-bold uppercase tracking-[0.14em]" style={{ fontSize: 'clamp(1.1rem, 5vw, 1.6rem)', color: 'var(--red-alert)' }}>Phones down. Argue it out.</p><DebateTimer deadline={round.voteOpensAt ?? 0}/><p className="mt-2 text-sm text-white/55">The vote opens when this hits zero. Nobody sees your pick.</p></GlassCard>)}
+      {round.kind === 'confess' && <GlassCard data-testid="confess-answer" className="space-y-4">
+        <p className="text-sm text-white/70">About you, not about anyone else. Only the count leaves this phone.</p>
+        <div className="grid grid-cols-2 gap-3">
+          <GlowButton aria-pressed={confessYes === true} onClick={() => setConfessYes(true)} className={confessYes === true ? 'ring-2 ring-white ring-offset-2 ring-offset-[#100019]' : 'opacity-80'}>Yes</GlowButton>
+          <GlowButton aria-pressed={confessYes === false} onClick={() => { setConfessYes(false); setSelected(''); }} className={confessYes === false ? 'ring-2 ring-white ring-offset-2 ring-offset-[#100019]' : 'opacity-80'}>No</GlowButton>
+        </div>
+        {confessYes === true && <div className="space-y-3">
+          <p className="text-sm text-white/70">Point at someone? Optional — and it stays private.</p>
+          <div className="grid grid-cols-2 gap-3">{others.map(p => <GlowButton key={p.id} aria-pressed={selected === p.id} onClick={() => setSelected(selected === p.id ? '' : p.id)} className={selected === p.id ? 'ring-2 ring-white ring-offset-2 ring-offset-[#100019]' : 'opacity-80'}>{p.alias}</GlowButton>)}</div>
+        </div>}
+        <div>
+          <label htmlFor="confess-note" className="text-sm text-white/70">One line, if you want one</label>
+          <input id="confess-note" className={`${field} mt-2`} maxLength={140} value={confessNote} onChange={e => setConfessNote(e.target.value)} placeholder="Optional" />
+        </div>
+        <GlowButton className="w-full" disabled={confessYes === null} onClick={() => void submit({
+          kind: 'confess', yes: confessYes === true,
+          ...(confessYes === true && selected ? { target: selected } : {}),
+          ...(confessNote.trim() ? { note: confessNote.trim() } : {}),
+        })}>Lock in answer</GlowButton>
+        <p className="text-xs text-white/45">No skip. If you leave it, the round closes without you — that is not a “no”.</p>
+      </GlassCard>}
       {round.kind === 'dare' && round.performer === you && <><p className="text-sm text-white/70">Your dare. You can pass, but give a reason.</p><GlowButton onClick={() => void submit({ kind: 'dare', status: 'done' })}>Done</GlowButton></>}
       {(round.kind === 'dare' || round.kind === 'pair_dare') && <><GlowButton className="border border-lime-accent/50 bg-none" onClick={() => setReasonOpen(true)}>I can&apos;t</GlowButton>{reasonOpen && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4" role="dialog" aria-modal="true" aria-labelledby="reason-title" onKeyDown={e => { e.stopPropagation(); if (e.key === 'Escape') setReasonOpen(false); }}><GlassCard className="w-full max-w-md bg-[#0d0617]"><h2 id="reason-title" className="text-xl font-bold">Why can&apos;t you?</h2><label htmlFor="reason" className="mt-3 block">A reason is required.</label><textarea autoFocus id="reason" maxLength={140} value={reason} onChange={e => setReason(e.target.value)} className={`${field} mt-2 min-h-28`}/><p className="text-sm text-white/60">{reason.length}/140</p><div className="mt-4 flex flex-wrap gap-2"><GlowButton disabled={!reason.trim()} onClick={() => void submit({ kind: 'dare', status: 'passed', reason: reason.trim() })}>Pass dare</GlowButton><GlowButton onClick={() => setReasonOpen(false)}>Cancel</GlowButton></div></GlassCard></div>}</>}
       {round.kind === 'pair_dare' && <GlassCard><p className="text-xl font-bold">You two—one shared dare.</p><p className="mt-2 text-white/70">Either of you can pass. If one passes, both phones must give a reason.</p><div className="my-4"><Clock deadline={round.closesAt - 30000} total={300}/></div><GlowButton onClick={() => void submit({ kind: 'dare', status: 'done' })}>We did it</GlowButton></GlassCard>}

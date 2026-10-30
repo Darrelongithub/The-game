@@ -25,7 +25,7 @@ async function setup(t: TestContext, fakeFetch: typeof fetch, services?: GameSer
   globalThis.fetch = fakeFetch;
   const dir = mkdtempSync(join(tmpdir(), "reveal-provider-test-"));
   const server = createGameServer({ dataDir: dir, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, graceMs: 0,
-    roundTimers: { spotlight: 300, verdict: 300 }, verdictDiscussMs: 0, services });
+    roundTimers: { spotlight: 300, verdict: 300, confess: 300 }, verdictDiscussMs: 0, services });
   const port = await server.listen(0, "127.0.0.1", false);
   const clients: Client[] = [];
   t.after(async () => {
@@ -55,8 +55,8 @@ test("real integration filters generated prompts and sends only pseudonymous pub
   const grokPayloads: string[] = [];
   const fakeFetch: typeof fetch = async (input, init) => {
     const url = String(input), body = String(init?.body ?? ""); calls.push({ url, body });
-    if (url.includes("x.ai")) {
-      const xaiCalls = calls.filter((call) => call.url.includes("x.ai")).length;
+    if (!url.includes("generativelanguage")) {
+      const xaiCalls = calls.filter((call) => !call.url.includes("generativelanguage")).length;
       if (xaiCalls === 4) generated();
       if (xaiCalls > 4) {
         const request = JSON.parse(body) as { messages?: { role: string; content: string }[] };
@@ -89,7 +89,8 @@ test("real integration filters generated prompts and sends only pseudonymous pub
   };
   const { connect, dir } = await setup(t, fakeFetch, services);
   const clients = await Promise.all([connect(), connect(), connect(), connect()]);
-  const aliases = ["Alice.*", "Brian", "Chao", "Zoë"];
+  // Keep aliases distinct from ordinary bank words such as "chaos".
+  const aliases = ["Alice.*", "Brian", "ChaoZed", "Zoë"];
   const first = await create(clients[0]!, aliases[0]!);
   const replies = [first];
   for (let i = 1; i < clients.length; i++) replies.push(await joinRoom(clients[i]!, first.code, aliases[i]!));
@@ -117,6 +118,7 @@ test("real integration filters generated prompts and sends only pseudonymous pub
         case "minigame": value = { kind: "minigame", score: 23 }; break;
         case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
         case "spotlight": value = { kind: "text", text: "Alice.* is enjoying this synthetic moment." }; break;
+        case "confess": value = { kind: "confess", yes: true }; break;
         case "verdict": value = { kind: "pick", target }; break;
       }
       const submit = () => clients[i]!.emit("submit", { roundId: round.roundId, clientUuid: `synthetic-${i}-${round.roundId}`, value }, (result) => { if (!result.ok) errors.push(result.error ?? "submission rejected"); });
@@ -130,13 +132,19 @@ test("real integration filters generated prompts and sends only pseudonymous pub
   assert.deepEqual(errors, []);
   assert.ok(rounds.some((round) => round.promptText === candidate), "a validated generated prompt is selected into an eligible slot");
   assert.ok(rounds.every((round) => !round.promptText.includes("shoplift")), "hard-blocked model output never reaches a phone");
-  assert.equal(calls.filter((call) => call.url.includes("x.ai")).length, 5, "four phase batches plus one Grok reveal request");
+  assert.equal(calls.filter((call) => call.url.includes("localhost:11434")).length, 4, "four local phase batches");
+  assert.equal(calls.filter((call) => call.url.includes("x.ai")).length, 1, "existing Grok reveal request is unchanged");
   assert.equal(calls.filter((call) => call.url.includes("generativelanguage")).length, 1, "Gemini is analysis-only; no reveal request is sent");
   assert.equal(grokPayloads.length, 1, "Grok receives the single validated narration request");
   assert.ok(observedTags && observedTags.public.length > 0 && observedTags.public.every((tags) => tags?.includes("contempt")), "completed public classification is available without affecting scores");
   assert.ok(observedTags.private.length > 0 && observedTags.private.every((tags) => tags === undefined), "private debriefs are never sent for classification");
   for (const { body } of calls) {
-    for (const alias of aliases) assert.ok(!body.normalize("NFC").toLowerCase().includes(alias.normalize("NFC").toLowerCase()), `alias ${alias} leaked to a provider`);
+    // Alias matching is TOKEN-based: "Chao" must not match the innocent word
+    // "chaos" inside ordinary digest copy.
+    for (const alias of aliases) {
+      const token = new RegExp(`(^|[^\\p{L}\\p{N}])${alias.normalize("NFC").toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u");
+      assert.ok(!token.test(body.normalize("NFC").toLowerCase()), `alias ${alias} leaked to a provider`);
+    }
     assert.ok(!body.includes("PRIVATE_DEBRIEF_"), "private debrief must not reach the public narrator");
   }
   assert.ok(!JSON.stringify(views).includes("PRIVATE_DEBRIEF_"));

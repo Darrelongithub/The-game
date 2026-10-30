@@ -19,11 +19,15 @@ NOTES/contract-requests.md        agents append; Agent Z resolves
 ## Setup (2 minutes)
 1. Put the UI code in `reference/ui-system.md` (the paste from your UI agent).
 2. Run `npx -y tsx scripts/selfcheck.ts` — must print ALL CHECKS PASSED.
-3. Copy `.env.example` → `.env`. Every key is OPTIONAL — no keys at all =
-   the handwritten bank runs the whole night, fully offline:
-   - `XAI_API_KEY` (console.x.ai) — Grok generates the unhinged prompts.
-   - `GEMINI_API_KEY` (aistudio.google.com/apikey) — higher-tier Gemini
-     analyzes the data + narrates the finale.
+3. Copy `.env.example` → `.env`. Every setting is optional. The handwritten
+   bank runs the whole night even if every provider is unavailable.
+   - **Local generation (no key):** install Ollama on the host laptop, start its
+     service, and run `ollama pull dolphin-mistral`. The Node server connects to
+     `GEN_BASE=http://localhost:11434/v1` using `GEN_MODEL=dolphin-mistral`.
+     Phones never connect directly to Ollama. After downloading the model,
+     generation requires no internet. See `RUNBOOK.md` for setup and fallback.
+   - Existing optional cloud analysis/reveal configuration is unchanged;
+     no cloud key is needed for local generation.
 
 ## Run it (game night)
 `npm run host` — builds the web app, starts the server on your LAN

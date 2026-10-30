@@ -26,6 +26,7 @@ export class LogBuilder {
     playerId: PlayerId,
     value: LogRecord["value"],
     latencyMs = 5000,
+    promptId?: string,
   ): void {
     this.seq++;
     this.log.push({
@@ -33,7 +34,7 @@ export class LogBuilder {
       roundId,
       playerId,
       roundKind,
-      promptId: `${roundId}-prompt`,
+      promptId: promptId ?? `${roundId}-prompt`,
       coding,
       value,
       at: BASE_AT + this.seq * 1000,
@@ -65,6 +66,26 @@ export class LogBuilder {
   }
   minigame(roundId: string, playerId: PlayerId, score: number): this {
     this.push(roundId, "minigame", "neutral", playerId, { kind: "minigame", score });
+    return this;
+  }
+  /** CONFESS: a private yes/no self-report (optional target, optional note). */
+  confess(
+    roundId: string,
+    playerId: PlayerId,
+    yes: boolean,
+    extra: { target?: PlayerId; note?: string; promptId?: string } = {},
+  ): this {
+    this.push(
+      roundId, "confess", "neutral", playerId,
+      {
+        kind: "confess",
+        yes,
+        ...(extra.target !== undefined ? { target: extra.target } : {}),
+        ...(extra.note !== undefined ? { note: extra.note } : {}),
+      },
+      5000,
+      extra.promptId,
+    );
     return this;
   }
   dare(roundId: string, playerId: PlayerId, status: "done" | "passed", reason?: string): this {
