@@ -142,6 +142,7 @@ function valueFor(bot: Bot, round: RoundView): ResponseValue {
     case 'dare': case 'pair_dare': return { kind: 'dare', status: 'done' };
     // Live moments (ROUND 3): a spotlight caption is a short text, a verdict is
     // a normal pick — the server opens the pick window only after the debate.
+    case 'confess': return { kind: 'confess', yes: index % 2 === 0 };
     case 'spotlight': return { kind: 'text', text: `Caption from ${bot.alias}.` };
     case 'verdict': return { kind: 'pick', target: target.id };
   }
