@@ -8,7 +8,7 @@
 // Design rules (reference/ui-system.md):
 //   • fluid type via clamp() so 320px phones and tablets both work
 //   • framer-motion stagger, killed entirely by prefers-reduced-motion
-//   • glass cards, grain, lime accent for the punchline
+//   • glass cards, grain and a soft purple accent for the punchline
 'use client'
 import React from 'react'
 import { motion } from 'framer-motion'
@@ -55,7 +55,7 @@ export function CaptionWall({
       <ul className="flex flex-col gap-2.5" data-testid="caption-stack">
         {captions.map((caption, index) => (
           <motion.li
-            key={`${index}-${caption.alias}`}
+            key={`${reduced ? 'still' : 'animated'}-${index}-${caption.alias}`}
             className="glass-card min-w-0 break-words px-4 py-3"
             data-testid="caption-item"
             initial={reduced ? false : { opacity: 0, y: 14 }}
@@ -72,9 +72,10 @@ export function CaptionWall({
 
       {punchline && (
         <motion.section
+          key={reduced ? 'still' : 'animated'}
           className="mt-auto rounded-2xl border px-4 py-6"
           data-testid="caption-punchline"
-          style={{ borderColor: 'var(--lime-accent)', background: 'rgba(182,255,60,0.06)' }}
+          style={{ borderColor: 'var(--lime-accent)', background: 'rgba(239,180,255,0.06)' }}
           initial={reduced ? false : { opacity: 0, scale: 0.94 }}
           animate={reduced ? { opacity: 1 } : { opacity: 1, scale: [0.94, 1.02, 1] }}
           transition={{ duration: reduced ? 0 : 0.5, delay: punchDelay, ease: easeOutExpo }}

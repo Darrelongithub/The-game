@@ -1,5 +1,4 @@
 import { createGameServer } from "./server.ts";
-import { createIntegratedServices } from "./integrated-services.ts";
 
 const host = process.env.HOST || "0.0.0.0";
 const rawPort = process.env.PORT ?? "3001";
@@ -8,7 +7,7 @@ if (!/^\d+$/.test(rawPort) || !Number.isInteger(port) || port < 0 || port > 6553
   console.error("PORT must be an integer from 0 to 65535.");
   process.exit(1);
 }
-const server = createGameServer({ services: createIntegratedServices() });
+const server = createGameServer(); // the default production integration
 let closing = false;
 const shutdown = (): void => {
   if (closing) return;

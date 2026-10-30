@@ -1,5 +1,9 @@
 # Fix & feature report — ROUND 3: LIVE GROUP MOMENTS
 
+> Historical report for PR #10. Subsequent integration adds the purple shell,
+> local earlier-answer callbacks, improved rating/IOS defaults and secure resume
+> retry. Real-device, LAN, live-provider and public-proxy testing remain open.
+
 Two new round kinds — **spotlight** ("everyone look at X") and **verdict**
 ("discuss it, then decide") — added to the working game. They are not more
 questions: they are MOMENTS that put the room's eyes on one person, or make

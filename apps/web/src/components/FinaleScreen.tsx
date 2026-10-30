@@ -177,7 +177,7 @@ function StatSlide({ slide, reduced }: { slide: FinaleSlide; reduced: boolean })
       {value !== null ? (
         <span
           className="tabular-nums font-display font-bold text-lime-accent leading-none"
-          style={{ fontSize: 'clamp(4rem, 18vw, 8rem)', textShadow: '0 0 60px rgba(182,255,60,0.4)' }}
+          style={{ fontSize: 'clamp(4rem, 18vw, 8rem)', textShadow: '0 0 60px rgba(239,180,255,0.4)' }}
           data-testid="stat-number"
         >
           {value}
@@ -341,7 +341,7 @@ export function FinaleScreen({
           <span className="text-[10.5px] uppercase tracking-[0.35em] text-white/50">it’s heating up</span>
           <h2
             className="font-display font-bold text-lime-accent text-display-lg text-center"
-            style={{ textShadow: '0 0 34px rgba(182,255,60,0.35)' }}
+            style={{ textShadow: '0 0 34px rgba(239,180,255,0.35)' }}
           >
             {slide.title}
           </h2>

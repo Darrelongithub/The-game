@@ -9,7 +9,7 @@ import { buildSkeleton, sourceOf } from "../src/slides.ts";
 import { narrateNight, writeFinale } from "../src/write.ts";
 import { applyAliasesToDecks, applyAliasesToSlides } from "../src/index.ts";
 import { parseJsonLoose } from "../src/gemini.ts";
-import { swapPseudonyms } from "../src/roster.ts";
+import { derivePseudonyms, scrubAliases, swapPseudonyms } from "../src/roster.ts";
 import { night, ROSTER } from "./fixtures.ts";
 
 const READY = (): {
@@ -80,6 +80,19 @@ const payloadOf = (call: Call): Record<string, unknown> => {
 
 const sortedDeck = (decks: Map<PlayerId, SecretCard[]>): Record<string, SecretCard[]> =>
   Object.fromEntries([...decks.entries()].sort(([a], [b]) => a.localeCompare(b)));
+
+describe("canonical alias privacy", () => {
+  it("scrubs Unicode-equivalent names while preserving unrelated verbatim text", () => {
+    const data = night();
+    const roster = [{ id: "p1", alias: "Zoë" }];
+    const ps = derivePseudonyms(data.results, data.digest, roster);
+    assert.equal(scrubAliases("Zoe\u0308 told me co\u0308operate", ps, roster), "Player 1 told me co\u0308operate");
+    assert.equal(scrubAliases("A totally unrelated co\u0308operative", ps, roster), "A totally unrelated co\u0308operative");
+    const otherRoster = [{ id: "p1", alias: "İris" }, { id: "p2", alias: "ΟΣ" }];
+    const other = derivePseudonyms(data.results, data.digest, otherRoster);
+    assert.equal(scrubAliases("İris and ος", other, otherRoster), "Player 1 and Player 2");
+  });
+});
 
 describe("no key — the whole show runs on the engine", () => {
   it("makes zero network calls and returns the skeleton untouched", async () => {
@@ -254,6 +267,33 @@ describe("one call, right lane", () => {
     }
     const payload = payloadOf(calls[0] as Call);
     assert.match(JSON.stringify(payload["digest"]), /Player \d+/);
+  });
+
+  it("scrubs aliases from prebuilt slides, claims, running gags and card copy before sending", async () => {
+    const data = night();
+    data.digest.quotes[0]!.text = "Zedward would fight a bus for this group.";
+    data.digest.dodges[0]!.reason = "Zed had other plans.";
+    data.digest.runningGags[0]!.word = "Zed";
+    data.results.claims.find((claim) => claim.id === "c-ship")!.evidence.push("Zed was mentioned in evidence.");
+    data.decks.get("p1")![0]!.facts.push("Zed was mentioned in a card.");
+    const skeleton = buildSkeleton(data.results, data.digest, ROSTER);
+    assert.ok(skeleton.some((slide) => slide.body?.includes("Zed")), "fixture must exercise a prebuilt slide");
+    const { impl, calls } = mockFetch(() => envelope({}));
+    const out = await writeFinale(skeleton, data.decks, data.results, data.digest, {
+      apiKey: "test-key", fetchImpl: impl, roster: ROSTER,
+    });
+    const payload = JSON.stringify(payloadOf(calls[0] as Call));
+    assert.doesNotMatch(payload, /Zed/i, "every provider-bound free-text field must be pseudonymized");
+    assert.match(payload, /Player 2/);
+    assert.ok(out.slides.some((slide) => slide.body?.includes("Zed")), "fallback copy remains unchanged locally");
+  });
+
+  it("does not send unidentifiable free text when the roster is missing", async () => {
+    const { skeleton, decks, night: data } = READY();
+    const { impl, calls } = mockFetch(() => envelope({}));
+    const out = await writeFinale(skeleton, decks, data.results, data.digest, { apiKey: "test-key", fetchImpl: impl });
+    assert.equal(calls.length, 0);
+    assert.deepEqual(out.slides, skeleton);
   });
 
   it("scrubs an alias a player typed into a quote", async () => {

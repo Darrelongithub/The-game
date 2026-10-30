@@ -8,7 +8,9 @@ export function prefersReducedMotion(): boolean {
 }
 
 export function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState<boolean>(prefersReducedMotion)
+  // Match the server's first render; the effect applies the browser setting
+  // immediately after hydration. CSS also suppresses motion before that.
+  const [reduced, setReduced] = useState(false)
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
     let mq: MediaQueryList

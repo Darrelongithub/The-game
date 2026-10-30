@@ -23,7 +23,7 @@ export function AnimatedWords({
             key={i}
             variants={wordItem}
             className={isHighlight ? 'text-lime-accent' : 'text-white'}
-            style={isHighlight ? { textShadow: '0 0 24px rgba(182,255,60,0.6)' } : undefined}
+            style={isHighlight ? { textShadow: '0 0 24px rgba(222,105,255,0.55)' } : undefined}
           >
             {word}
           </motion.span>

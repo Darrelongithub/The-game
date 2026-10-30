@@ -119,6 +119,46 @@ test("timer honors grace, skip advances, and reconnect restores the personalized
   assert.ok((await limit(secondReveal)).items?.[0]?.text.includes("vibes"));
 });
 
+test("a lost rotation acknowledgement is recoverable only on its authenticated socket", async (t) => {
+  const { connect } = await setup(t);
+  const host = await connect(), attacker = await connect();
+  const made = await create(host);
+  const old = { playerId: made.you!, secret: made.secret! };
+  const rotated = await joinRoom(host, made.code!, "Host", old);
+  assert.ok(rotated.ok && rotated.secret && rotated.secret !== old.secret);
+  // Treat the first acknowledgement as lost: the same authenticated socket
+  // retries with the token it still knows and receives the identical result.
+  const retry = await joinRoom(host, made.code!, "Host", old);
+  assert.equal(retry.ok, true); assert.equal(retry.secret, rotated.secret);
+  assert.equal((await joinRoom(attacker, made.code!, "Host", old)).ok, false, "old tokens cannot resume on another socket");
+  const replaced = await joinRoom(attacker, made.code!, "Host", { playerId: made.you!, secret: rotated.secret! });
+  assert.ok(replaced.ok && replaced.secret !== rotated.secret);
+  const third = await connect();
+  assert.equal((await joinRoom(third, made.code!, "Host", { playerId: made.you!, secret: rotated.secret! })).ok, false);
+});
+
+test("a nonce-bound lost rotation acknowledgement survives a new socket without accepting the old token alone", async (t) => {
+  const { connect } = await setup(t);
+  const host = await connect(), first = await connect(), attacker = await connect();
+  const made = await create(host);
+  const nonce = "1a".repeat(16);
+  const attempt = { playerId: made.you!, secret: `rr1.${made.secret!}.${nonce}` };
+  // Drop the acknowledgement entirely, then disconnect the authenticated
+  // socket. The client knows only its original secret and its private nonce.
+  const accepted = event(first, "state");
+  first.emit("join", { roomCode: made.code!, alias: "Host", consent, resume: attempt }, undefined as any);
+  await limit(accepted);
+  assert.equal((await joinRoom(attacker, made.code!, "Host", { playerId: made.you!, secret: made.secret! })).ok, false, "the old bearer token alone stays invalid");
+  assert.equal((await joinRoom(attacker, made.code!, "Host", { playerId: made.you!, secret: `rr1.${made.secret!}.${"2b".repeat(16)}` })).ok, false, "a guessed nonce cannot replay the request");
+  first.disconnect();
+  const retrySocket = await connect();
+  const retry = await joinRoom(retrySocket, made.code!, "Host", attempt);
+  assert.ok(retry.ok && retry.secret && retry.secret !== made.secret, "the exact pending request recovers the rotation");
+  const next = await joinRoom(retrySocket, made.code!, "Host", { playerId: made.you!, secret: `rr1.${retry.secret}.${"3c".repeat(16)}` });
+  assert.ok(next.ok && next.secret !== retry.secret);
+  assert.equal((await joinRoom(attacker, made.code!, "Host", attempt)).ok, false, "a later rotation retires the old nonce");
+});
+
 test("majority heat-down lowers exactly one level; repeated votes do not count twice", async (t) => {
   const { connect } = await setup(t, { roundTimers: { pick: 10000, shout: 10000, minigame: 10000, spotlight: 10000, verdict: 10000 }, verdictDiscussMs: 0, graceMs: 1000, revealHoldMs: 10000, interludeHoldMs: 10000 });
   const clients = await Promise.all(Array.from({length:5}, () => connect()));
@@ -168,4 +208,33 @@ test("hourly purge rules delete expired rooms and orphan files, not unrelated fi
   utimesSync(stale, new Date(now - 49 * 3600000), new Date(now - 49 * 3600000));
   const deleted = event<void>(host, "deleted"); now += 25 * 3600000; server.rooms.purge();
   await limit(deleted); assert.deepEqual(readdirSync(dir), ["my-notes.jsonl"]);
+});
+
+test("an idle room cannot be revived on access at the 24-hour TTL", async (t) => {
+  let now = Date.now();
+  const { connect, dir } = await setup(t, { now: () => now });
+  const host = await connect(), guest = await connect(), made = await create(host);
+  now += 24 * 3600000;
+  const deleted = event<void>(host, "deleted");
+  const reply = await joinRoom(guest, made.code!, "Guest");
+  assert.equal(reply.ok, false, "joining must not extend an already-expired room");
+  await limit(deleted);
+  assert.deepEqual(readdirSync(dir), []);
+});
+
+test("an active room cannot be revived on access after the 48-hour hard limit", async (t) => {
+  let now = Date.now();
+  const { connect, dir } = await setup(t, { now: () => now });
+  const host = await connect(), guest = await connect(), made = await create(host);
+  for (const count of [2, 3]) {
+    now += 23 * 3600000;
+    const changed = event<any>(host, "state", (state) => state.players.length === count);
+    host.emit("add_bot"); await limit(changed);
+  }
+  now += 2 * 3600000;
+  const deleted = event<void>(host, "deleted");
+  const reply = await joinRoom(guest, made.code!, "Guest");
+  assert.equal(reply.ok, false, "activity cannot extend the 48-hour retention deadline");
+  await limit(deleted);
+  assert.deepEqual(readdirSync(dir), []);
 });

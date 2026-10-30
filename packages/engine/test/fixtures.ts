@@ -88,7 +88,7 @@ export const meta5 = (roomId: string, revealOptIn: PlayerId[] = ["p1", "p2", "p3
 });
 
 // ---------------------------------------------------------------------------
-// GOLDEN FIXTURE 1 — ship (p1,p2)+(p3,p4), besties (p3,p4)+(p1,p5),
+// GOLDEN FIXTURE 1 — ship (p1,p2)+(p3,p4), besties (p3,p4),
 // spark p1–p2, consensus C2→p1, blindspot p3 loyalty, one-sided p5→p1.
 // ---------------------------------------------------------------------------
 export function goldenLog1(): LogRecord[] {

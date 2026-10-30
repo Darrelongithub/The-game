@@ -11,8 +11,11 @@
     "typecheck": "tsc --noEmit",
     "test:mock": "npx -y tsx --tsconfig scripts/tsconfig.test.json scripts/mock-flow.test.ts",
     "test:ssr": "npx -y tsx --tsconfig scripts/tsconfig.test.json scripts/ssr-smoke.test.ts",
-    "test": "npm run typecheck && npm run test:ssr",
+    "test:regressions": "npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/regressions.tsx && npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/socket-regressions.ts && npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/transport-timeouts.ts && npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/mock-regressions.ts && npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/app-privacy-regression.tsx",
+    "test:components": "npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/run.tsx",
+    "test": "npm run typecheck && npm run test:ssr && npm run test:regressions && npm run test:transport",
     "test:live": "node scripts/live-socket-smoke.mjs",
+    "test:browser": "node scripts/browser-flow.test.mjs",
     "test:transport": "tsx --tsconfig scripts/tsconfig.test.json --test scripts/socket-transport.test.ts"
   },
   "dependencies": {
@@ -30,6 +33,8 @@
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
     "autoprefixer": "^10.4.20",
+    "jsdom": "^26.1.0",
+    "playwright-core": "^1.64.1",
     "postcss": "^8.5.1",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.7.3"
