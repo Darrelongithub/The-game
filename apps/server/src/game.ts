@@ -575,10 +575,15 @@ export function buildLookChainCase(input: {
   now: number;
   rand: () => number;
   variant: LookChainVariant;
+  /** Players who have already acted in a chain tonight. */
+  acted?: ReadonlySet<PlayerId>;
 }): Case | undefined {
-  const { room, index, aliasOf, now, rand, variant } = input;
+  const { room, index, aliasOf, now, rand, variant, acted } = input;
   if (room.order.length < 2) return undefined;
-  const actor = room.order[Math.floor(rand() * room.order.length)]!;
+  // Everybody gets a turn before anybody gets a second one.
+  const fresh = room.order.filter((id) => !acted?.has(id));
+  const pool = fresh.length > 0 ? fresh : room.order;
+  const actor = pool[Math.floor(rand() * pool.length)]!;
   const actorAlias = aliasOf(actor);
   const guessers = room.order.filter((id) => id !== actor);
   if (guessers.length === 0) return undefined;

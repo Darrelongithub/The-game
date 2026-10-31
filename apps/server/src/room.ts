@@ -325,6 +325,9 @@ export class RoomManager {
     const cases: Case[] = [];
     const now = this.now();
     let chainIndex = 0;
+    // Players who have already acted in a chain — a second turn only after
+    // everybody has had one.
+    const chainActors = new Set<PlayerId>();
     const shipCount = shipVotesFor(room.order.length);
     const dareCount = daresFor(room.order.length);
     const caseCount = room.totalCases;
@@ -373,7 +376,9 @@ export class RoomManager {
         chainIndex += 1;
         built = buildLookChainCase({
           room, index, aliasOf: (id) => this.aliasOf(room, id), now, rand: this.rand, variant,
+          acted: chainActors,
         });
+        if (built?.subjectId) chainActors.add(built.subjectId);
       } else {
         built = buildCase({
           room,

@@ -174,10 +174,17 @@ export function slideForStat(digest: NightDigest, ps: Pseudonyms): FinaleSlide |
     beat: "tease",
     flavor: "stat",
     title: "Quickest in the room",
-    body: clip(`${who} answered in ${(fastest.ms / 1000).toFixed(1)}s.`, NARRATOR_TUNING.bodyMaxChars),
+    body: clip(`${who} answered in ${formatSeconds(fastest.ms)}.`, NARRATOR_TUNING.bodyMaxChars),
     numbers: { ms: fastest.ms },
   };
   return registerSource(slide, { kind: "stat" });
+}
+
+/** Seconds, but never a silly "0.0s". */
+function formatSeconds(ms: number): string {
+  const seconds = ms / 1000;
+  if (seconds < 0.1) return "less than a second";
+  return `${seconds.toFixed(1)}s`;
 }
 
 /**

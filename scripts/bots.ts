@@ -15,6 +15,8 @@
  * Run: npm run smoke
  *   SMOKE_URL, SMOKE_ROOM and SMOKE_HOST_TOKEN run it against a live server;
  *   without them the smoke test starts its own server.
+ *   SMOKE_SHOWCASE=1 prints the reveal and the private decks, so a human can
+ *   read the night instead of only watching it pass.
  */
 import { strict as assert } from "node:assert";
 import { io, type Socket } from "socket.io-client";
@@ -274,6 +276,21 @@ async function main(): Promise<void> {
     for (const bot of bots) {
       if (!bot.deck) continue;
       check(bot.deck.cards.length <= 6, "a deck never holds more than six cards");
+    }
+
+    if (process.env.SMOKE_SHOWCASE) {
+      console.log("\n--- THE REVEAL ---");
+      for (const slide of bots[0]!.finale!.slides) {
+        console.log(`\n[${slide.beat}/${slide.flavor}] ${slide.title}`);
+        console.log(slide.body);
+      }
+      console.log("\n--- THE PRIVATE DECKS ---");
+      for (const bot of bots) {
+        console.log(`\n${bot.alias}:`);
+        for (const card of bot.deck?.cards ?? []) {
+          console.log(`  - [${card.kind}] ${card.facts.join(" ")}`);
+        }
+      }
     }
 
     console.log("smoke: the night played out — the reveal reached every phone");
