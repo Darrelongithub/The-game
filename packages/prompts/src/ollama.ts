@@ -6,26 +6,33 @@
 //   GEN_MODEL      default dolphin-mistral
 //   GEN_TIMEOUT_MS default 120000
 //
+// THE ROOM'S REAL NAMES ARE IN THE PROMPT. The bank writes {P1}..{Pn} slots;
+// fillNames() writes the actual display names into them before the request, so
+// the model reads "Do you think Wanjiru would sleep with Kofi?" — this is a
+// party, not a form — and restoreNames() puts the slots back before a line is
+// kept, so the deal can still bind it to whoever the case is about. A line that
+// ends up naming nobody in the room is dropped. The name the model reads is
+// the roster's own; the SLOT is what is stored, so the question stays true
+// whoever it finally lands on — tonight the model is here for the wording, not
+// for the casting.
+//
 // WHAT THE MODEL IS ALLOWED TO DO (and nothing else):
-//   1. REPHRASE a bank prompt, keeping its {P1}..{Pn} slots. The slots are
-//      bound to real players at deal time, so a rephrased prompt is still
-//      about someone actually in the room.
-//   2. WRITE a one-line verdict from the night's data.
+//   1. REPHRASE a bank prompt — the night's questions and its dares.
 //
 // WHAT IT MAY NOT DO:
-//   • Invent a new kind of question that is not in the bank.
+//   • Invent a kind of question the bank does not play.
 //   • Name a person who is not in the room.
 //   • Emit a refusal, an "as an AI" disclaimer, a repeat, or a line over
 //     MAX_PROMPT_CHARS.
 //
-// ON ANY FAILURE the bank prompt is used unchanged. The bank carries the
-// night; Ollama only makes it sharper.
+// Reading the answers and writing the reveal is NOT this lane's job: that is
+// Gemini (provider.ts, called by the narrator). ON ANY FAILURE the bank prompt
+// is used unchanged — the bank carries the night, Ollama only sharpens it.
 import {
   BAND_ORDER,
   MAX_PROMPT_CHARS,
   type Band,
   type MetricKey,
-  type PlayerId,
   type Prompt,
   type PromptRole,
   type RoundKind,
@@ -202,17 +209,53 @@ export interface OllamaResult {
   status?: number;
 }
 
+/**
+ * Write the room's real display names into a bank line's {Pn} slots. Slots
+ * outside the roster (a four-player room asked for {P7}) stay as slots, and the
+ * validator will not accept them — the bank line stands instead.
+ */
+export function fillNames(text: string, names: readonly string[]): string {
+  if (names.length === 0) return text;
+  return text.replace(/\{P(\d+)\}/g, (whole, digits: string) => {
+    const i = parseInt(digits, 10) - 1;
+    return i >= 0 && i < names.length ? names[i] ?? whole : whole;
+  });
+}
+
+const escapeRe = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Put the {Pn} slots back wherever the model wrote a player's name. Longest
+ * names first, so "Kamau" is matched before "Kam"; word-bounded, so "Or"
+ * cannot carve up "orange". The slot number is the roster position.
+ */
+export function restoreNames(text: string, names: readonly string[]): string {
+  let out = text;
+  const ordered = names
+    .map((name, i) => ({ name: name.trim(), slot: `{P${i + 1}}` }))
+    .filter((entry) => entry.name.length >= 2)
+    .sort((a, b) => b.name.length - a.name.length);
+  for (const entry of ordered) {
+    out = out.replace(
+      new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRe(entry.name)}(?![\\p{L}\\p{N}_])`, "giu"),
+      entry.slot,
+    );
+  }
+  return out;
+}
+
 /** The system prompt for the rephrase job. It is deliberately narrow. */
 export function rephraseSystemPrompt(): string {
   return [
     "You rewrite party-game questions for adults who all know each other.",
     "Rules:",
     "- Keep the meaning of the question you are given. Change only the wording.",
-    `- Keep every {P1}..{P11} placeholder exactly as it is written.`,
+    "- Every line names real people in this room. Keep every one of those names, spelled exactly as given, and keep the question about the same people.",
+    "- You may write {P1}, {P2} … instead of a name; those slots are the same players.",
     `- Output ONE question per line. No numbering, no bullets, no quotes, no explanation.`,
     `- Each line must be at most ${MAX_PROMPT_CHARS} characters.`,
-    "- Ask about a person or people in the room. Never ask about strangers.",
-    "- Be blunt, funny and a bit rude. Never write anything cruel about a real person.",
+    "- Ask about a person or people in the room. Never bring in anyone who is not in the room.",
+    "- Be blunt, funny and a bit rude.",
     "- Never mention being an AI, never explain yourself, never refuse.",
     "- Never repeat a question that is already in the list.",
   ].join("\n");
@@ -225,7 +268,7 @@ export function rephraseSystemPrompt(): string {
 export function rephraseUserPrompt(seedTexts: readonly string[]): string {
   const lines = seedTexts.map((t, i) => `${i + 1}. ${t}`).join("\n");
   return [
-    "Rewrite each of these questions. One rewritten question per line, same order, same meaning, same placeholders.",
+    "Rewrite each of these questions. One rewritten question per line, same order, and keep every person's name.",
     "",
     lines,
   ].join("\n");
@@ -394,6 +437,8 @@ export async function generateNightWithOllama(
     config: OllamaConfig;
     playerCount: number;
     seed: number;
+    /** The room's display names, in roster order — written into the request. */
+    aliases?: readonly string[];
     fetchImpl?: OllamaFetch | null;
     now?: () => number;
     safetyCapMs?: number;
@@ -422,12 +467,16 @@ export async function generateNightWithOllama(
 
     const asked = seeds.length;
     const shuffled = seededShuffle(seeds, opts.seed);
+    const names = opts.aliases ?? [];
     const result = await callOllama(
       opts.config,
       {
         messages: [
           { role: "system", content: rephraseSystemPrompt() },
-          { role: "user", content: rephraseUserPrompt(shuffled.map((s) => s.text)) },
+          {
+            role: "user",
+            content: rephraseUserPrompt(shuffled.map((s) => fillNames(s.text, names))),
+          },
         ],
         temperature: 0.95,
         maxTokens: 1_600,
@@ -453,7 +502,10 @@ export async function generateNightWithOllama(
     const lines = parseLines(result.text);
     for (let i = 0; i < shuffled.length; i++) {
       const seed = shuffled[i]!;
-      const candidate = lines[i];
+      const written = lines[i];
+      // The model was handed real names and may have written them back; the
+      // bank stores slots, so put the slots back before anything is kept.
+      const candidate = written === undefined ? undefined : restoreNames(written, names);
       if (!candidate) {
         reasons["missing"] = (reasons["missing"] ?? 0) + 1;
         dropped += 1;
@@ -511,36 +563,3 @@ export function formatReasons(reasons: Record<string, number>): string {
   if (entries.length === 0) return "none";
   return entries.map(([reason, n]) => `${reason}:${n}`).join(", ");
 }
-
-/**
- * One-line verdict text from the night's data. The model may only restate
- * what the data says, in one sentence, naming a real player.
- */
-export function verdictSystemPrompt(): string {
-  return [
-    "You write one short, funny verdict about a party of friends.",
-    "- Output ONE sentence. No preamble, no quotes, no explanation.",
-    "- Use only the names and numbers given to you. Never invent a number.",
-    "- Never say 'as an AI', never explain yourself, never refuse.",
-    `- At most ${MAX_PROMPT_CHARS} characters.`,
-  ].join("\n");
-}
-
-/** Validate a generated verdict line. Same four drop reasons. */
-export function validateVerdictLine(
-  text: string,
-  ctx: { playerCount: number; allowedNames: readonly string[]; seen: ReadonlySet<string> },
-): OllamaValidation {
-  const raw = (text ?? "").trim();
-  if (raw.length === 0) return { ok: false, reason: "refusal", detail: "empty" };
-  if (raw.length > MAX_PROMPT_CHARS) return { ok: false, reason: "too-long", detail: `${raw.length} chars` };
-  if (isRefusal(raw)) return { ok: false, reason: "refusal", detail: "refusal or AI disclaimer" };
-  const namesPlayer = ctx.allowedNames.some((n) => n.length > 0 && raw.includes(n));
-  if (!namesPlayer) return { ok: false, reason: "not-in-room", detail: "no real player named" };
-  const norm = normalizeForMatch(raw);
-  if (ctx.seen.has(norm)) return { ok: false, reason: "repeat", detail: "same as an earlier line" };
-  return { ok: true };
-}
-
-/** All the player ids in the room — used to check that a line names someone real. */
-export const roomPlayerIds = (ids: readonly PlayerId[]): PlayerId[] => [...ids];

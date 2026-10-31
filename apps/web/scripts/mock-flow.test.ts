@@ -30,7 +30,7 @@ test("the mock walks a whole v3.2 night", { timeout: 20_000 }, async () => {
     roomCode: "MOCK",
     alias: "Wanjiru",
     consent: { age: true, terms: true },
-    profile: { age: 27, gender: "woman", sexuality: "straight", attractedTo: "women", lookingFor: "fun" },
+    profile: { age: 27, gender: "woman", sexuality: "straight", attractedTo: "women" },
   });
   assert.equal(joined.ok, true);
   assert.ok(joined.you);

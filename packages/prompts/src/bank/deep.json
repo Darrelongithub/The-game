@@ -1,5 +1,5 @@
 [
-  {
+{
     "id": "dp-01",
     "band": "deep",
     "role": "observer_subject",
@@ -8,8 +8,8 @@
     "measures": ["flavour:friction"],
     "coding": "friction",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-02",
     "band": "deep",
     "role": "subject",
@@ -18,8 +18,8 @@
     "measures": ["flavour:confession"],
     "coding": "status",
     "asksTarget": false
-  },
-  {
+},
+{
     "id": "dp-03",
     "band": "deep",
     "role": "group",
@@ -28,8 +28,8 @@
     "measures": ["metric:secret"],
     "coding": "friction",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-04",
     "band": "deep",
     "role": "group",
@@ -38,18 +38,21 @@
     "measures": ["metric:trust"],
     "coding": "friendship",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-05",
     "band": "deep",
     "role": "observer_subject",
     "kind": "pick",
     "text": "Who do you think {P1} would take a bullet for?",
-    "measures": ["metric:trust", "guess"],
+    "measures": [
+        "metric:trust",
+        "guess"
+    ],
     "coding": "friendship",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-06",
     "band": "deep",
     "role": "observer_subject",
@@ -58,8 +61,8 @@
     "measures": ["flavour:couple"],
     "coding": "couple",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-07",
     "band": "deep",
     "role": "group",
@@ -68,8 +71,8 @@
     "measures": ["metric:betrayal"],
     "coding": "friction",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-08",
     "band": "deep",
     "role": "group",
@@ -78,8 +81,8 @@
     "measures": ["metric:ex"],
     "coding": "friction",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-09",
     "band": "deep",
     "role": "subject",
@@ -88,28 +91,34 @@
     "measures": ["metric:crush"],
     "coding": "couple",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-10",
     "band": "deep",
     "role": "observer_pair",
     "kind": "text",
     "text": "What is the tension between {P1} and {P2} really about?",
-    "measures": ["metric:betrayal", "guess"],
+    "measures": [
+        "metric:betrayal",
+        "guess"
+    ],
     "coding": "rivalry",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-11",
     "band": "deep",
     "role": "observer_subject",
     "kind": "pick",
     "text": "Who do you think {P1} would betray first if it meant everyone else was safe?",
-    "measures": ["metric:betrayal", "guess"],
+    "measures": [
+        "metric:betrayal",
+        "guess"
+    ],
     "coding": "friction",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-12",
     "band": "deep",
     "role": "group",
@@ -118,8 +127,8 @@
     "measures": ["metric:is-fake"],
     "coding": "friction",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-13",
     "band": "deep",
     "role": "observer_subject",
@@ -128,8 +137,8 @@
     "measures": ["flavour:friction"],
     "coding": "friction",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-14",
     "band": "deep",
     "role": "subject",
@@ -138,8 +147,8 @@
     "measures": ["flavour:confession"],
     "coding": "status",
     "asksTarget": false
-  },
-  {
+},
+{
     "id": "dp-15",
     "band": "deep",
     "role": "group",
@@ -148,8 +157,8 @@
     "measures": ["metric:money"],
     "coding": "status",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-16",
     "band": "deep",
     "role": "observer_subject",
@@ -159,8 +168,8 @@
     "measures": ["trait:loyalty"],
     "coding": "trust",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-17",
     "band": "deep",
     "role": "subject",
@@ -170,38 +179,47 @@
     "measures": ["trait:loyalty"],
     "coding": "trust",
     "asksTarget": false
-  },
-  {
+},
+{
     "id": "dp-18",
     "band": "deep",
     "role": "observer_subject",
     "kind": "pick",
     "text": "Who do you think {P1} is closest to in this room?",
-    "measures": ["metric:closest", "guess"],
+    "measures": [
+        "metric:closest",
+        "guess"
+    ],
     "coding": "friendship",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-19",
     "band": "deep",
     "role": "group",
     "kind": "pick",
     "text": "Who here is holding a grudge right now?",
-    "measures": ["metric:would-snitch", "guess"],
+    "measures": [
+        "metric:would-snitch",
+        "guess"
+    ],
     "coding": "rivalry",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-20",
     "band": "deep",
     "role": "observer_subject",
     "kind": "text",
     "text": "What is the worst thing {P1} has ever done to a friend?",
-    "measures": ["metric:ruin-friendship", "guess"],
+    "measures": [
+        "metric:ruin-friendship",
+        "guess"
+    ],
     "coding": "friction",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-21",
     "band": "deep",
     "role": "group",
@@ -210,8 +228,8 @@
     "measures": ["metric:trust"],
     "coding": "trust",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-22",
     "band": "deep",
     "role": "solo",
@@ -220,28 +238,34 @@
     "measures": ["flavour:confession"],
     "coding": "status",
     "asksTarget": false
-  },
-  {
+},
+{
     "id": "dp-23",
     "band": "deep",
     "role": "observer_pair",
     "kind": "text",
     "text": "Could {P1} and {P2} be honest with each other for one full night? Why?",
-    "measures": ["metric:trust", "guess"],
+    "measures": [
+        "metric:trust",
+        "guess"
+    ],
     "coding": "friendship",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-24",
     "band": "deep",
     "role": "observer_subject",
     "kind": "pick",
     "text": "Who would {P1} go to war with?",
-    "measures": ["metric:ruin-friendship", "guess"],
+    "measures": [
+        "metric:ruin-friendship",
+        "guess"
+    ],
     "coding": "friction",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-25",
     "band": "deep",
     "role": "group",
@@ -250,8 +274,8 @@
     "measures": ["metric:is-fake"],
     "coding": "friction",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-26",
     "band": "deep",
     "role": "subject",
@@ -260,28 +284,34 @@
     "measures": ["flavour:confession"],
     "coding": "friction",
     "asksTarget": false
-  },
-  {
+},
+{
     "id": "dp-27",
     "band": "deep",
     "role": "observer_subject",
     "kind": "pick",
     "text": "Who do you think {P1} would pick between their ex and the person they like now?",
-    "measures": ["metric:ex", "guess"],
+    "measures": [
+        "metric:ex",
+        "guess"
+    ],
     "coding": "couple",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-28",
     "band": "deep",
     "role": "group",
     "kind": "pick",
     "text": "Who here do you think is going to cry tonight?",
-    "measures": ["metric:crier", "flavour:chaos"],
+    "measures": [
+        "metric:crier",
+        "flavour:chaos"
+    ],
     "coding": "tease",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-29",
     "band": "deep",
     "role": "observer_subject",
@@ -290,18 +320,21 @@
     "measures": ["flavour:roast"],
     "coding": "status",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-30",
     "band": "deep",
     "role": "group",
     "kind": "pick",
     "text": "Who here would you trust to keep a secret overnight?",
-    "measures": ["metric:trust", "flavour:closeness"],
+    "measures": [
+        "metric:trust",
+        "flavour:closeness"
+    ],
     "coding": "trust",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-31",
     "band": "deep",
     "role": "observer_subject",
@@ -311,19 +344,8 @@
     "measures": ["trait:warmth"],
     "coding": "friendship",
     "asksTarget": true
-  },
-  {
-    "id": "dp-32",
-    "band": "deep",
-    "role": "subject",
-    "kind": "rating",
-    "trait": "warmth",
-    "text": "How warm are you, 1 to 10?",
-    "measures": ["trait:warmth"],
-    "coding": "friendship",
-    "asksTarget": false
-  },
-  {
+},
+{
     "id": "dp-33",
     "band": "deep",
     "role": "group",
@@ -332,18 +354,21 @@
     "measures": ["metric:trust"],
     "coding": "friendship",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-34",
     "band": "deep",
     "role": "observer_subject",
     "kind": "pick",
     "text": "Who do you think {P1} has never forgiven?",
-    "measures": ["metric:ex", "guess"],
+    "measures": [
+        "metric:ex",
+        "guess"
+    ],
     "coding": "friction",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-35",
     "band": "deep",
     "role": "solo",
@@ -352,28 +377,34 @@
     "measures": ["flavour:confession"],
     "coding": "status",
     "asksTarget": false
-  },
-  {
+},
+{
     "id": "dp-36",
     "band": "deep",
     "role": "observer_pair",
     "kind": "text",
     "text": "If {P1} and {P2} told the truth right now, what would actually happen?",
-    "measures": ["metric:betrayal", "guess"],
+    "measures": [
+        "metric:betrayal",
+        "guess"
+    ],
     "coding": "rivalry",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-37",
     "band": "deep",
     "role": "group",
     "kind": "pick",
     "text": "Who here is the most misunderstood?",
-    "measures": ["metric:is-fake", "guess"],
+    "measures": [
+        "metric:is-fake",
+        "guess"
+    ],
     "coding": "tease",
     "asksTarget": true
-  },
-  {
+},
+{
     "id": "dp-38",
     "band": "deep",
     "role": "observer_subject",
@@ -382,5 +413,5 @@
     "measures": ["flavour:roast"],
     "coding": "tease",
     "asksTarget": true
-  }
+}
 ]

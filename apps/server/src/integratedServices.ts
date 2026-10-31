@@ -1,10 +1,17 @@
 // apps/server/src/integratedServices.ts
 // Production integration of the finished packages.
 //
-// The Ollama lane is the ONLY generator: it writes the night's questions and
-// dares. Gemini arranges the data (analysis only) and is not on the critical
-// path. Every score is a deterministic local computation — a model response
-// (or its timing) never changes a verdict.
+// Two lanes, two jobs, and neither one decides a score.
+//
+//   • Ollama is the GENERATOR: the night's questions and dares, with the room's
+//     real names written into them. Bank-first — it is never on the critical path.
+//   • Gemini is the ANALYST: at the end of the night it gets the whole pseudonymised
+//     result set and writes the reveal and the secret-card copy. One call, and if
+//     it fails or says something the validator dislikes, the engine's own line
+//     stands.
+//
+// Every number in the room is a deterministic local computation — a model
+// response (or its timing) never changes a verdict.
 import {
   MAX_PROVIDER_CALLS_PER_NIGHT,
   type FinaleSlide,
@@ -23,6 +30,7 @@ import {
   computeSignals,
 } from "../../../packages/engine/src/index.ts";
 import {
+  SYSTEM_PROMPT,
   buildSkeleton,
   derivePseudonyms,
   writeFinale,
@@ -71,15 +79,22 @@ class IntegratedPromptProvider implements PromptProvider {
   private readonly network = new RoomNetwork();
   private readonly provider: Provider;
   private readonly facade: PackagePromptProvider;
+  private readonly room: string;
+  private readonly aliases: readonly string[];
+  private readonly log: (line: string) => void;
   private disposed = false;
 
   constructor(context: PromptProviderContext) {
+    this.room = context.roomId;
+    this.aliases = context.aliases ?? [];
+    this.log = context.log ?? ((line: string) => console.log(line));
     this.provider = new Provider({ guard: new CallGuard(), fetchImpl: this.network.fetch as FetchLike });
     this.facade = createPromptProvider({
       room: context.roomId,
       playerCount: context.playerCount,
       seed: context.seed,
-      aliases: context.aliases ?? [],
+      aliases: this.aliases,
+      log: this.log,
     });
   }
 
@@ -106,6 +121,35 @@ class IntegratedPromptProvider implements PromptProvider {
     return { done: state.ready, total: state.target };
   }
 
+  /**
+   * GEMINI, THE ANALYST. The narrator hands over the night — pseudonyms, never
+   * names — and Gemini writes the reveal and the card copy for it. One call,
+   * one attempt: no key, no answer, or a bad answer means null and the engine's
+   * own copy is what the room sees.
+   */
+  async analyse(payload: Record<string, unknown>): Promise<unknown | null> {
+    if (this.disposed) return null;
+    const slides = Array.isArray(payload.slides) ? payload.slides.length : 0;
+    const cards = Array.isArray(payload.secretCards) ? payload.secretCards.length : 0;
+    const { result, value } = await this.provider.geminiJson({
+      room: this.room,
+      purpose: "reveal",
+      model: this.provider.modelFor("gemini", "reveal"),
+      system: SYSTEM_PROMPT,
+      user: JSON.stringify(payload),
+      json: true,
+      aliases: this.aliases,
+      temperature: 0.6,
+      maxTokens: 4_096,
+    });
+    if (!result.ok || value === null) {
+      this.log(`Gemini: asked ${slides + cards}, used 0 (unavailable:${result.reason ?? "empty"})`);
+      return null;
+    }
+    this.log(`Gemini: asked ${slides + cards}, answered (slides ${slides}, cards ${cards})`);
+    return value;
+  }
+
   dispose(): void {
     this.disposed = true;
     this.network.dispose();
@@ -129,10 +173,12 @@ export function createProductionServices(): GameServices {
       results: Results,
       digest: NightDigest,
       meta: RoomMeta,
-    ) => {
-      const ps = derivePseudonyms(results, digest, meta.players);
-      return writeFinale(skeleton, decks, results, digest, { roster: meta.players });
-    },
+      provider?: PromptProvider,
+    ) =>
+      writeFinale(skeleton, decks, results, digest, {
+        roster: meta.players,
+        gemini: provider?.analyse ? (payload) => provider.analyse!(payload) : undefined,
+      }),
   };
 }
 

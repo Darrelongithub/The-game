@@ -571,5 +571,6 @@ describe("the room view", () => {
     assert.ok(!json.includes("attractedTo"));
     assert.ok(!json.includes("sexuality"));
     assert.ok(!json.includes("lookingFor"));
+    assert.ok(!json.includes("gender"));   // the fifth field is gone from the contract entirely
   });
 });

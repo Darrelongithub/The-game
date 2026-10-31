@@ -16,7 +16,6 @@ import {
     BAND_ORDER,
     type Band,
     type MetricKey,
-    type PlayerId,
     type Prompt,
 } from "../../shared/src/contracts.ts";
 import { BANK, metricOf, selectFromBank } from "./bank/index.ts";
@@ -49,7 +48,7 @@ export interface GenerateBatchInput {
     seed: number;
     /** Room id for the call guard. */
     room?: string;
-    /** Aliases — scrubbed from anything that leaves the process. */
+    /** The room's display names, in roster order. The lane is handed names. */
     aliases?: readonly string[];
     /** Overrides for tests. */
     config?: Partial<OllamaConfig>;
@@ -125,6 +124,7 @@ export async function generateNight(input: GenerateBatchInput): Promise<Generate
         config,
         playerCount: input.playerCount,
         seed: input.seed,
+        aliases: input.aliases ?? [],
         fetchImpl: input.fetchImpl ?? null,
         now: input.now,
         safetyCapMs: input.safetyCapMs ?? GEN_SAFETY_CAP_MS,
@@ -167,67 +167,9 @@ export async function generateNight(input: GenerateBatchInput): Promise<Generate
     };
 }
 
-/**
- * The one-line verdict writer. Ollama may restate what the data says, in one
- * sentence, naming a real player. On any failure the template stands.
- */
-export async function writeVerdictLines(
-    lines: { id: string; template: string; names: string[] }[],
-    opts: {
-        config?: Partial<OllamaConfig>;
-        fetchImpl?: OllamaFetch | null;
-        aliases?: readonly string[];
-        room?: string;
-        log?: (line: string) => void;
-    } = {},
-): Promise<{ id: string; text: string; source: "ollama" | "template" }[]> {
-    const config = { ...ollamaConfig(), ...(opts.config ?? {}) };
-    const out: { id: string; text: string; source: "ollama" | "template" }[] = [];
-    if (lines.length === 0) return out;
-
-    const { callOllama, validateVerdictLine, verdictSystemPrompt, normalizeForMatch } = await import("./ollama.ts");
-    const seen = new Set<string>();
-
-    for (const line of lines) {
-        const result = await callOllama(
-            config,
-            {
-                messages: [
-                    { role: "system", content: verdictSystemPrompt() },
-                    {
-                        role: "user",
-                        content: `Rewrite this verdict in one funny sentence using only the given names and numbers:\n${line.template}`,
-                    },
-                ],
-                temperature: 0.8,
-                maxTokens: 200,
-            },
-            opts.fetchImpl ?? null,
-        );
-        if (!result.ok || !result.text) {
-            out.push({ id: line.id, text: line.template, source: "template" });
-            continue;
-        }
-        const check = validateVerdictLine(result.text, {
-            playerCount: opts.aliases?.length ?? 0,
-            allowedNames: line.names,
-            seen,
-        });
-        if (!check.ok) {
-            out.push({ id: line.id, text: line.template, source: "template" });
-            continue;
-        }
-        seen.add(normalizeForMatch(result.text));
-        out.push({ id: line.id, text: result.text.trim(), source: "ollama" });
-    }
-    return out;
-}
-
 /** Re-exported so callers do not have to reach into two modules. */
 export { BAND_BATCH_SIZE, GEN_SAFETY_CAP_MS, GEN_TARGET_PROMPTS };
 
 /** The metrics the engine can read off a prompt. */
 export type { MetricKey };
 
-/** Every player id in the room — used to check generated lines name someone real. */
-export const roomPlayers = (ids: readonly PlayerId[]): PlayerId[] => [...ids];

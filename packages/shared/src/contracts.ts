@@ -41,7 +41,6 @@ export const OLLAMA = {
     model: "dolphin-mistral",
     path: "/api/chat",
 } as const;
-export const SPICY_TIER = true;     // include the unhinged tier (private adult group)
 export const MAX_PROMPT_CHARS = 160;
 
 // ---------- Phases (player-facing only) ----------
@@ -190,23 +189,21 @@ export interface LogRecord {
 
 // ---------- Sign-up profile ----------
 // Engine-needed only. NEVER printed on any screen, never compared against the
-// room's guesses, never sent to a client. Today the only thing the engine
-// does with a profile is the 18+ gate: the age decides whether the night
-// happens at all. Gender, sexuality and attraction are collected because the
-// brief asks for them, and they are deliberately NOT used to shape a ship or
-// a prompt — a guess about the room must never be traceable to what
-// somebody answered at sign-up. The raw values die with the room.
+// room's guesses, never sent to a client, never sent to a model. The ONLY thing
+// the engine does with a profile is the 18+ gate: the age decides whether the
+// night happens at all. Nothing else is asked, because nothing else is used —
+// there is no 'what are you here for tonight' question, no relationship history,
+// no vibe check. A guess the room makes about somebody must never be traceable
+// to what they typed at sign-up. The raw values die with the room.
 export type Gender = "woman" | "man" | "nonbinary" | "other" | "undisclosed";
 export type Sexuality = "straight" | "gay" | "bi" | "pan" | "queer" | "asexual" | "other" | "undisclosed";
 export type Attraction = "women" | "men" | "everyone" | "nobody" | "undisclosed";
-export type LookingFor = "relationship" | "hookup" | "fun" | "chaos" | "undisclosed";
 
 export interface ProfileAnswers {
     age: number;
     gender: Gender;
     sexuality: Sexuality;
     attractedTo: Attraction;
-    lookingFor: LookingFor;
 }
 
 export const PROFILE_QUESTIONS = [
@@ -214,7 +211,6 @@ export const PROFILE_QUESTIONS = [
     { field: "gender", label: "Gender", kind: "select", options: ["woman", "man", "nonbinary", "other", "undisclosed"] },
     { field: "sexuality", label: "Sexuality", kind: "select", options: ["straight", "gay", "bi", "pan", "queer", "asexual", "other", "undisclosed"] },
     { field: "attractedTo", label: "Who are you attracted to?", kind: "select", options: ["women", "men", "everyone", "nobody", "undisclosed"] },
-    { field: "lookingFor", label: "What are you here for tonight?", kind: "select", options: ["relationship", "hookup", "fun", "chaos", "undisclosed"] },
 ] as const;
 
 // ---------- Engine: room metadata ----------
@@ -456,14 +452,12 @@ export interface JoinReply {
 }
 
 export interface SubmitRequest { roundId: string; segmentId?: string; clientUuid: string; value: ResponseValue; }
-export interface DarePassRequest { roundId: string; reason: string; }   // reason REQUIRED, <=140
 
 export type ClientToServerEvents = {
     join: (p: JoinRequest, reply: (r: JoinReply) => void) => void;
     /** The host laptop binds to tonight's room with its token — no code to type. */
     host_join: (p: { token: string }, reply: (r: { ok: boolean; state?: RoomView; error?: string }) => void) => void;
     submit: (p: SubmitRequest, reply: (r: { ok: boolean; error?: string }) => void) => void;
-    dare_pass: (p: DarePassRequest) => void;
     /** The lobby tick: "I'm in". */
     lobby_ready: (p: { ready: boolean }) => void;
     /** "Ready for the results" — the ONE ready gate, at the end of the night. */

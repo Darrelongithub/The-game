@@ -20,7 +20,6 @@
 import { readFileSync } from "node:fs";
 import {
   MAX_PLAYERS,
-  SPICY_TIER,
   type Band,
   type MetricKey,
   type Prompt,
@@ -89,29 +88,6 @@ export const RAW_BANK: { bands: Record<Band, BankEntry[]>; unhinged: BankEntry[]
   unhinged: readBankFile(UNHINGED_FILE),
 };
 
-/** un-* ids — the unhinged tier. Never sent to any provider. */
-export const UNHINGED_IDS: readonly string[] = RAW_BANK.unhinged.map((e) => e.id);
-
-/**
- * SPICY_TIER resolution: contracts.ts is the source of truth (default true),
- * but the host may switch the tier off for a tamer night via `SPICY_TIER=false`
- * in `.env` — no contract edit needed.
- */
-export function spicyTierEnabled(env: Record<string, string | undefined> = readEnv()): boolean {
-  const raw = env.SPICY_TIER;
-  if (raw === undefined || raw.trim() === "") return SPICY_TIER;
-  return !["false", "0", "off", "no", "n"].includes(raw.trim().toLowerCase());
-}
-
-function readEnv(): Record<string, string | undefined> {
-  return typeof process !== "undefined" && process.env ? process.env : {};
-}
-
-export interface BankOptions {
-  /** Include the unhinged tier (default: SPICY_TIER / env override). */
-  spicy?: boolean;
-}
-
 /**
  * Whole bank. ORDER MATTERS:
  *   1. the unhinged tier — the hottest prompts in the game, loaded FIRST
@@ -123,13 +99,12 @@ export interface BankOptions {
  * order decides the TONE of a night (hot first) rather than the exact
  * sequence (which is shuffled).
  */
-export function loadBank(opts: BankOptions = {}): Prompt[] {
-  const spicy = opts.spicy ?? spicyTierEnabled();
+export function loadBank(): Prompt[] {
   const out: Prompt[] = [];
   const push = (rows: BankEntry[]) => {
     for (const row of rows) out.push({ ...row, source: "bank" });
   };
-  if (spicy) push(RAW_BANK.unhinged);
+  push(RAW_BANK.unhinged);
   push(RAW_BANK.bands.spicy);
   push(RAW_BANK.bands.warmup);
   push(RAW_BANK.bands.deep);
@@ -137,22 +112,22 @@ export function loadBank(opts: BankOptions = {}): Prompt[] {
   return out;
 }
 
-/** The default bank for this process (SPICY_TIER / env resolved once). */
+/** The bank, for this process, in order. */
 export const BANK: readonly Prompt[] = loadBank();
 
-export function bankForBand(band: Band, opts: BankOptions = {}): Prompt[] {
-  return loadBank(opts).filter((p) => p.band === band);
+export function bankForBand(band: Band): Prompt[] {
+  return loadBank().filter((p) => p.band === band);
 }
 
-export function bankCounts(opts: BankOptions = {}): Record<Band, number> {
+export function bankCounts(): Record<Band, number> {
   const counts: Record<Band, number> = { warmup: 0, spicy: 0, deep: 0, dare: 0 };
-  for (const p of loadBank(opts)) counts[p.band] += 1;
+  for (const p of loadBank()) counts[p.band] += 1;
   return counts;
 }
 
 /** Total prompts available tonight. */
-export function bankTotal(opts: BankOptions = {}): number {
-  return loadBank(opts).length;
+export function bankTotal(): number {
+  return loadBank().length;
 }
 
 // ---------- placeholders ----------
@@ -198,7 +173,7 @@ export function promptTypeKey(prompt: Pick<Prompt, "kind" | "measures" | "coding
 }
 
 // ---------- selection ----------
-export interface SelectOptions extends BankOptions {
+export interface SelectOptions {
   /** Players in the room — prompts needing a higher {Pn} are skipped. */
   playerCount?: number;
   /** Ids already used tonight (never repeat a prompt). */
@@ -254,7 +229,7 @@ export function selectFromBank(n: number, opts: SelectOptions = {}): Prompt[] {
   const roles = opts.roles ? new Set(opts.roles) : opts.role ? new Set([opts.role]) : null;
   const bands = opts.bands ? new Set(opts.bands) : null;
   const codings = opts.coding ? new Set(opts.coding) : null;
-  const pool = loadBank(opts).filter((p) => {
+  const pool = loadBank().filter((p) => {
     if (exclude.has(p.id)) return false;
     if (kinds && !kinds.has(p.kind)) return false;
     if (roles && !roles.has(p.role)) return false;
@@ -274,30 +249,41 @@ export function selectFromBank(n: number, opts: SelectOptions = {}): Prompt[] {
     picked.push(p);
     taken.add(p.id);
   };
-
-  // Pass 1: one of each type (kind + metric) — kills same-type back-to-back.
-  const seenTypes = new Set<string>();
-  for (const p of shuffled) {
-    if (picked.length >= n) break;
-    const key = promptTypeKey(p);
-    if (seenTypes.has(key)) continue;
-    seenTypes.add(key);
-    push(p);
-  }
-
-  // Pass 2: fill the rest, still never repeating the previous type while the
-  // pool allows it.
-  let lastType = picked.length ? promptTypeKey(picked[picked.length - 1]!) : "";
+  // Two prompts are "the same kind of thing" when they ask the same KIND for
+  // the same METRIC. That is the pairing that reads as a repeat, even when the
+  // codings differ ("who would you sleep with" twice in a row is one joke).
+  const adjacencyKey = (p: Prompt): string => `${p.kind}|${metricOf(p) ?? "none"}`;
+  const lastKey = (): string => (picked.length ? adjacencyKey(picked[picked.length - 1]!) : "");
   const deferred: Prompt[] = [];
-  for (const p of shuffled) {
-    if (picked.length >= n) break;
-    if (taken.has(p.id)) continue;
+
+  const fill = (accept: (p: Prompt) => boolean): void => {
+    for (const p of shuffled) {
+      if (picked.length >= n) return;
+      if (taken.has(p.id)) continue;
+      if (!accept(p)) continue;
+      if (adjacencyKey(p) === lastKey()) {
+        deferred.push(p);
+        continue;
+      }
+      push(p);
+    }
+  };
+
+  // Pass 1: one of each type (kind + metric + coding) — kills same-type
+  // back-to-back before anything else is considered.
+  const seenTypes = new Set<string>();
+  fill((p) => {
     const key = promptTypeKey(p);
-    if (key === lastType) { deferred.push(p); continue; }
-    push(p);
-    lastType = key;
-  }
-  // Pass 3: a thin pool still fills the slot (repeats allowed).
+    if (seenTypes.has(key)) return false;
+    seenTypes.add(key);
+    return true;
+  });
+
+  // Pass 2: fill the rest, still never landing the same kind twice in a row.
+  fill(() => true);
+
+  // Pass 3: a thin pool still fills the slot (adjacency allowed, never a
+  // repeated template).
   for (const p of deferred) {
     if (picked.length >= n) break;
     if (taken.has(p.id)) continue;

@@ -41,7 +41,6 @@ const profile = {
   gender: "woman" as const,
   sexuality: "straight" as const,
   attractedTo: "women" as const,
-  lookingFor: "fun" as const,
 };
 
 const ALIASES = ["Wanjiru", "Dee", "Kofi", "Zuri", "Tayo", "Amina", "Bodi", "Sade", "Nia", "Kito", "Zee"];

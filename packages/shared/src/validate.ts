@@ -11,7 +11,6 @@ import {
   TRAITS,
   type Attraction,
   type Gender,
-  type LookingFor,
   type ProfileAnswers,
   type ResponseValue,
   type Sexuality,
@@ -36,7 +35,6 @@ const intInRange = (n: unknown, lo: number, hi: number): n is number =>
 export const GENDERS: readonly Gender[] = ["woman", "man", "nonbinary", "other", "undisclosed"];
 export const SEXUALITIES: readonly Sexuality[] = ["straight", "gay", "bi", "pan", "queer", "asexual", "other", "undisclosed"];
 export const ATTRACTIONS: readonly Attraction[] = ["women", "men", "everyone", "nobody", "undisclosed"];
-export const LOOKING_FOR: readonly LookingFor[] = ["relationship", "hookup", "fun", "chaos", "undisclosed"];
 
 export function isProfileAnswers(v: unknown): v is ProfileAnswers {
   if (!v || typeof v !== "object") return false;
@@ -45,8 +43,7 @@ export function isProfileAnswers(v: unknown): v is ProfileAnswers {
     intInRange(p.age, 18, 120) &&
     GENDERS.includes(p.gender) &&
     SEXUALITIES.includes(p.sexuality) &&
-    ATTRACTIONS.includes(p.attractedTo) &&
-    LOOKING_FOR.includes(p.lookingFor)
+    ATTRACTIONS.includes(p.attractedTo)
   );
 }
 

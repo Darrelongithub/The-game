@@ -21,6 +21,7 @@ import {
 import { buildSkeleton, conservativeSource, registerSource, sourceOf } from "./slides.ts";
 import {
   derivePseudonyms,
+  pseudonymForAlias,
   toRoster,
   type Pseudonyms,
   type RosterEntry,
@@ -37,8 +38,13 @@ import {
 } from "./validate.ts";
 
 export interface WriteOptions {
-  /** Optional single Ollama polish call; validated copy is merged over the engine text. */
-  ollama?: (payload: Record<string, unknown>) => Promise<unknown | null>;
+  /**
+   * The Gemini analysis call — ONE, for the whole night. It is handed the
+   * payload from buildRequestPayload and returns the JSON the merge below
+   * validates. Validated copy is merged over the engine text; anything that
+   * fails validation is dropped and the engine line stands.
+   */
+  gemini?: (payload: Record<string, unknown>) => Promise<unknown | null>;
   /** Legacy-compatible option; ignored. */
   apiKey?: string;
   /** Legacy-compatible option; ignored. */
@@ -55,6 +61,38 @@ export interface WriteOptions {
 export interface FinaleCopy {
   slides: FinaleSlide[];
   decks: Map<PlayerId, SecretCard[]>;
+  /** The share-card headline — see `finaleSummary`. */
+  summary: FinaleSummary;
+}
+
+/**
+ * The three lines the share card is drawn from: the ship, the core, the target.
+ * They are the slides' OWN copy (pseudonyms, as the room saw them) — never a
+ * new sentence, so nothing is printed on a shareable image that the room did
+ * not already hear.
+ */
+export type FinaleSummary = { couple?: string; core?: string; hates?: string };
+
+export function finaleSummary(slides: readonly FinaleSlide[]): FinaleSummary {
+  const lineFor = (kind: "couple" | "core" | "hates"): string | undefined => {
+    const slide = slides.find((entry) => {
+      const source = sourceOf(entry);
+      if (source?.kind !== "verdict" || source.verdictKind !== kind) return false;
+      // The couple verdict has two halves; the share card wants the ship, not
+      // the "never happening" one.
+      return kind !== "couple" || !String(source.verdictId ?? "").includes("-never-");
+    });
+    const text = (slide?.body ?? slide?.title ?? "").trim();
+    return text.length > 0 ? text : undefined;
+  };
+  const couple = lineFor("couple");
+  const core = lineFor("core");
+  const hates = lineFor("hates");
+  return {
+    ...(couple === undefined ? {} : { couple }),
+    ...(core === undefined ? {} : { core }),
+    ...(hates === undefined ? {} : { hates }),
+  };
 }
 
 const SECRET_KINDS: readonly SecretKind[] = ["crush", "blindspot", "lookchain"];
@@ -69,7 +107,7 @@ const TONE =
   "roast-warm, dry, never mean-spirited, never clinical. The room is laughing WITH each other. " +
   "Secret cards are KIND — they open on one phone, alone, at midnight.";
 
-export const SYSTEM_PROMPT = `You are the narrator of "The Reveal Game": a private, 18+ friends' party game. You write the end-of-night reveal — a Wrapped-style story — plus private secret cards that open on ONE phone only.
+export const SYSTEM_PROMPT = `You are the analyst and the voice of "The Reveal Game": a private, 18+ friends' party game. You are handed the whole night — who picked whom, who said what, every number the game counted — and you write the end-of-night reveal (a Wrapped-style story) plus the private secret cards that open on ONE phone only.
 
 VOICE
 - Roast-warm and dry. Funny because it is true, never because it is cruel.
@@ -80,7 +118,7 @@ VOICE
 HARD RULES — a validator checks every line and silently replaces anything that breaks them with the engine line:
 1. NUMBERS: only repeat digits that already appear in that slide's "numbers" object or its "engine" text. Never compute, round, sum, average, or invent a number.
 2. PEOPLE: refer to people ONLY as "Player N" (e.g. "Player 3"), exactly as listed in that slide's "players". Never use a real name, never invent a player, never rename anyone.
-3. FACTS: never invent a quote, statistic, label or event. The engine text is the truth; you are polishing it. Text marked "verbatim" must be reproduced character for character.
+3. FACTS: never invent a quote, statistic, label or event. The "night" object is the whole data set — you may rearrange it and put it in sharper words, but the engine text stays the truth and you are polishing it. Text marked "verbatim" must be reproduced character for character.
 4. LENGTH: title <= 6 words. body <= 140 characters. Each secret-card fact <= 120 characters, 1-4 facts per card.
 5. BANNED: "toxic person", "red flag", "soulmate", "science says", "love language", any form of "diagnos-", "narcissis-", "therapy", or clinical/psychology vocabulary.
 6. NEVER print an orientation claim. Never write that anyone is gay, lesbian, bi, straight, or that anyone was named in a gay-hypothetical question. Only ever write the hypothetical phrasing the engine gave you.
@@ -161,7 +199,11 @@ export function flattenCards(decks: Map<PlayerId, SecretCard[]>): FlatCard[] {
 
 export interface FlatCard { playerId: PlayerId; card: SecretCard; }
 
-/** The data the model sees. Aliases are scrubbed; numbers stay. */
+/**
+ * The data Gemini sees: the engine's slides and cards, the night's own
+ * numbers, and the best lines people actually wrote — every one of them
+ * pseudonymised to "Player N". Aliases never appear here; digits always do.
+ */
 export function buildRequestPayload(
   slides: readonly FinaleSlide[],
   decks: Map<PlayerId, SecretCard[]>,
@@ -186,15 +228,59 @@ export function buildRequestPayload(
     facts: entry.card.facts,
     engine: entry.card.facts,
   }));
+  // Every alias in the digest has to have an honest "Player N" mapping, or it
+  // is dropped — the analyst is never shown a real name, and never gets to
+  // guess who said what.
+  const tok = (alias: string | undefined): string | null => pseudonymForAlias(ps, alias) ?? null;
+  const kept = <T extends object>(alias: string | undefined, rest: T): (T & { player: string }) | null => {
+    const player = tok(alias);
+    return player === null ? null : { player, ...rest };
+  };
+  const only = <T>(rows: readonly (T | null)[]): T[] => rows.filter((row): row is T => row !== null);
+
   return {
     tone: TONE,
     publicToneHint: "warm",
     players: ps.order.map((id) => ps.byId.get(id)).filter(Boolean),
     slides: publicSlides,
     secretCards,
-    digest: {
-      quotes: (digest.quotes ?? []).slice(0, 4).map((q) => ({ text: q.text, verbatim: true })),
-      dodges: (digest.dodges ?? []).slice(0, 4).map((d) => ({ reason: d.reason, verbatim: true })),
+    /** The night itself — the only facts this lane is allowed to work from. */
+    night: {
+      quotes: only([
+        ...(digest.quotes ?? []).slice(0, 8).map((q) =>
+          kept(q.alias, { text: q.text, context: q.context, verbatim: true as const }),
+        ),
+      ]),
+      dodges: only([
+        ...(digest.dodges ?? []).slice(0, 8).map((d) => kept(d.alias, { reason: d.reason, verbatim: true as const })),
+      ]),
+      selfVsRoom: only([
+        ...(digest.selfVsRoom ?? []).slice(0, 10).map((row) =>
+          kept(row.alias, { trait: row.trait, self: row.self, roomMean: row.roomMean }),
+        ),
+      ]),
+      lookChains: only([
+        ...(digest.lookChains ?? []).map((c) =>
+          kept(c.actor, {
+            watched: tok(c.target) ?? "nobody",
+            guessedRight: c.guessedRight,
+            guessers: c.guessers,
+            ...(c.reason === undefined ? {} : { reason: c.reason }),
+          }),
+        ),
+      ]),
+      runningGags: (digest.runningGags ?? []).slice(0, 5),
+      stats: {
+        ...(digest.stats.fastest === undefined
+          ? {}
+          : { fastest: kept(digest.stats.fastest.alias, { ms: digest.stats.fastest.ms }) }),
+        ...(digest.stats.slowest === undefined
+          ? {}
+          : { slowest: kept(digest.stats.slowest.alias, { ms: digest.stats.slowest.ms }) }),
+        ...(digest.stats.topDodger === undefined
+          ? {}
+          : { topDodger: kept(digest.stats.topDodger.alias, { count: digest.stats.topDodger.count }) }),
+      },
     },
     results: { verdicts: results.verdicts.map((v) => ({ kind: v.kind, numbers: v.numbers, text: v.text })) },
   };
@@ -314,9 +400,10 @@ export function mergeCards(
 // --------------------------------------------------------------------------
 
 /**
- * Build the finale. Deterministic by default; one optional Ollama call may
- * polish the wording. The decks are returned SEPARATELY from the slides —
- * the server emits each deck only to its own socket.
+ * Build the finale. The engine's own copy is always complete and stands on its
+ * own; ONE Gemini call analyses the night and its validated lines are merged
+ * over it. The decks are returned SEPARATELY from the slides — the server
+ * emits each deck only to its own socket, and never the same copy twice.
  */
 export async function writeFinale(
   skeleton: readonly FinaleSlide[],
@@ -330,19 +417,21 @@ export async function writeFinale(
   const slides = normalizeSlides(skeleton);
   const cards = normalizeDecks(decks);
 
-  if (!options.ollama) return { slides, decks: cards };
+  if (!options.gemini) return { slides, decks: cards, summary: finaleSummary(slides) };
 
   let raw: unknown = null;
   try {
     const payload = buildRequestPayload(slides, cards, results, digest, ps);
-    raw = await options.ollama(payload);
+    raw = await options.gemini(payload);
   } catch {
     raw = null;
   }
-  if (!raw) return { slides, decks: cards };
+  if (!raw) return { slides, decks: cards, summary: finaleSummary(slides) };
+  const merged = mergeSlides(slides, raw, ps, roster);
   return {
-    slides: mergeSlides(slides, raw, ps, roster),
+    slides: merged,
     decks: mergeCards(cards, raw, ps, roster),
+    summary: finaleSummary(merged),
   };
 }
 

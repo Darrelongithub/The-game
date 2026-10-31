@@ -22,7 +22,6 @@ const PROFILE = {
   gender: 'woman' as const,
   sexuality: 'straight' as const,
   attractedTo: 'women' as const,
-  lookingFor: 'fun' as const,
 };
 
 test('the transport joins, binds the host, and resumes', { timeout: 20000 }, async t => {

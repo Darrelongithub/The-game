@@ -296,6 +296,7 @@ export class RoomManager {
       playerCount: room.order.length,
       seed: room.seed,
       aliases: room.order.map((id) => this.aliasOf(room, id)),
+      log: (line) => this.log(line),
     });
     this.providers.set(room.code, provider);
 
@@ -609,10 +610,21 @@ export class RoomManager {
 
     let slides: FinaleSlide[];
     let finalDecks: Map<PlayerId, SecretCard[]> = decks;
+    let summary: { couple?: string; core?: string; hates?: string } = {};
     try {
-      const written = await this.services.writeFinale(skeleton, decks, results, digest, meta);
+      const written = await this.services.writeFinale(
+        skeleton,
+        decks,
+        results,
+        digest,
+        meta,
+        this.providers.get(room.code),
+      );
       slides = written.slides;
       finalDecks = written.decks;
+      // The headline lines are pseudonymised on purpose: the share card leaves
+      // this room, the slides do not.
+      summary = written.summary ?? {};
     } catch {
       slides = skeleton;
     }
@@ -621,7 +633,7 @@ export class RoomManager {
     const publicSlides = applyAliasesToSlides(slides, roster);
     const aliasedDecks = applyAliasesToDecks(finalDecks, roster);
 
-    this.broadcastFinale(room, { slides: publicSlides, summary: {} });
+    this.broadcastFinale(room, { slides: publicSlides, summary });
 
     // The secret decks go to ONE socket each.
     for (const [playerId, cards] of aliasedDecks) {

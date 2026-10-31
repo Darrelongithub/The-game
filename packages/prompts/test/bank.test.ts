@@ -194,9 +194,10 @@ describe("the seeded shuffle", () => {
 });
 
 describe("loadBank", () => {
-  it("can turn the unhinged tier off", () => {
-    const tamed = loadBank({ spicy: false });
-    assert.equal(tamed.filter((p) => p.id.startsWith("un-")).length, 0);
-    assert.ok(tamed.length > 100);
+  it("always loads the unhinged tier, first, with no switch to turn it off", () => {
+    const bank = loadBank();
+    assert.ok(bank[0]!.id.startsWith("un-"), "the hottest tier leads the pack");
+    assert.ok(bank.filter((p) => p.id.startsWith("un-")).length >= 25);
+    assert.ok(bank.length >= 150, "the brief's floor: 150+ varied prompts");
   });
 });

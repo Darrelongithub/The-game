@@ -33,7 +33,6 @@ const EMPTY_PROFILE: ProfileAnswers = {
   gender: "undisclosed",
   sexuality: "undisclosed",
   attractedTo: "undisclosed",
-  lookingFor: "undisclosed",
 };
 
 export function JoinScreen({
@@ -131,7 +130,7 @@ export function JoinScreen({
                   return (
                     <div key={q.field}>
                       <label className="mb-1 block text-xs text-white/65" htmlFor={id}>{q.label}</label>
-                      <select id={id} className="field" value={profile[q.field as "gender" | "sexuality" | "attractedTo" | "lookingFor"]}
+                      <select id={id} className="field" value={profile[q.field as "gender" | "sexuality" | "attractedTo"]}
                         onChange={(e) => setProfile((p) => ({ ...p, [q.field]: e.target.value } as ProfileAnswers))}>
                         {q.options.map((option) => <option className="text-black" key={option} value={option}>{option}</option>)}
                       </select>

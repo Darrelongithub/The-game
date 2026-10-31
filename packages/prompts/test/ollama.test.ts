@@ -2,7 +2,8 @@
 // The Ollama lane.
 //
 // The rules under test:
-//   • The model may ONLY rephrase a bank prompt (keeping its slots).
+//   • The model may ONLY rephrase a bank prompt — and it is handed the room's
+//     real names, which are turned back into {Pn} slots before anything is kept.
 //   • Exactly four drop reasons exist: not-in-room, repeat, too-long, refusal.
 //   • Every accepted line names a player in the room.
 //   • On failure the bank prompt is used unchanged.
@@ -15,11 +16,13 @@ import {
   isRefusal,
   normalizeForMatch,
   ollamaConfig,
+  fillNames,
   parseLines,
   parseOllamaText,
+  rephraseSystemPrompt,
   rephraseUserPrompt,
+  restoreNames,
   validateGenerated,
-  validateVerdictLine,
 } from "../src/index.ts";
 import { generateNight } from "../src/generate.ts";
 
@@ -166,34 +169,64 @@ describe("the response parsing", () => {
   });
 });
 
-describe("the verdict line", () => {
-  it("accepts a line that names a real player", () => {
-    const check = validateVerdictLine("Wanjiru is the one everybody is watching tonight.", {
-      playerCount: 5,
-      allowedNames: ["Wanjiru", "Dee"],
-      seen: new Set(),
-    });
-    assert.equal(check.ok, true);
+describe("the room's real names", () => {
+  it("fills the slots on the way in and puts them back on the way out", () => {
+    const names = ["Wanjiru", "Kamau", "Dee"];
+    assert.equal(fillNames("Who here would kiss {P1}?", names), "Who here would kiss Wanjiru?");
+    assert.equal(restoreNames("Would Kamau text Dee at 3am?", names), "Would {P2} text {P3} at 3am?");
+    // a name inside an unrelated word is not a player
+    assert.equal(restoreNames("Is orange the worst flavour?", names), "Is orange the worst flavour?");
+    // case-insensitive, and the long name wins over the short one it hides in
+    assert.equal(restoreNames("WANJIRU likes Kamau", names), "{P1} likes {P2}");
+    // a slot beyond the roster stays a slot, so the validator can reject it
+    assert.equal(fillNames("Kiss {P9}?", names), "Kiss {P9}?");
   });
 
-  it("drops a line that names nobody in the room", () => {
-    const check = validateVerdictLine("Somebody here has the highest body count.", {
-      playerCount: 5,
-      allowedNames: ["Wanjiru", "Dee"],
-      seen: new Set(),
-    });
-    assert.equal(check.ok, false);
-    assert.equal(check.reason, "not-in-room");
+  it("tells the model to keep every name it was given", () => {
+    const system = rephraseSystemPrompt();
+    assert.match(system, /names real people in this room/);
+    assert.doesNotMatch(system, /Never write anything cruel/);
+    const user = rephraseUserPrompt(["Who in this room has a crush on {P1}?"]);
+    assert.match(user, /\{P1\}/);
+    assert.match(user, /keep every person's name/);
   });
 
-  it("drops a refusal", () => {
-    const check = validateVerdictLine("As an AI I will not do this.", {
+  it("asks with real names and stores the slots back", async () => {
+    let sent = "";
+    const report = await generateNight({
       playerCount: 5,
-      allowedNames: ["Wanjiru"],
-      seen: new Set(),
+      seed: 7,
+      aliases: ["Wanjiru", "Kamau", "Dee", "Otieno", "Zawadi"],
+      fetchImpl: async (_url, init) => {
+        sent = String(init?.body ?? "");
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify({ choices: [{ message: { content: "Would Zawadi take home Wanjiru tonight?" } }] }),
+        };
+      },
     });
-    assert.equal(check.ok, false);
-    assert.equal(check.reason, "refusal");
+    assert.ok(sent.includes("Wanjiru"), "the local lane reads real names");
+    const accepted = report.prompts.find((p) => p.source === "ollama");
+    assert.ok(accepted, "a valid line is accepted");
+    assert.ok(!accepted!.text.includes("Wanjiru"), "the bank stores slots, not names");
+    assert.ok(accepted!.text.includes("{P1}") && accepted!.text.includes("{P5}"));
+  });
+
+  it("drops a line that names nobody in the room", async () => {
+    const report = await generateNight({
+      playerCount: 5,
+      seed: 8,
+      aliases: ["Wanjiru", "Kamau", "Dee", "Otieno", "Zawadi"],
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({ choices: [{ message: { content: "Who in the next flat has the best legs?" } }] }),
+      }),
+    });
+    assert.equal(report.accepted, 0, "a stranger is not a prompt");
   });
 });
 

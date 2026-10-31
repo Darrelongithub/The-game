@@ -35,6 +35,12 @@ export interface PromptProvider {
   generate?(): Promise<Prompt[]>;
   /** Progress for the loading screen: "14/40 ready". */
   generationProgress?(): { done: number; total: number };
+  /**
+   * The Gemini analysis lane: the night's pseudonymised data goes in, the
+   * reveal and the secret-card copy come out. Null when Gemini has nothing to
+   * say — the engine's own copy stands, always, with no retry.
+   */
+  analyse?(payload: Record<string, unknown>): Promise<unknown | null>;
   /** Cancel room-scoped provider work when the room is deleted or expires. */
   dispose?(): void;
 }
@@ -45,8 +51,10 @@ export interface PromptProviderContext {
   playerCount: number;
   /** The night's seed — the same seed gives the same shuffle. */
   seed: number;
-  /** Aliases, so anything sent to the model can be scrubbed. */
+  /** Aliases: written into the local lane's prompts, scrubbed from Gemini's. */
   aliases?: readonly string[];
+  /** Where the provider's one-line-per-call report goes. */
+  log?: (line: string) => void;
 }
 
 export interface GameServices {
@@ -62,5 +70,12 @@ export interface GameServices {
     results: Results,
     digest: NightDigest,
     meta: RoomMeta,
-  ): Promise<{ slides: FinaleSlide[]; decks: Map<PlayerId, SecretCard[]> }>;
+    /** The room's provider, so Gemini can be asked once. Optional: tests pass none. */
+    provider?: PromptProvider,
+  ): Promise<{
+    slides: FinaleSlide[];
+    decks: Map<PlayerId, SecretCard[]>;
+    /** The three headline lines the share card draws. */
+    summary: { couple?: string; core?: string; hates?: string };
+  }>;
 }

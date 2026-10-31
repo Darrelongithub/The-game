@@ -135,7 +135,7 @@ describe("writeFinale", () => {
     const skeleton = buildSkeleton(results, digest, ps);
     const out = await writeFinale(skeleton, new Map(), results, digest, {
       roster: meta.players,
-      ollama: async () => ({
+      gemini: async () => ({
         slides: [{ i: 0, title: "As an AI I cannot do this", body: "Also 47 elephants." }],
       }),
     });
@@ -148,7 +148,7 @@ describe("writeFinale", () => {
     const skeleton = buildSkeleton(results, digest, ps);
     const out = await writeFinale(skeleton, new Map(), results, digest, {
       roster: meta.players,
-      ollama: async () => ({
+      gemini: async () => ({
         slides: [{ i: 0, title: "The numbers", body: "Player 3 is the one everybody wants to take home tonight." }],
       }),
     });
@@ -160,11 +160,32 @@ describe("writeFinale", () => {
     const skeleton = buildSkeleton(results, digest, ps);
     const out = await writeFinale(skeleton, new Map(), results, digest, {
       roster: meta.players,
-      ollama: async () => ({
+      gemini: async () => ({
         slides: [{ i: 0, title: "The numbers", body: "Player 1 and Player 2 would absolutely wreck it tonight." }],
       }),
     });
     assert.equal(out.slides[0]!.body, "75% of people here want to have sex with Player 3.");
+  });
+
+  it("hands the analyst the whole night, with no real names in it", async () => {
+    const ps = derivePseudonyms(results, digest, meta.players);
+    const skeleton = buildSkeleton(results, digest, ps);
+    let sent: Record<string, unknown> | null = null;
+    await writeFinale(skeleton, new Map(), results, digest, {
+      roster: meta.players,
+      gemini: async (payload) => {
+        sent = payload;
+        return null;
+      },
+    });
+    const seen = sent as Record<string, unknown> | null;
+    assert.ok(seen, "the analysis lane is called once");
+    const night = seen!.night as Record<string, unknown>;
+    assert.ok(Array.isArray(night!.quotes) && night.quotes.length > 0, "the night's lines are in it");
+    assert.ok(Array.isArray(night!.dodges), "the excuses are in it");
+    assert.ok(Array.isArray(night!.selfVsRoom), "self vs room is in it");
+    const json = JSON.stringify(seen);
+    for (const player of meta.players) assert.ok(!json.includes(player.alias), `no real alias (${player.alias})`);
   });
 
   it("never lets the model print a real alias", async () => {
@@ -172,7 +193,7 @@ describe("writeFinale", () => {
     const skeleton = buildSkeleton(results, digest, ps);
     const out = await writeFinale(skeleton, new Map(), results, digest, {
       roster: meta.players,
-      ollama: async () => ({
+      gemini: async () => ({
         slides: [{ i: 0, title: "Wanjiru", body: "Wanjiru is the one everybody is watching." }],
       }),
     });

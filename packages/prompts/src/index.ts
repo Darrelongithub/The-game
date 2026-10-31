@@ -1,11 +1,18 @@
 // packages/prompts/src/index.ts
 // Public surface of @reveal/prompts.
 //
-//   • bank/     179+ prompts, band + role tagged; the unhinged tier loads FIRST
-//   • ollama.ts the local model that writes the night's questions and dares
-//   • filter.ts the deterministic guardrail (four drop reasons, no more)
+//   • bank/     193 prompts, band + role tagged; the unhinged tier loads FIRST
+//   • ollama.ts the local model that writes the night's questions and dares —
+//               and the only place a prompt may be dropped (four reasons)
+//   • provider.ts the Gemini lane, which reads the night's data and writes
+//               the reveal
 //   • generate.ts the batched generation run, spicy first, safety-capped
 //   • facade.ts PromptProvider — bank-first, never blocks the game
+//
+// There is no content filter. This is a party for the people in the room, not
+// an app that ships: the only things that stop a line being played are that it
+// names nobody in the room, repeats one already accepted, runs past
+// MAX_PROMPT_CHARS, or is a refusal.
 export {
   CallGuard,
   PURPOSE_SLOTS,
@@ -36,7 +43,6 @@ export {
   BAND_ORDER,
   BAND_KINDS,
   RAW_BANK,
-  UNHINGED_IDS,
   bankCounts,
   bankForBand,
   bankTotal,
@@ -48,35 +54,9 @@ export {
   seededShuffle,
   selectBand,
   selectFromBank,
-  spicyTierEnabled,
   type BankEntry,
-  type BankOptions,
   type SelectOptions,
 } from "./bank/index.ts";
-
-export {
-  BANNED_PATTERNS,
-  CODINGS,
-  DUPLICATE_JACCARD,
-  EVALUATIVE_TRAITS,
-  HARD_BLOCKED,
-  MAX_PROMPT_CHARS,
-  MIN_PROMPT_CHARS,
-  ROOM_REFERENCES,
-  ROUND_KINDS,
-  badPlaceholder,
-  checkBanned,
-  checkHardBlocked,
-  hasInvalidPlaceholder,
-  hasRoomReference,
-  hashString,
-  isRoomDirected,
-  normalizeCandidate,
-  normalizeCoding,
-  normalizeKind,
-  normalizeMeasures,
-  placeholderIndexes as filterPlaceholderIndexes,
-} from "./filter.ts";
 
 export {
   BAND_BATCH_SIZE,
@@ -87,6 +67,7 @@ export {
   OLLAMA_DEFAULT_TIMEOUT_MS,
   REFUSAL_PATTERNS,
   callOllama,
+  fillNames,
   formatReasons,
   generateNightWithOllama,
   isMetaCommentary,
@@ -97,9 +78,8 @@ export {
   parseOllamaText,
   rephraseSystemPrompt,
   rephraseUserPrompt,
+  restoreNames,
   validateGenerated,
-  validateVerdictLine,
-  verdictSystemPrompt,
   type OllamaBatchReport,
   type OllamaBankPrompt,
   type OllamaConfig,
@@ -115,7 +95,6 @@ export {
 export {
   generateNight,
   seedPromptsForBand,
-  writeVerdictLines,
   type GenerateBatchInput,
   type GenerateBatchReport,
   type GenerateDrop,
@@ -135,7 +114,6 @@ export {
   PROVIDERS,
   ROUND_TIMERS_MS,
   SECRET_DECK_MAX,
-  SPICY_TIER,
   TRAITS,
   resolveGeminiModel,
   pseudonym,

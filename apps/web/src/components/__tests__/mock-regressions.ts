@@ -20,7 +20,7 @@ async function main() {
     roomCode: 'MOCK',
     alias: 'Guest',
     consent: { age: true, terms: true },
-    profile: { age: 27, gender: 'woman', sexuality: 'straight', attractedTo: 'women', lookingFor: 'fun' },
+    profile: { age: 27, gender: 'woman', sexuality: 'straight', attractedTo: 'women' },
   })
   assert.ok(joined.ok, 'the mock seat is taken')
   assert.equal(phase, 'lobby')
@@ -64,7 +64,7 @@ async function main() {
     roomCode: 'MOCK',
     alias: 'Guest',
     consent: { age: true, terms: true },
-    profile: { age: 27, gender: 'woman', sexuality: 'straight', attractedTo: 'women', lookingFor: 'fun' },
+    profile: { age: 27, gender: 'woman', sexuality: 'straight', attractedTo: 'women' },
   })
   second.start()
   second.deleteRoom()

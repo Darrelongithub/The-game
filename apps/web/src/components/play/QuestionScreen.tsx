@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import type { PlayerId, ResponseValue, RoomView, RoundView } from "@shared/contracts.ts";
-import { SHORT_TEXT_MAX_CHARS, TEXT_MAX_CHARS } from "@shared/contracts.ts";
+import { DARE_REASON_MAX_CHARS, SHORT_TEXT_MAX_CHARS, TEXT_MAX_CHARS } from "@shared/contracts.ts";
 import { GlowButton } from "@/components/GlowButton";
 
 const TRAITS: { key: NonNullable<RoundView["trait"]>; label: string }[] = [
@@ -36,6 +36,8 @@ export function QuestionScreen({
 }) {
   const [text, setText] = useState("");
   const [dareReason, setDareReason] = useState("");
+  // Tapping "I can't do it" does not end it: the reason is the answer.
+  const [declining, setDeclining] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +46,7 @@ export function QuestionScreen({
   useEffect(() => {
     setText("");
     setDareReason("");
+    setDeclining(false);
     setSent(false);
     setError(null);
   }, [round.roundId, round.segmentId]);
@@ -190,6 +193,8 @@ export function QuestionScreen({
       }
 
       case "dare":
+        // Two answers, in order: you did it, or you did not — and if you did
+        // not, you say why. No third way out, no pass button sitting below.
         return (
           <div className="flex flex-col gap-3">
             <button
@@ -197,27 +202,43 @@ export function QuestionScreen({
               disabled={answered || busy}
               onClick={() => void send({ kind: "dare", status: "done" })}
               className="min-h-[48px] w-full rounded-2xl bg-lime-accent px-4 py-3 text-base font-bold text-black disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent"
+              data-testid="dare-done"
             >
-              I&apos;m doing it
+              I did it
             </button>
-            <input
-              className="field"
-              value={dareReason}
-              maxLength={140}
-              disabled={answered || busy}
-              placeholder="I can't — and here's why"
-              onChange={(e) => setDareReason(e.target.value)}
-              aria-label="Why you cannot do it"
-            />
-            <button
-              type="button"
-              disabled={answered || busy || !dareReason.trim()}
-              onClick={() => void send({ kind: "dare", status: "passed", reason: dareReason.trim() })}
-              className="min-h-[48px] w-full rounded-2xl border border-white/20 px-4 py-3 text-base text-white disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent"
-            >
-              I can&apos;t do this
-            </button>
-            <p className="text-center text-xs text-white/45">Your excuse is data. It ends up in the results.</p>
+            {declining ? (
+              <div className="flex flex-col gap-2" data-testid="dare-why">
+                <textarea
+                  className="field min-h-[84px]"
+                  value={dareReason}
+                  maxLength={DARE_REASON_MAX_CHARS}
+                  disabled={answered || busy}
+                  placeholder="Why not?"
+                  onChange={(e) => setDareReason(e.target.value)}
+                  aria-label="Why you cannot do it"
+                  data-testid="dare-reason"
+                />
+                <button
+                  type="button"
+                  disabled={answered || busy || dareReason.trim().length === 0}
+                  onClick={() => void send({ kind: "dare", status: "passed", reason: dareReason.trim() })}
+                  className="min-h-[48px] w-full rounded-2xl bg-lime-accent px-4 py-3 text-base font-bold text-black disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent"
+                  data-testid="dare-send-why"
+                >
+                  Send it
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={answered || busy}
+                onClick={() => setDeclining(true)}
+                className="min-h-[48px] w-full rounded-2xl border border-white/20 px-4 py-3 text-base text-white disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent"
+                data-testid="dare-couldnt"
+              >
+                I can&apos;t do it
+              </button>
+            )}
           </div>
         );
 

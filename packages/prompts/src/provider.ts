@@ -10,7 +10,7 @@
 //   • Each lane checks only its own key/config; a missing key means that lane
 //     returns `no-key` without touching the network. Nothing here throws.
 //   • Both lanes spend from ONE CallGuard (per room, MAX_PROVIDER_CALLS_PER_NIGHT).
-//   • Only pseudonyms leave the server — `redactAliases` scrubs any alias a
+//   • Only pseudonyms leave the server for GEMINI — `redactAliases` scrubs any alias a
 //     caller forgot to strip before a payload is serialized.
 import {
   PROVIDERS,
@@ -211,8 +211,8 @@ export interface GeminiRequest {
 }
 
 /**
- * The lane client. Construct one per server process (or per room harness in
- * tests) and pass it to `generateBatch` / `tagBatch` / `debriefBatch`.
+ * The lane client. Construct one per room: Ollama generates the night's
+ * questions and dares, Gemini analyses the answers into the reveal.
  */
 export class Provider {
   readonly guard: CallGuard;
@@ -248,7 +248,11 @@ export class Provider {
     return this.fetchImpl !== null;
   }
 
-  /** Gemini lane: tagging and debrief analysis only. */
+  /**
+   * Gemini lane: the night's data goes in, the reveal and the secret-card copy
+   * come out. Needs an API key, so it is optional by nature — the engine's own
+   * copy stands when it is not there.
+   */
   canAnalyze(): boolean {
     return this.geminiKey !== null && this.fetchImpl !== null;
   }
@@ -259,8 +263,6 @@ export class Provider {
 
   modelFor(lane: Lane, purpose: CallPurpose = "generate"): string {
     if (lane === "ollama") return this.ollama.model;
-    if (purpose === "reveal") throw new Error("Gemini finale narration is disabled; use templates/Ollama.");
-    if (purpose === "tag") return this.geminiTagModel;
     return this.geminiAnalyzeModel;
   }
 
@@ -284,10 +286,10 @@ export class Provider {
     if (this.fetchImpl === null) return { ok: false, lane, reason: "disabled", requests: 0 };
     if (!this.guard.tryConsume(req.room, purpose)) return { ok: false, lane, reason: "budget", requests: 0 };
 
-    const messages = req.messages.map((m) => ({
-      role: m.role,
-      content: redactAliases(m.content, req.aliases),
-    }));
+    // The local lane is NOT scrubbed: the night's questions are about these
+    // exact people, and the model writes them better when it can read the
+    // names. Nothing leaves this machine.
+    const messages = req.messages.map((m) => ({ role: m.role, content: m.content }));
 
     const controller = new AbortController();
     const timeoutMs = req.timeoutMs ?? this.ollama.timeoutMs;
@@ -324,9 +326,14 @@ export class Provider {
   }
 
   // ---------- Gemini lane ----------
+  /**
+   * One Gemini call. This is the analysis lane: it reads the night (already
+   * pseudonymised by the narrator) and writes the copy the room sees. Aliases
+   * are scrubbed on the way out — unlike the local lane, which is handed the
+   * real names because the questions have to sound like they are about people.
+   */
   async gemini(req: GeminiRequest): Promise<LaneResult> {
     const lane: Lane = "gemini";
-    if (req.purpose === "reveal") return { ok: false, lane, reason: "disabled", requests: 0 };
     if (this.geminiKey === null || this.fetchImpl === null) return { ok: false, lane, reason: "no-key", requests: 0 };
     if (!this.guard.tryConsume(req.room, req.purpose)) return { ok: false, lane, reason: "budget", requests: 0 };
 

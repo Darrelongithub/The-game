@@ -33,8 +33,18 @@ export {
   type SkeletonSource,
 } from "./slides.ts";
 
-export { writeFinale, narrateNight, flattenCards, buildRequestPayload, mergeSlides, mergeCards, normalizeTitle, SYSTEM_PROMPT } from "./write.ts";
-export type { WriteOptions, FinaleCopy, FlatCard } from "./write.ts";
+export {
+  SYSTEM_PROMPT,
+  buildRequestPayload,
+  finaleSummary,
+  flattenCards,
+  mergeCards,
+  mergeSlides,
+  narrateNight,
+  normalizeTitle,
+  writeFinale,
+} from "./write.ts";
+export type { FinaleCopy, FinaleSummary, FlatCard, WriteOptions } from "./write.ts";
 
 export {
   BANNED_PHRASES,

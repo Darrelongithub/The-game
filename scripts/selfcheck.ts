@@ -41,7 +41,9 @@ import {
   type VerdictKind,
 } from "../packages/shared/src/contracts.ts";
 import { BANK, bankTotal, loadBank, promptTypeKey, seededShuffle, selectFromBank } from "../packages/prompts/src/bank/index.ts";
-import { ollamaConfig } from "../packages/prompts/src/ollama.ts";
+import { fillNames, ollamaConfig, restoreNames } from "../packages/prompts/src/ollama.ts";
+import { Provider } from "../packages/prompts/src/provider.ts";
+import { PURPOSE_SLOTS } from "../packages/prompts/src/guard.ts";
 import { LOOK_CHAIN_VARIANTS, lookChainsFor } from "../apps/server/src/lookchain.ts";
 import { assertNoOrientationLeak } from "../packages/engine/src/results.ts";
 import {
@@ -75,22 +77,22 @@ ok("alias rejects 1 char / 15 chars", !isAlias("b") && !isAlias("abcdefghijklmno
 ok("players capped 4..11", playerCountOk(4) && playerCountOk(11) && !playerCountOk(3) && !playerCountOk(12) && !playerCountOk(4.5));
 
 // ------------------------------------------------------------------ sign-up
-ok("sign-up asks exactly 5 fields", PROFILE_QUESTIONS.length === 5);
+ok("sign-up asks exactly four fields", PROFILE_QUESTIONS.length === 4);
 ok(
   "sign-up fields are name-free and history-free",
-  PROFILE_QUESTIONS.map((q) => q.field).join(",") === "age,gender,sexuality,attractedTo,lookingFor",
+  PROFILE_QUESTIONS.map((q) => q.field).join(",") === "age,gender,sexuality,attractedTo",
 );
 ok("sign-up has no relationship-history question", !PROFILE_QUESTIONS.some((q) => /\bex\b|history|relationship\s*status|\bdated\b|marital/i.test(q.label + q.field)));
 ok("adult floor is 18", AGE_MIN === 18);
 ok(
   "profile under 18 rejected",
-  !isProfileAnswers({ age: 17, gender: "man", sexuality: "straight", attractedTo: "women", lookingFor: "fun" }),
+  !isProfileAnswers({ age: 17, gender: "man", sexuality: "straight", attractedTo: "women" }),
 );
 ok(
   "profile at 18 accepted",
-  isProfileAnswers({ age: 18, gender: "man", sexuality: "straight", attractedTo: "women", lookingFor: "fun" }),
+  isProfileAnswers({ age: 18, gender: "man", sexuality: "straight", attractedTo: "women" }),
 );
-ok("profile rejects unknown enum values", !isProfileAnswers({ age: 30, gender: "alien", sexuality: "straight", attractedTo: "women", lookingFor: "fun" }));
+ok("profile rejects unknown enum values", !isProfileAnswers({ age: 30, gender: "alien", sexuality: "straight", attractedTo: "women" }));
 
 // ------------------------------------------------------------------ responses
 ok("pick ok", isResponseValue({ kind: "pick", target: "p2" }));
@@ -155,8 +157,8 @@ ok("every prompt fits the char cap", BANK.every((p) => p.text.length <= MAX_PROM
 ok("no generic 'which vibe are you looking for' prompt", !bankTexts.has("which vibe are you looking for"));
 ok("no generic 'point at that person' prompt", ![...bankTexts].some((t) => t.includes("point at that person")));
 ok("no generic 'how warm are you, honestly' prompt", ![...bankTexts].some((t) => t.includes("how warm are you, honestly")));
-ok("loader puts the unhinged tier FIRST", loadBank({ spicy: true })[0]!.band === "spicy");
-ok("spicy-first band order", loadBank({ spicy: true })[0]!.source === "bank" && BAND_ORDER[0] === "spicy");
+ok("loader puts the unhinged tier FIRST", loadBank()[0]!.band === "spicy" && loadBank()[0]!.id.startsWith("un-"));
+ok("spicy-first band order", loadBank()[0]!.source === "bank" && BAND_ORDER[0] === "spicy");
 ok("bank covers all 4 bands", (["warmup", "spicy", "deep", "dare"] as Band[]).every((b) => BANK.some((p) => p.band === b)));
 const spicyWarmups = BANK.filter((p) => p.band === "spicy" && p.role === "subject").length;
 ok("10-15 spicy warm-ups", spicyWarmups >= 10 && spicyWarmups <= 15);
@@ -213,6 +215,12 @@ ok("ollama default base", cfg.baseUrl === "http://127.0.0.1:11434");
 ok("ollama default model", cfg.model === "dolphin-mistral");
 ok("ollama default timeout 120s", cfg.timeoutMs === 120_000);
 ok("ollama env overrides", ollamaConfig({ GEN_BASE: "http://x:1", GEN_MODEL: "llama3", GEN_TIMEOUT_MS: "1000" }).model === "llama3");
+ok("the local lane is handed the room's names", fillNames("Kiss {P1}?", ["Wanjiru", "Dee"]) === "Kiss Wanjiru?");
+ok("names go back to slots before anything is stored", restoreNames("Wanjiru kisses Dee", ["Wanjiru", "Dee"]) === "{P1} kisses {P2}");
+ok("no tamer-night switch: the bank takes no options", loadBank.length === 0 && bankTotal.length === 0);
+ok("the unhinged tier leads the bank", loadBank()[0]!.id.startsWith("un-"));
+ok("one call slot per lane", JSON.stringify(Object.keys(PURPOSE_SLOTS).sort()) === '["generate","reveal"]');
+ok("gemini is allowed to write the reveal", new Provider({ geminiApiKey: "k", env: {} }).modelFor("gemini", "reveal").length > 0);
 
 console.log(
   fail === 0

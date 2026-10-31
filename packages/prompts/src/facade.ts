@@ -9,7 +9,6 @@ import {
     BAND_ORDER,
     type Band,
     type MetricKey,
-    type PlayerId,
     type Prompt,
     type PromptRole,
     type RoundKind,
@@ -229,9 +228,3 @@ export { BANK };
 
 /** The band order the case engine walks. */
 export { BAND_ORDER };
-
-/** Every prompt id in the bank. */
-export const bankPromptIds = (): string[] => BANK.map((p) => p.id);
-
-/** Players in the room — helper for the engine. */
-export const roomPlayerIds = (ids: readonly PlayerId[]): PlayerId[] => [...ids];

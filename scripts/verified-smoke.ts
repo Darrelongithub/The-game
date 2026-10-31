@@ -116,7 +116,7 @@ async function main(): Promise<void> {
 
   // 4. The log never carries a profile answer.
   const logJson = JSON.stringify(after!.log);
-  for (const field of ["sexuality", "attractedTo", "lookingFor"]) {
+  for (const field of ["sexuality", "attractedTo", "lookingFor", "gender"]) {
     check(!logJson.includes(field), `the log carries a profile answer: ${field}`);
   }
 

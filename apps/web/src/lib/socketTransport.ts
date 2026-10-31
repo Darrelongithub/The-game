@@ -269,7 +269,6 @@ export class SocketTransport implements Transport {
           gender: "undisclosed",
           sexuality: "undisclosed",
           attractedTo: "undisclosed",
-          lookingFor: "undisclosed",
         },
         resume: { playerId: this.lastJoin.playerId, secret: this.lastJoin.secret },
       },

@@ -5,7 +5,7 @@ import { createServer } from 'node:http'
 import { Server } from 'socket.io'
 import { SocketTransport } from '../../lib/socketTransport.ts'
 
-const profile = { age: 28, gender: 'woman' as const, sexuality: 'straight' as const, attractedTo: 'women' as const, lookingFor: 'fun' as const }
+const profile = { age: 28, gender: 'woman' as const, sexuality: 'straight' as const, attractedTo: 'women' as const as const }
 const consent = { age: true, terms: true }
 
 async function main() {

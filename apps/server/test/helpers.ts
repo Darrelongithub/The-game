@@ -104,8 +104,14 @@ export class ManualClock {
   }
 }
 
-/** A prompt provider that serves the bank and never calls a model. */
-export function bankProvider(context: PromptProviderContext): PromptProvider {
+/**
+ * A prompt provider that serves the bank and never calls Ollama. `analyse` is
+ * optional: pass one to stand in for the Gemini reveal lane.
+ */
+export function bankProvider(
+  context: PromptProviderContext,
+  analyse?: (payload: Record<string, unknown>) => Promise<unknown | null>,
+): PromptProvider {
   const used = new Set<string>();
   return {
     draw: ({ role, count, kinds, metric }) => {
@@ -123,13 +129,16 @@ export function bankProvider(context: PromptProviderContext): PromptProvider {
     usedPromptIds: () => [...used],
     generate: async () => [...BANK],
     generationProgress: () => ({ done: BANK.length, total: 40 }),
+    ...(analyse ? { analyse } : {}),
   };
 }
 
 /** The real engine, with the bank standing in for the model. */
-export function testServices(): GameServices {
+export function testServices(
+  options: { analyse?: (payload: Record<string, unknown>) => Promise<unknown | null> } = {},
+): GameServices {
   return {
-    createPromptProvider: (context: PromptProviderContext) => bankProvider(context),
+    createPromptProvider: (context: PromptProviderContext) => bankProvider(context, options.analyse),
     computeSignals: (log: LogRecord[], meta: RoomMeta): PairSignal[] => computeSignals(log, meta),
     computeResults: (log: LogRecord[], meta: RoomMeta): Results => computeResults(log, meta),
     buildNightDigest: (log: LogRecord[], meta: RoomMeta): NightDigest => buildNightDigest(log, meta),
@@ -143,7 +152,12 @@ export function testServices(): GameServices {
       results: Results,
       digest: NightDigest,
       meta: RoomMeta,
-    ) => writeFinale(skeleton, decks, results, digest, { roster: meta.players }),
+      provider?: PromptProvider,
+    ) =>
+      writeFinale(skeleton, decks, results, digest, {
+        roster: meta.players,
+        gemini: provider?.analyse ? (payload) => provider.analyse!(payload) : undefined,
+      }),
   };
 }
 
@@ -153,5 +167,4 @@ export const adultProfile = {
   gender: "woman" as const,
   sexuality: "straight" as const,
   attractedTo: "women" as const,
-  lookingFor: "fun" as const,
 };

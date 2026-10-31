@@ -764,6 +764,48 @@ async function main() {
     ok('the answer locks in', !!q('[data-testid="locked-in"]'))
     await unmount()
 
+    // a dare: you did it, or you did not — and then you say why. No pass row.
+    const dareRound = {
+      ...pickRound,
+      kind: 'dare' as const,
+      promptText: 'Text your ex the sentence you never sent.',
+      note: "About Wanjiru. They won't see this.",
+      target: 'p2',
+    }
+    const sentDare: any[] = []
+    const elDare = await mount(
+      <QuestionScreen
+        round={dareRound as any}
+        view={room as any}
+        you={'p1'}
+        onSubmit={async (value) => { sentDare.push(value); return true }}
+      />,
+    )
+    ok('a dare offers "I did it"', !!q('[data-testid="dare-done"]'))
+    ok('a dare offers "I can\'t do it"', !!q('[data-testid="dare-couldnt"]'))
+    ok('a dare has no pass row and no excuse disclaimer', !/pass|is data/i.test(text(elDare)))
+    ok('the reason box only exists after "I can\'t do it"', q('[data-testid="dare-why"]') === null)
+    await click(q('[data-testid="dare-couldnt"]')!)
+    ok('tapping it opens the reason box', !!q('[data-testid="dare-why"]'))
+    ok('an empty reason cannot be sent', (q('[data-testid="dare-send-why"]') as HTMLButtonElement).disabled)
+    const why = q('[data-testid="dare-reason"]') as HTMLTextAreaElement
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(w.HTMLTextAreaElement.prototype, 'value')!.set!
+      setter.call(why, 'They are sitting right next to me.')
+      why.dispatchEvent(new w.Event('input', { bubbles: true }))
+    })
+    await tick(30)
+    ok('a written reason enables the send', !(q('[data-testid="dare-send-why"]') as HTMLButtonElement).disabled)
+    await click(q('[data-testid="dare-send-why"]')!)
+    ok(
+      'the dare answer is the reason, not a pass',
+      sentDare.length === 1
+        && sentDare[0].kind === 'dare'
+        && sentDare[0].status === 'passed'
+        && sentDare[0].reason === 'They are sitting right next to me.',
+    )
+    await unmount()
+
     // a look chain stage this phone only WATCHES
     const watchRound = {
       roundId: 'c9',

@@ -185,11 +185,6 @@ export function createGameServer(options: ServerOptions = {}): GameServer {
       reply(result);
     });
 
-    socket.on("dare_pass", () => {
-      // The dare answer is a normal submit with a "passed" value; this event
-      // exists so a client can send a reason without a full value payload.
-    });
-
     socket.on("lobby_ready", (req) => {
       const code = data.roomCode;
       const playerId = data.playerId;

@@ -35,7 +35,7 @@ async function main() {
     transport.setHandlers({ onSecrets: (d) => { deck = d } })
     await transport.join({
       roomCode: 'MOCK', alias: 'Guest 1', consent: { age: true, terms: true },
-      profile: { age: 27, gender: 'woman', sexuality: 'straight', attractedTo: 'women', lookingFor: 'fun' },
+      profile: { age: 27, gender: 'woman', sexuality: 'straight', attractedTo: 'women' },
     })
     transport.start()
     await new Promise((resolve) => setTimeout(resolve, 1100))
