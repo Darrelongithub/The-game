@@ -45,6 +45,7 @@ import { fillNames, ollamaConfig, restoreNames } from "../packages/prompts/src/o
 import { Provider } from "../packages/prompts/src/provider.ts";
 import { PURPOSE_SLOTS } from "../packages/prompts/src/guard.ts";
 import { LOOK_CHAIN_VARIANTS, lookChainsFor } from "../apps/server/src/lookchain.ts";
+import { hypotheticalFor, intoThisPerson } from "../apps/server/src/game.ts";
 import { assertNoOrientationLeak } from "../packages/engine/src/results.ts";
 import {
   CLOSENESS_METRICS,
@@ -221,6 +222,16 @@ ok("no tamer-night switch: the bank takes no options", loadBank.length === 0 && 
 ok("the unhinged tier leads the bank", loadBank()[0]!.id.startsWith("un-"));
 ok("one call slot per lane", JSON.stringify(Object.keys(PURPOSE_SLOTS).sort()) === '["generate","reveal"]');
 ok("gemini is allowed to write the reveal", new Provider({ geminiApiKey: "k", env: {} }).modelFor("gemini", "reveal").length > 0);
+
+// --------------------------------------------------------------- casting
+const woman = { age: 27, gender: "woman", sexuality: "straight", attractedTo: "men" } as const;
+const man = { age: 30, gender: "man", sexuality: "gay", attractedTo: "men" } as const;
+const nonbinary = { age: 25, gender: "nonbinary", sexuality: "queer", attractedTo: "everyone" } as const;
+ok("a binary attraction only removes the opposite sex", intoThisPerson(man, woman) && !intoThisPerson(woman, man));
+ok("a nonbinary player is never filtered out", intoThisPerson(nonbinary, woman) && intoThisPerson(nonbinary, man));
+ok("everyone / nobody / undisclosed cast wide", intoThisPerson(man, { ...nonbinary, attractedTo: "undisclosed" }) && intoThisPerson(woman, { ...nonbinary, attractedTo: "nobody" }));
+ok("no profile, no filtering", intoThisPerson(undefined, woman) && intoThisPerson(man, undefined));
+ok("an out player is not put on the spot by a hypothetical", !hypotheticalFor(man) && hypotheticalFor(woman) && hypotheticalFor(undefined));
 
 console.log(
   fail === 0

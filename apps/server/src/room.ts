@@ -362,7 +362,14 @@ export class RoomManager {
       const index = i;
       let built: Case | undefined;
       if (shape === "ship") {
-        built = buildShipVoteCase({ room, index, aliasOf: (id) => this.aliasOf(room, id), now, rand: this.rand });
+        built = buildShipVoteCase({
+          room,
+          index,
+          aliasOf: (id) => this.aliasOf(room, id),
+          now,
+          rand: this.rand,
+          draw: (role, count, opts) => this.drawPrompts(room, role, count, opts),
+        });
       } else if (shape === "bestcouple") {
         built = buildBestCoupleCase({ room, index, aliasOf: (id) => this.aliasOf(room, id), now, rand: this.rand });
       } else if (shape === "dare") {

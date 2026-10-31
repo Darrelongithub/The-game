@@ -7,7 +7,13 @@
 //   buildNightDigest(log, meta)        quotes, stats, dodges
 //   buildSecrets(results, log, meta)   the private per-phone decks
 export { computeSignals, pairSignalOf, topCouple, topFriends, pickTally, tallyAcross, pairVotes, pairPicks, pickResponses, traitAgreementOf, isDirectedAboutOthers, type PairWeights } from "./signals.ts";
-export { computeResults, assertNoOrientationLeak, resetVerdictIds, type ResultsConfig } from "./results.ts";
+export {
+    assertNoOrientationLeak,
+    computeResults,
+    orientationLeak,
+    resetVerdictIds,
+    type ResultsConfig,
+} from "./results.ts";
 export { buildNightDigest, collectQuotes, collectStats, collectDodges, collectRunningGags, collectLookChains, selfVsRoom } from "./digest.ts";
 export {
   buildSecrets,

@@ -16,6 +16,7 @@ import {
   lookChains,
   mutualCrushes,
   assertNoOrientationLeak,
+  orientationLeak,
   CLOSENESS_METRICS,
   COUPLE_METRICS,
   DESIRE_METRICS,
@@ -144,6 +145,27 @@ describe("computeResults", () => {
     assert.match(gay!.text, /If .* were gay/);
     assert.doesNotMatch(gay!.text, /\bis gay\b/i);
     assertNoOrientationLeak(results);
+  });
+
+  it("draws the line at describing someone, while allowing the room's hypothetical", () => {
+    assert.equal(orientationLeak("Kofi is gay."), true);
+    assert.equal(orientationLeak("Kofi is actually gay, everyone knows."), true);
+    assert.equal(orientationLeak("Dee turned out to be lesbian."), true);
+    assert.equal(orientationLeak("Zuri came out last year."), true);
+    assert.equal(orientationLeak("Nobody here is in the closet."), true);
+    // The sanctioned line: a vote on a question the whole room was asked.
+    assert.equal(orientationLeak("If Kofi and Zuri were gay they'd be a good couple (100% said yes)."), false);
+    // And a verdict that crossed the line is caught by the guard itself.
+    assert.throws(
+      () =>
+        assertNoOrientationLeak({
+          ...computeResults([vote("p1", "p3", "p4", 5, "gay-hypothetical")], meta),
+          verdicts: [
+            { id: "v-leak", kind: "gaycouple", subjects: ["p3", "p4"], tone: "warm", text: "Kofi is gay.", numbers: {}, strength: 1 },
+          ],
+        } as never),
+      /leaks an orientation claim/,
+    );
   });
 
   it("finds a blind spot from a self-rating that disagrees with the room", () => {

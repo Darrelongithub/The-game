@@ -14,7 +14,7 @@
 import { spawn } from "node:child_process";
 import { createGameServer } from "../apps/server/src/server.ts";
 import { createProductionServices } from "../apps/server/src/integratedServices.ts";
-import { computeResults, assertNoOrientationLeak } from "../packages/engine/src/index.ts";
+import { assertNoOrientationLeak, computeResults, orientationLeak } from "../packages/engine/src/index.ts";
 import type { LogRecord, SecretDeckView, VerdictKind } from "../packages/shared/src/contracts.ts";
 
 // Keys explicitly disabled: this harness never calls a hosted model.
@@ -92,12 +92,20 @@ async function main(): Promise<void> {
   const recipients = new Set(secretFrames.map((f) => f.recipient));
   check(recipients.size === secretFrames.length, "a socket received more than one deck");
 
-  // 2. The reveal never prints an orientation claim.
+  // 2. The reveal never prints an orientation CLAIM. The one place the word may
+  // appear is the room's own hypothetical — "Hypothetically · A If A and B were
+  // gay they'd be a good couple (N% said yes)." — which is a vote on a question
+  // the whole room was asked, not a fact about a person. Any other use of an
+  // orientation word, and anything that reads as "X is gay", fails the night.
+  const HYPOTHETICAL_LINE =
+    /^Hypothetically · .* If .* and .* were gay they'd be a good couple \(\d+% said yes\)\.$/;
   for (const finale of finales) {
     for (const slide of finale.slides) {
-      const text = `${slide.title} ${slide.body ?? ""}`;
-      check(!/\bis gay\b/i.test(text), `the reveal printed an orientation claim: "${text}"`);
-      check(!/\bstraight\b|\bgay\b|\bbisexual\b/i.test(text), `the reveal printed an orientation: "${text}"`);
+      const text = `${slide.title} ${slide.body ?? ""}`.trim();
+      check(!orientationLeak(text), `the reveal printed an orientation claim: "${text}"`);
+      if (/\bgay\b|\blesbian\b|\bbisexual\b|\bqueer\b|\bstraight\b/i.test(text)) {
+        check(HYPOTHETICAL_LINE.test(text), `an orientation word outside the sanctioned hypothetical: "${text}"`);
+      }
     }
   }
 

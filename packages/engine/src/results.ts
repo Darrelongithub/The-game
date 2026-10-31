@@ -678,13 +678,24 @@ export function computeResults(
 }
 
 /**
- * Assertion used by the server and the tests: no verdict may print "is gay"
- * or name a gay-guess target. The gay-guess metric never reaches this
- * function's outputs — the coupling path is the pair VOTE, not the guess.
+ * Who is who is nobody's business. A verdict may put the room's own
+ * hypothetical in front of the room — "If Kofi and Zuri were gay they'd be a
+ * good couple" is what the whole room was just asked to vote on — but it may
+ * never state, imply or tease out a person's orientation, and it never names
+ * who a gay-GUESS pick pointed at (that metric has no verdict path at all).
  */
+const ORIENTATION_CLAIM =
+    /\b(?:is|was|be|been|sounds|seems|looks|turned out)\s+(?:actually\s+|really\s+|secretly\s+|finally\s+|clearly\s+)?(?:gay|lesbian|bi|bisexual|queer|straight|hetero|homosexual|asexual|pansexual)\b/i;
+const COMING_OUT = /\bcame out\b|\b(?:out|in) the closet\b|\bcloseted\b|\bout as\b/i;
+
+/** True when a piece of copy describes somebody instead of asking about them. */
+export function orientationLeak(text: string): boolean {
+    return ORIENTATION_CLAIM.test(text) || COMING_OUT.test(text);
+}
+
 export function assertNoOrientationLeak(results: Results): void {
     for (const v of results.verdicts) {
-        if (/\bis gay\b/i.test(v.text)) {
+        if (orientationLeak(v.text)) {
             throw new Error(`engine: verdict ${v.id} leaks an orientation claim`);
         }
     }

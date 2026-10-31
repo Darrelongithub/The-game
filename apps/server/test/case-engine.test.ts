@@ -10,16 +10,30 @@
 //     every observer pair gets a DIFFERENT question, and the odd player gets
 //     a solo spicy prompt.
 //   • A case closes the INSTANT the last required person answers.
-//   • A pick is forced, and you can never pick yourself.
+//   • A pick is forced, and you can never pick yourself. On a question about
+//     who YOU want, the list is the people you said you are into — casting from
+//     the sign-up answers, which are printed nowhere.
 //   • A timed-out player is skipped and the game keeps moving.
 //   • There is ONE ready gate, at the very end, and then the reveal.
 //   • Secret decks go to exactly the two phones that earned them.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { RoomManager } from "../src/room.ts";
-import { roomViewFor, type Segment } from "../src/game.ts";
+import {
+  buildShipVoteCase,
+  intoThisPerson,
+  hypotheticalFor,
+  metricOf,
+  pickOptionsFor,
+  roomViewFor,
+  type Player,
+  type Room,
+  type Segment,
+} from "../src/game.ts";
 import type {
   PlayerId,
+  ProfileAnswers,
+  Prompt,
   ResponseValue,
   RoomView,
   SecretDeckView,
@@ -572,5 +586,223 @@ describe("the room view", () => {
     assert.ok(!json.includes("sexuality"));
     assert.ok(!json.includes("lookingFor"));
     assert.ok(!json.includes("gender"));   // the fifth field is gone from the contract entirely
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CASTING — the sign-up answers steer who a question is aimed at, and are
+// never printed. These run on hand-built rooms so the nightly shuffle cannot
+// decide what is being proved.
+// ---------------------------------------------------------------------------
+
+const adult = (over: Partial<ProfileAnswers> = {}): ProfileAnswers => ({
+  age: 27,
+  gender: "woman",
+  sexuality: "straight",
+  attractedTo: "women",
+  ...over,
+});
+
+/** A room, optionally with one segment open. */
+function fakeRoom(
+  entries: { id: PlayerId; alias: string; profile: ProfileAnswers }[],
+  segment?: Partial<Segment>,
+): Room {
+  const players = new Map<PlayerId, Player>();
+  for (const entry of entries) {
+    players.set(entry.id, {
+      id: entry.id,
+      alias: entry.alias,
+      secret: "s",
+      connected: true,
+      isBot: false,
+      profile: entry.profile,
+      ready: true,
+      finalReady: false,
+      joinedAt: 0,
+    });
+  }
+  const open: Segment = {
+    id: "seg-1",
+    players: [entries[0]!.id],
+    prompt: {
+      id: "q-1",
+      source: "bank",
+      band: "spicy",
+      role: "subject",
+      kind: "pick",
+      text: "Who in this room would you kiss?",
+      measures: ["metric:sex-desire"],
+      coding: "couple",
+      asksTarget: true,
+    },
+    kind: "pick",
+    text: "Who in this room would you kiss?",
+    note: "Your answer stays between you and the results.",
+    subjectId: entries[0]!.id,
+    aboutSelf: true,
+    closesAt: 0,
+    answered: new Set(),
+    skipped: false,
+    ...segment,
+  };
+  return {
+    code: "R1",
+    order: entries.map((entry) => entry.id),
+    players,
+    shipPairsUsed: new Set<string>(),
+    current: {
+      id: "case-1",
+      index: 0,
+      segments: [open],
+      required: new Set<PlayerId>(),
+      startedAt: 0,
+      closed: false,
+    },
+  } as unknown as Room;
+}
+
+const MIXED = [
+  { id: "p1", alias: "Wanjiru", profile: adult({ gender: "woman", attractedTo: "men" }) },
+  { id: "p2", alias: "Kofi", profile: adult({ gender: "man", sexuality: "gay", attractedTo: "men" }) },
+  { id: "p3", alias: "Dee", profile: adult({ gender: "nonbinary", sexuality: "queer", attractedTo: "everyone" }) },
+  { id: "p4", alias: "Zuri", profile: adult({ gender: "woman", sexuality: "straight", attractedTo: "men" }) },
+];
+
+const HYPOTHETICAL: Prompt = {
+  id: "sp-12",
+  source: "bank",
+  band: "spicy",
+  role: "group",
+  kind: "pair_vote",
+  text: "If {P1} and {P2} were gay, would they make a good couple?",
+  measures: ["metric:gay-hypothetical"],
+  coding: "couple",
+  asksTarget: true,
+};
+
+/** An observer's prompt, for the "never narrowed" cases. */
+const MIXED_PROMPT = {
+  id: "q-obs",
+  source: "bank",
+  band: "spicy",
+  role: "observer_subject",
+  kind: "pick",
+  text: "Who do you think {P1} would kiss?",
+  measures: ["metric:sex-desire"],
+  coding: "couple",
+  asksTarget: true,
+} as unknown as Prompt;
+
+describe("casting", () => {
+  it("matches an attraction to a gender, and filters nobody else out", () => {
+    assert.equal(intoThisPerson(adult({ gender: "man" }), adult({ attractedTo: "women" })), false);
+    assert.equal(intoThisPerson(adult({ gender: "woman" }), adult({ attractedTo: "women" })), true);
+    assert.equal(intoThisPerson(adult({ gender: "undisclosed" }), adult({ attractedTo: "women" })), true);
+    // a nonbinary player is never the one a binary preference removes
+    assert.equal(intoThisPerson(adult({ gender: "nonbinary" }), adult({ attractedTo: "men" })), true);
+    for (const attractedTo of ["everyone", "nobody", "undisclosed"] as const) {
+      assert.equal(intoThisPerson(adult({ gender: "man" }), adult({ attractedTo })), true);
+    }
+    // one side missing a profile at all → nothing is filtered
+    assert.equal(intoThisPerson(undefined, adult()), true);
+    assert.equal(intoThisPerson(adult(), undefined), true);
+    assert.equal(hypotheticalFor(adult({ sexuality: "gay" })), false);
+    assert.equal(hypotheticalFor(adult({ sexuality: "bi" })), false);
+    assert.equal(hypotheticalFor(adult({ sexuality: "undisclosed" })), true);
+    assert.equal(hypotheticalFor(undefined), true);
+  });
+
+  it("narrows a phone's own want, and nobody else's list", () => {
+    // Wanjiru's turn: into men, so the man and the nonbinary player.
+    const wanjiruTurn = fakeRoom(MIXED);
+    assert.deepEqual(pickOptionsFor(wanjiruTurn, "p1").sort(), ["p2", "p3"]);
+
+    // Kofi's turn: into men too, and a nonbinary player is never the one a
+    // binary preference removes.
+    const kofiTurn = fakeRoom(MIXED, { players: ["p2"], subjectId: "p2", aboutSelf: true });
+    assert.deepEqual(pickOptionsFor(kofiTurn, "p2"), ["p3"]);
+
+    // Dee is into everyone: the whole room but themselves.
+    const deeTurn = fakeRoom(MIXED, { players: ["p3"], subjectId: "p3", aboutSelf: true });
+    assert.deepEqual(pickOptionsFor(deeTurn, "p3").sort(), ["p1", "p2", "p4"]);
+
+    // A phone that is not answering right now keeps the whole room: the list a
+    // spectator could see is never the one that carries the casting.
+    assert.deepEqual(pickOptionsFor(wanjiruTurn, "p4").sort(), ["p1", "p2", "p3"]);
+
+    // An OBSERVER answering about somebody else is never narrowed either: one
+    // player's sign-up answers do not shape another player's question.
+    const observers = fakeRoom(MIXED, {
+      players: ["p2", "p3"],
+      subjectId: "p4",
+      aboutSelf: false,
+      prompt: { ...MIXED_PROMPT },
+    });
+    assert.deepEqual(pickOptionsFor(observers, "p2").sort(), ["p1", "p3", "p4"]);
+
+    // And a ranking of the room is nobody's business to trim.
+    const ranking = fakeRoom(MIXED, {
+      prompt: { ...MIXED_PROMPT, measures: ["metric:body-count"] },
+    });
+    assert.deepEqual(pickOptionsFor(ranking, "p1").sort(), ["p2", "p3", "p4"]);
+  });
+
+  it("never leaves a phone with nothing to pick", () => {
+    const room = fakeRoom([
+      { id: "p1", alias: "Wanjiru", profile: adult({ gender: "woman", attractedTo: "women" }) },
+      { id: "p2", alias: "Kofi", profile: adult({ gender: "man", attractedTo: "men" }) },
+      { id: "p3", alias: "Zuri", profile: adult({ gender: "man", attractedTo: "men" }) },
+    ]);
+    // Wanjiru is into women and the only woman is herself — she gets the room.
+    assert.deepEqual(pickOptionsFor(room, "p1").sort(), ["p2", "p3"]);
+  });
+
+  it("asks the gay-hypothetical about a pair it is a hypothetical for", () => {
+    const room = fakeRoom(MIXED);
+    const aliasOf = (id: PlayerId) => room.players.get(id)!.alias;
+    const built = buildShipVoteCase({ room, index: 0, aliasOf, now: 0, rand: () => 0.5, draw: () => [HYPOTHETICAL] });
+    assert.ok(built, "the case is built");
+    const segment = built!.segments[0]!;
+    assert.ok(!segment.text.includes("Kofi"), `Kofi is not put on the spot: ${segment.text}`);
+    assert.ok(!segment.note.includes("Kofi"), "and not in the grey line either");
+    assert.equal(metricOf(segment.prompt), "gay-hypothetical", "the answer feeds its own tally");
+    assert.match(segment.note, /^About .+ and .+\. They won't see this\.$/, "the note is unchanged in shape");
+    assert.ok(!JSON.stringify(segment).includes("profile"), "no profile rides along on the segment");
+  });
+
+  it("asks it anyway when the room gives no alternative — a skipped prompt is a tell", () => {
+    const allOut = fakeRoom([
+      { id: "p1", alias: "Kofi", profile: adult({ gender: "man", sexuality: "gay", attractedTo: "men" }) },
+      { id: "p2", alias: "Amina", profile: adult({ gender: "woman", sexuality: "gay", attractedTo: "women" }) },
+      { id: "p3", alias: "Bila", profile: adult({ gender: "man", sexuality: "bi", attractedTo: "everyone" }) },
+      { id: "p4", alias: "Ouma", profile: adult({ gender: "man", sexuality: "queer", attractedTo: "men" }) },
+    ]);
+    const built = buildShipVoteCase({
+      room: allOut,
+      index: 0,
+      aliasOf: (id) => allOut.players.get(id)!.alias,
+      now: 0,
+      rand: () => 0.5,
+      draw: () => [HYPOTHETICAL],
+    });
+    assert.ok(built, "the case still happens");
+    assert.equal(metricOf(built!.segments[0]!.prompt), "gay-hypothetical");
+  });
+
+  it("is an ordinary ship vote when the pool has no hypothetical", () => {
+    const room = fakeRoom(MIXED);
+    const built = buildShipVoteCase({
+      room,
+      index: 1,
+      aliasOf: (id) => room.players.get(id)!.alias,
+      now: 0,
+      rand: () => 0.5,
+      draw: () => [],
+    });
+    assert.ok(built);
+    const segment = built!.segments[0]!;
+    assert.match(segment.text, /make a good couple\?$/);
+    assert.equal(metricOf(segment.prompt), "couple-fit");
   });
 });

@@ -25,6 +25,7 @@ import {
   CASES_PER_NIGHT,
   DARE_CASES,
   MAX_PLAYERS,
+  METRIC,
   MIN_PLAYERS,
   READY_GATE_GRACE_MS,
   ROUND_TIMERS_MS,
@@ -273,6 +274,78 @@ export function metricOf(prompt: Prompt): string | undefined {
   return undefined;
 }
 
+// ---------------------------------------------------------------------------
+// casting — the ONLY thing the sign-up answers are used for
+// ---------------------------------------------------------------------------
+
+/**
+ * The metrics where a phone is choosing someone for ITSELF. A ranking of the
+ * room ("who has the biggest body count") is deliberately not here: the room
+ * gets to say that about anybody, and narrowing it would be censorship, not
+ * casting.
+ */
+const SELF_DESIRE_METRICS: ReadonlySet<string> = new Set<string>([METRIC.sexDesire, METRIC.crush]);
+
+/**
+ * Could this chooser be into this person? A binary attraction only removes the
+ * opposite sex from a list — a nonbinary or undisclosed player is never
+ * filtered out of anybody's list, and "everyone", "nobody" and "undisclosed"
+ * cast wide.
+ */
+export function intoThisPerson(
+  candidate: ProfileAnswers | undefined,
+  chooser: ProfileAnswers | undefined,
+): boolean {
+  if (!candidate || !chooser) return true;
+  switch (chooser.attractedTo) {
+    case "women":
+      return candidate.gender !== "man";
+    case "men":
+      return candidate.gender !== "woman";
+    default:
+      return true;
+  }
+}
+
+/**
+ * "If they were gay" is only a question for people it is a hypothetical for.
+ * Someone who already told us is not put on the spot with it. The reason a
+ * pair was preferred lives in this function and nowhere else — no client, log
+ * or model payload ever sees it, and the answer to the question is itself never
+ * printed as an identity (see results.ts).
+ */
+export const hypotheticalFor = (profile: ProfileAnswers | undefined): boolean =>
+  profile === undefined ||
+  profile.sexuality === "straight" ||
+  profile.sexuality === "undisclosed" ||
+  profile.sexuality === "other";
+
+/** The segment open on this phone right now, if it has one. */
+export const segmentFor = (room: Room, playerId: PlayerId): Segment | undefined => {
+  const current = room.current;
+  if (!current) return undefined;
+  const stage = current.stage ?? 0;
+  return current.segments.find((s) => (s.stage ?? 0) === stage && s.players.includes(playerId));
+};
+
+/**
+ * Who a phone may pick between: everyone but itself, narrowed by its OWN
+ * attraction when the question asks what it wants. An observer answering about
+ * somebody else is never narrowed — one player's sign-up answers do not shape
+ * another player's question. A narrowed list that leaves nobody to pick falls
+ * back to the whole room: a stalled case is worse than an unwieldy one.
+ */
+export function pickOptionsFor(room: Room, playerId: PlayerId): PlayerId[] {
+  const everyone = room.order.filter((id) => id !== playerId);
+  const segment = segmentFor(room, playerId);
+  if (!segment) return everyone;
+  const askingAboutItself = segment.aboutSelf === true || segment.subjectId === playerId;
+  if (!askingAboutItself || !SELF_DESIRE_METRICS.has(metricOf(segment.prompt) ?? "")) return everyone;
+  const chooser = room.players.get(playerId)?.profile;
+  const narrowed = everyone.filter((id) => intoThisPerson(room.players.get(id)?.profile, chooser));
+  return narrowed.length > 0 ? narrowed : everyone;
+}
+
 /**
  * The 18+ gate. Age comes from the sign-up profile; consent must be given.
  * This is asserted in code — not just checked in the UI.
@@ -449,25 +522,40 @@ export function buildShipVoteCase(input: {
   aliasOf: (id: PlayerId) => string;
   now: number;
   rand: () => number;
+  /** The night's pool, so the room's OWN hypothetical can be asked. */
+  draw?: DrawFn;
 }): Case | undefined {
-  const { room, index, aliasOf, now, rand } = input;
+  const { room, index, aliasOf, now, rand, draw } = input;
   const candidates = allPairs(room.order).filter(([a, b]) => !room.shipPairsUsed.has(pairKey(a, b)));
   if (candidates.length === 0) return undefined;
-  const [a, b] = candidates[Math.floor(rand() * candidates.length)]!;
+
+  // The bank's "if these two were a gay couple" prompts are pair votes like
+  // this one, so they are drawn here rather than left to rot in the deck. When
+  // one is available it is asked of a pair it is a HYPOTHETICAL for; when no
+  // such pair exists, or the pool is dry, the ship vote is an ordinary one.
+  const drawn = draw?.("group", 1, { kinds: ["pair_vote"], metric: METRIC.gayHypothetical })[0];
+  const hypothetical = drawn !== undefined && metricOf(drawn) === METRIC.gayHypothetical;
+  const preferred = hypothetical
+    ? candidates.filter(([x, y]) => hypotheticalFor(room.players.get(x)?.profile) && hypotheticalFor(room.players.get(y)?.profile))
+    : [];
+  const from = preferred.length > 0 ? preferred : candidates;
+  const [a, b] = from[Math.floor(rand() * from.length)]!;
   room.shipPairsUsed.add(pairKey(a, b));
 
   const voters = room.order.filter((id) => id !== a && id !== b);
-  const prompt: Prompt = {
-    id: `${room.code}-ship-${index}`,
-    source: "bank",
-    band: "spicy",
-    role: "group",
-    kind: "pair_vote",
-    text: `Would ${aliasOf(a)} and ${aliasOf(b)} make a good couple?`,
-    measures: ["metric:couple-fit"],
-    coding: "couple",
-    asksTarget: true,
-  };
+  const prompt: Prompt = drawn
+    ? { ...drawn, text: substitute(drawn.text, bindingFor([aliasOf(a), aliasOf(b)])) }
+    : {
+        id: `${room.code}-ship-${index}`,
+        source: "bank",
+        band: "spicy",
+        role: "group",
+        kind: "pair_vote",
+        text: `Would ${aliasOf(a)} and ${aliasOf(b)} make a good couple?`,
+        measures: ["metric:couple-fit"],
+        coding: "couple",
+        asksTarget: true,
+      };
   const segment: Segment = {
     id: `${room.code}-c${index}-ship`,
     players: voters,
@@ -834,8 +922,9 @@ export function roomView(room: Room, now: number): RoomView {
 /** The public view of the room for ONE player (their own case segment). */
 export function roomViewFor(room: Room, playerId: PlayerId, now: number): RoomView {
   const view = roomView(room, now);
-  // Your own pick list never contains you.
-  view.pickOptions = room.order.filter((id) => id !== playerId);
+  // Your own pick list never contains you — and, on a question about who YOU
+  // want, it only contains the people you said you are into.
+  view.pickOptions = pickOptionsFor(room, playerId);
   if (room.phase === "play") view.round = caseViewFor(room, playerId, now);
   return view;
 }
