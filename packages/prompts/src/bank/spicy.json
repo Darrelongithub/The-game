@@ -630,5 +630,125 @@
     "measures": ["metric:liar"],
     "coding": "tease",
     "asksTarget": true
+  },
+  {
+    "id": "sp-52",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "What would you do right now if nobody in this room was watching?",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-53",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "Which person here would you most want to disappear for a week with?",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-54",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "What is the pettiest thing you have ever done purely for attention?",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-55",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "Who in this room are you most attracted to, and what would you say to them first?",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-56",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "Say something you have never said out loud in front of these people.",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-57",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "What would your last one say about you if you were not in the room?",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-58",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "What is the worst mistake you have ever made in a bedroom?",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-59",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "Tell the room what you actually came here for.",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-60",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "What is the most illegal thing you have ever been tempted to do?",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-61",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "Who in this room would you trust with the thing you are most ashamed of?",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-62",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "What do you hope somebody asks you tonight, and nobody has?",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-63",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "What is the most chaotic thing you are willing to do before sunrise?",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
   }
 ]

@@ -20,6 +20,7 @@ import {
   bankCounts,
 } from "../src/index.ts";
 import { RAW_BANK } from "../src/bank/index.ts";
+import { CASES_PER_NIGHT } from "../../shared/src/contracts.ts";
 
 const GENERIC = [
   /which vibe are you looking for/i,
@@ -97,6 +98,14 @@ describe("the bank", () => {
     assert.ok(subjects.length >= 12, `only ${subjects.length} subject prompts`);
     const solos = BANK.filter((p) => p.role === "solo");
     assert.ok(solos.length >= 6, `only ${solos.length} solo prompts`);
+  });
+
+  it("has a solo prompt for every case of a night", () => {
+    // When the observer count is odd, the leftover answers a solo spicy
+    // prompt. That happens in EVERY case of a 4-, 6-, 8- or 10-player room,
+    // so the solo supply has to cover a whole night.
+    const solos = BANK.filter((p) => p.role === "solo").length;
+    assert.ok(solos >= CASES_PER_NIGHT, `only ${solos} solo prompts for a night of ${CASES_PER_NIGHT} cases`);
   });
 
   it("never asks a question about nobody", () => {
