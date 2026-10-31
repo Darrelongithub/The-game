@@ -190,9 +190,12 @@ export interface LogRecord {
 
 // ---------- Sign-up profile ----------
 // Engine-needed only. NEVER printed on any screen, never compared against the
-// room's guesses, never sent to a client. The engine uses gender + sexuality
-// + attraction to avoid building a ship between two people who could not fit,
-// and the raw values are dropped as soon as the night ends.
+// room's guesses, never sent to a client. Today the only thing the engine
+// does with a profile is the 18+ gate: the age decides whether the night
+// happens at all. Gender, sexuality and attraction are collected because the
+// brief asks for them, and they are deliberately NOT used to shape a ship or
+// a prompt — a guess about the room must never be traceable to what
+// somebody answered at sign-up. The raw values die with the room.
 export type Gender = "woman" | "man" | "nonbinary" | "other" | "undisclosed";
 export type Sexuality = "straight" | "gay" | "bi" | "pan" | "queer" | "asexual" | "other" | "undisclosed";
 export type Attraction = "women" | "men" | "everyone" | "nobody" | "undisclosed";

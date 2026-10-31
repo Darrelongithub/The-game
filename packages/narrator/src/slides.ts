@@ -114,9 +114,11 @@ const TITLE_BY_KIND: Record<VerdictKind, string> = {
  */
 export function slideForVerdict(verdict: Verdict, ps: Pseudonyms): FinaleSlide {
   const subject = verdict.subjects[0];
+  // The "never" couple is the same verdict type, the other way round.
+  const heading = isNeverCouple(verdict) ? "Never happening" : TITLE_BY_KIND[verdict.kind];
   const title = subject !== undefined && ps.byId.has(subject)
-    ? `${TITLE_BY_KIND[verdict.kind]} · ${ps.byId.get(subject)}`
-    : TITLE_BY_KIND[verdict.kind];
+    ? `${heading} · ${ps.byId.get(subject)}`
+    : heading;
   const slide: FinaleSlide = {
     beat: BEAT_BY_KIND[verdict.kind],
     flavor: "claim",
@@ -125,6 +127,11 @@ export function slideForVerdict(verdict: Verdict, ps: Pseudonyms): FinaleSlide {
     numbers: verdict.numbers,
   };
   return registerSource(slide, { kind: "verdict", verdictId: verdict.id, verdictKind: verdict.kind });
+}
+
+/** Is this the "the room said no" half of the couple verdict? */
+export function isNeverCouple(verdict: Verdict): boolean {
+  return verdict.kind === "couple" && verdict.id.includes("-never-");
 }
 
 /** A slide built from a verbatim quote. */
@@ -267,7 +274,7 @@ export function summaryFor(results: Results, ps: Pseudonyms): { couple?: string;
     const name = verdict.subjects[0];
     const token = name !== undefined ? ps.byId.get(name) : undefined;
     if (!token) continue;
-    if (verdict.kind === "couple" && !out.couple) out.couple = token;
+    if (verdict.kind === "couple" && !out.couple && !isNeverCouple(verdict)) out.couple = token;
     if (verdict.kind === "core" && !out.core) out.core = token;
     if (verdict.kind === "hates" && !out.hates) out.hates = token;
   }

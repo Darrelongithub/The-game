@@ -18,6 +18,8 @@
 export {
   buildSkeleton,
   clip,
+  isNeverCouple,
+  slideForLookChain,
   slideForVerdict,
   slideForQuote,
   slideForDodge,

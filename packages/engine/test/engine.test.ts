@@ -94,6 +94,28 @@ describe("computeResults", () => {
     assert.equal(results.verdicts.find((v) => v.kind === "couple"), undefined);
   });
 
+  it("ships the highest pair and never-ships the lowest one", () => {
+    const log = [
+      // The room loves p1 and p2.
+      vote("p3", "p1", "p2", 5),
+      vote("p4", "p1", "p2", 5),
+      vote("p5", "p1", "p2", 4),
+      // ...and cannot stand p3 and p4.
+      vote("p1", "p3", "p4", 1),
+      vote("p2", "p3", "p4", 1),
+      vote("p5", "p3", "p4", 2),
+    ];
+    const verdicts = computeResults(log, meta).verdicts;
+    const couples = verdicts.filter((v) => v.kind === "couple");
+    assert.equal(couples.length, 2, "one ship, one never");
+    const ship = couples.find((v) => !v.id.includes("-never-"))!;
+    const never = couples.find((v) => v.id.includes("-never-"))!;
+    assert.deepEqual([...ship.subjects].sort(), ["p1", "p2"]);
+    assert.match(ship.text, /say yes|%/);
+    assert.deepEqual([...never.subjects].sort(), ["p3", "p4"]);
+    assert.match(never.text, /never happen|not a thing/i);
+  });
+
   it("computes percent lines from OTHER players only", () => {
     // Three of the four other players pick p2 for sex.
     const log = [

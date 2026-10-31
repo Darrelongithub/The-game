@@ -58,7 +58,7 @@ export interface ResultsConfig {
 const DEFAULTS_PER_KIND: Record<VerdictKind, number> = {
     hates: 1,
     core: 1,
-    couple: 1,
+    couple: 2,
     sex: 1,
     percent: 3,
     gaycouple: 1,
@@ -330,6 +330,45 @@ export function computeResults(
                 numbers: { yes: best.yes, no: best.no, voters: best.voters, share: Number(share.toFixed(3)) },
                 strength,
             });
+        }
+
+        // The room's worst pair is a "never" — same verdict type, other way
+        // round. It only counts when at least two people actually voted.
+        if (tallies.size >= 2) {
+            let worst: PairTally | undefined;
+            for (const t of tallies.values()) {
+                if (t.voters < 2) continue;
+                if (best && t.pair[0] === best.pair[0] && t.pair[1] === best.pair[1]) continue;
+                const share = t.yes / Math.max(1, t.voters);
+                if (!worst || share < worst.yes / Math.max(1, worst.voters)) worst = t;
+            }
+            if (worst) {
+                const an = pseudoOf(meta, worst.pair[0]);
+                const bn = pseudoOf(meta, worst.pair[1]);
+                const share = worst.yes / Math.max(1, worst.voters);
+                const strength = clamp01((1 - share) * (worst.voters / Math.max(1, playerCount)));
+                const tone = toneFor(strength);
+                const text =
+                    tone === "filthy"
+                        ? `${an} and ${bn} should never happen. Not even close. (${pct(share)} said yes.)`
+                        : tone === "spicy"
+                          ? `${an} and ${bn} should never happen (${pct(share)} said yes).`
+                          : `${an} and ${bn} are not a thing, and the room agrees (${pct(share)} said yes).`;
+                push({
+                    id: vid("couple", "never", worst.pair[0], worst.pair[1]),
+                    kind: "couple",
+                    subjects: [worst.pair[0], worst.pair[1]],
+                    tone,
+                    text,
+                    numbers: {
+                        yes: worst.yes,
+                        no: worst.no,
+                        voters: worst.voters,
+                        share: Number(share.toFixed(3)),
+                    },
+                    strength,
+                });
+            }
         }
     }
 
