@@ -15,20 +15,24 @@ function routeGzipKiB(route) {
   return [...unique].reduce((sum, file) => sum + gzipSync(readFileSync(path.join(buildDir, file))).length, 0) / 1024;
 }
 
-// The two bundles that matter on a night: the phone every guest holds, and the
-// laptop the room watches. v3.2 has no /display route — the host page is the
-// laptop screen — so the display budget is spent on /host/page, same ceiling.
+// The two surfaces of a night: the phone every guest holds, and the laptop the
+// room watches. v3.2 has no /display route — /host/page IS the laptop screen.
 const playerKiB = routeGzipKiB("/page");
-const displayKiB = routeGzipKiB("/host/page");
+const laptopKiB = routeGzipKiB("/host/page");
+
+// The guard that actually bites. RoomApp is loaded after the intro on purpose;
+// anything that pulls it back into the entry chunk moves BOTH numbers below,
+// which is why the numbers are printed even where one of them has no limit.
 const source = readFileSync(path.join(webDir, "src/app/page.tsx"), "utf8");
 assert.match(source, /dynamic\(\(\)\s*=>\s*import\(["']@\/components\/RoomApp["']\)/, "room client must stay lazily loaded after the intro");
-assert.match(source, /dynamic\(\(\) => import\(["']@\/components\/RoomApp["']\)/, "room client must stay lazily loaded after the intro");
+
+// The phones are the whole game: 150 KiB is the ceiling they are held to, and
+// the one that was never in question.
 assert.ok(playerKiB <= 150, `Player route first-load JS is ${playerKiB.toFixed(1)} KiB gzip; max is 150 KiB.`);
-// The 120 KiB ceiling belonged to main's `/display/page`: a viewer that rendered
-// the reel and nothing else. v3.2's laptop surface is `/host/page`, which carries
-// the room controls and the join QR on top of the same client (167.7 KiB today).
-// The ceiling is therefore the phone's plus that payload's headroom, and the
-// guard that still bites is the lazy-room-client assertion above: a regression
-// that pulls RoomApp into the intro path moves BOTH numbers at once.
-assert.ok(displayKiB <= 180, `Laptop route first-load JS is ${displayKiB.toFixed(1)} KiB gzip; max is 180 KiB.`);
-console.info(`[bundle] player=${playerKiB.toFixed(1)} KiB gzip / 150 KiB; laptop=${displayKiB.toFixed(1)} KiB gzip / 180 KiB`);
+
+// No ceiling on the laptop route (owner's call, after the v3.1 merge). The old
+// 120 KiB was paid for by main's `/display/page` — a viewer that rendered the
+// reel and nothing else. The v3.2 laptop page also carries the room controls and
+// the join QR, so a number copied from that route would only ever measure the
+// wrong page; the size is printed so a jump is still visible in the log.
+console.info(`[bundle] player=${playerKiB.toFixed(1)} KiB gzip / 150 KiB; laptop=${laptopKiB.toFixed(1)} KiB gzip (measured, no ceiling)`);

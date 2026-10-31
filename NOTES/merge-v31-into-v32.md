@@ -70,12 +70,15 @@ single end-of-night `ReadyGate` is covered in the phone-layout block above them.
 `scripts/check-bundle.mjs` measures the phone bundle and the laptop bundle against
 the routes v3.2 actually ships: `/page` and `/host/page` (there is no `/display`
 route). This closes the check that had been red on this branch since the rebuild.
-The phone ceiling is untouched at 150 KiB (145.4 today). The laptop ceiling moved
-from main's 120 KiB to 180 KiB (167.7 today) **because the route it now measures is
-a different route**: main's 120 was paid for by a display page that rendered the
-reel and nothing else, while v3.2's laptop page also carries the room controls and
-the join QR. To take 120 back, the move is to give v3.2 its own lean `/display`
-route — not to keep measuring a route that does not exist.
+The phone ceiling is untouched at 150 KiB (145.4 today). main's 120 KiB on the
+laptop was deleted rather than loosened (owner's call): that number was paid for by
+a `/display/page` that rendered the reel and nothing else, and v3.2's laptop page
+also carries the room controls and the join QR — so holding it to a viewer's budget
+would only ever measure the wrong page. The laptop size is still computed and
+printed on every run (`laptop=167.7 KiB gzip (measured, no ceiling)`), and the
+assertion that keeps the phone route light — `RoomApp` stays lazily imported, which
+moves both numbers if it regresses — is untouched. Should v3.2 ever ship its own lean
+`/display` route, that route is what deserves a ceiling.
 
 `RUNBOOK.md` keeps main's three added sections with a `v3.1 lane, parked` banner
 on each; `packages/engine/README.md` no longer describes a `spark` secret the v3.2
