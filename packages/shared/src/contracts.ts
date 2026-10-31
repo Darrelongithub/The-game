@@ -1,9 +1,27 @@
 // packages/shared/src/contracts.ts
-// SINGLE SOURCE OF TRUTH. Agents A–G never edit this file.
-// Change requests go to NOTES/contract-requests.md; Agent Z resolves them.
+// SINGLE SOURCE OF TRUTH — brief v3.2.
+//
+// The game is a spicy party game for 4–11 friends, one phone each. Every
+// question is ABOUT people in the room, and every answer feeds a verdict or a
+// secret card. There is no quiz, no phase machinery and no per-round reveal:
+// one night is a flat sequence of CASES, one ready gate at the end, and a
+// reveal on the host laptop.
+//
+// Vocabulary used throughout:
+//   CASE   one round. It is about ONE subject and is played at the same time
+//          in three groups: observer PAIRS (each pair gets a different
+//          question), the SUBJECT (a real question of their own) and, when the
+//          observer count is odd, one SOLO player with a spicy prompt.
+//   SEGMENT one question inside a case, shown to the players who answer it.
+//          A player is in exactly one segment per case.
+//   BAND   an internal generation bucket (warmup / spicy / deep / dare).
+//          Bands are NOT phases: the night is shuffled, and no band name is
+//          ever shown to a player.
+//
+// PSEUDONYM DISCIPLINE (unchanged): prompts are authored with {P1}..{P11}
+// placeholders and real names are substituted server-side at display time.
 
-// ---------- Identity & rooms ----------
-export type PlayerId = string; // server-generated opaque id, e.g. "p3". NEVER the literal "self".
+export type PlayerId = string; // server-generated opaque id, e.g. "p3". NEVER "self".
 export type RoomCode = string; // 4 chars from ROOM_CODE_ALPHABET
 
 export const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
@@ -13,81 +31,141 @@ export const MAX_PLAYERS = 11;
 export const RETENTION_HOURS = 48;  // rooms hard-deleted after this
 export const IDLE_TTL_HOURS = 24;   // abandoned lobbies die after this
 export const AGE_MIN = 18;
-export const SPICY_TIER = true;     // include unhinged-tier bank prompts (private adult group)
 
-// ---------- Phases & rounds ----------
-export type Phase =
-| "lobby" | "warmup" | "spicy" | "deep" | "dare" | "debrief"
-| "interlude" | "finale" | "closed";
+/**
+ * Ollama wiring (env). The local model is the ONLY generator — it writes the
+ * night's questions, dares and one-line verdicts.
+ */
+export const OLLAMA = {
+    baseUrl: "http://127.0.0.1:11434",
+    model: "dolphin-mistral",
+    path: "/api/chat",
+} as const;
+export const MAX_PROMPT_CHARS = 160;
 
-export const HEAT_ORDER = ["warmup", "spicy", "deep", "dare"] as const;
+// ---------- Phases (player-facing only) ----------
+// lobby → generating → play → results → closed
+export type Phase = "lobby" | "generating" | "play" | "results" | "closed";
 
+// ---------- Heat bands (internal generation buckets, never shown) ----------
+export type Band = "warmup" | "spicy" | "deep" | "dare";
+// Spicy first: if generation times out, the most important prompts already exist.
+export const BAND_ORDER: readonly Band[] = ["spicy", "warmup", "deep", "dare"];
+
+// ---------- Round kinds & answer kinds ----------
 export type RoundKind =
-| "pick" | "text" | "shout" | "rating" | "ios"
-| "minigame" | "dare" | "pair_dare" | "debrief"
-// Live moments (ROUND 3). Both are group-theatre rounds, not more questions:
-//   spotlight — everyone EXCEPT one subject answers a question about the live
-//               moment; the subject gets a DECOY round and never sees it.
-//   verdict   — open discussion for VERDICT_DISCUSS_MS, then a simultaneous
-//               secret pick; the reveal is a Group Announcement mini-finale.
-| "spotlight" | "verdict"
-// THE SECOND VOICE (CONFESS ROUNDS). A confess round asks the SAME question of
-// everyone and every player answers about THEMSELVES, privately: yes/no, an
-// optional target and an optional one-line note. Group rounds ("Who here…")
-// capture the room's perception; confess rounds ("Have you ever…") capture
-// reality. No skip option — a non-answer stays missing, never "no".
-| "confess";
+  | "pick"         // choose ONE person in the room (forced, never yourself)
+  | "text"         // short written answer (<= 140 chars)
+  | "longtext"     // long written answer (<= 280 chars)
+  | "rating"       // 1..10 rating of yourself or someone in the room
+  | "dare"         // do it, or "I can't" plus a required reason
+  | "pair_vote"    // vote on a proposed pair (yes / no)
+  | "pair_pick";   // choose one pair from a list of pairs
+
+export const ROUND_KINDS: readonly RoundKind[] = [
+  "pick", "text", "longtext", "rating", "dare", "pair_vote", "pair_pick",
+];
 
 export type PromptCoding =
-| "couple" | "friendship" | "trust" | "friction" | "tease" | "rivalry" | "status" | "neutral";
+  | "couple" | "friendship" | "trust" | "friction" | "tease" | "rivalry" | "status" | "neutral";
+
+/**
+ * The role a prompt plays inside a case. It decides WHO answers it and which
+ * names get substituted into its {P1}/{P2} slots.
+ */
+export type PromptRole =
+  | "subject"          // asked to the subject, about themselves or their own view
+  | "observer_subject" // asked to an observer pair, about the case subject
+  | "observer_pair"    // asked to an observer pair, about ANOTHER pair in the room
+  | "group"            // asked to everyone; results are counts only
+  | "solo"             // the odd leftover observer gets a spicy prompt of their own
+  | "dare";            // aimed at a named player
+
+export const PROMPT_ROLES: readonly PromptRole[] = [
+  "subject", "observer_subject", "observer_pair", "group", "solo", "dare",
+];
+
+// ---------- Metrics: what a prompt actually measures ----------
+// The engine keys off these; the prompts carry them in `measures` as
+// "metric:<key>" so a verdict can always point at the data behind it.
+export const METRIC = {
+  /** "who would you have sex with" — feeds the percent lines. */
+  sexDesire: "sex-desire",
+  /** "who has the highest body count here" */
+  bodyCount: "body-count",
+  /** "who is the best in bed here" */
+  bestInBed: "best-in-bed",
+  /** "who would snitch" */
+  wouldSnitch: "would-snitch",
+  /** "who would cheat" */
+  wouldCheat: "would-cheat",
+  /** "who is fake" */
+  isFake: "is-fake",
+  /** "who is the weirdest" */
+  weirdest: "weirdest",
+  /** "who is going to fall apart tonight" */
+  crier: "crier",
+  /** "who is the most dangerous" */
+  mostDangerous: "most-dangerous",
+  /** "who would you ruin a friendship for" */
+  ruinFriendship: "ruin-friendship",
+  /** "who has a crush on someone here" */
+  crush: "crush",
+  /** "who would make a good couple" */
+  coupleFit: "couple-fit",
+  /** "who is closest to you" */
+  closest: "closest",
+  /** "who do you trust" */
+  trust: "trust",
+  /** "who is the biggest liar" */
+  liar: "liar",
+  /** "who has the most money / spends the most" */
+  money: "money",
+  /** "who would betray the group" */
+  betrayal: "betrayal",
+  /** "who has the weirdest secret" */
+  secret: "secret",
+  /** "who is your ex" */
+  ex: "ex",
+  /** "who hooks up the most" */
+  hookups: "hookups",
+  /** A HYPOTHETICAL question about a pair. Never an orientation claim. */
+  gayHypothetical: "gay-hypothetical",
+  /** A look chain: the actor's own (hidden) choice. */
+  lookchain: "lookchain",
+  /** A look chain: somebody's guess at who the actor is looking at. */
+  lookchainGuess: "lookchain-guess",
+} as const;
+
+export type MetricKey = (typeof METRIC)[keyof typeof METRIC];
 
 export interface Prompt {
-    id: string;
-    source: "bank" | "host" | "grok" | "gemini";
-    phase: "warmup" | "spicy" | "deep" | "dare";
-    kind: RoundKind;
-    text: string;                // {P1}..{P11} placeholders, substituted server-side for display ONLY
-    measures: string[];
-    coding: PromptCoding;
-    asksTarget: boolean;
-    /** THE SECOND VOICE: which register this prompt is written in.
-     *  "group"   — addressed to the room, everyone picks someone else.
-     *  "confess" — second person, self-report ("Have you ever…"), answered
-     *              about the player themselves.
-     *  Absent means "group" (back-compat for host lines and old rows). */
-    style?: PromptStyle;
-    /** PAYOFF: links a group seed to the confess seed on the SAME topic. The
-     *  director may schedule the confess twin 1–3 rounds after its group twin
-     *  — the room's perception, then the room's reality. */
-    twinId?: string;
+  id: string;
+  source: "bank" | "host" | "ollama";
+  band: Band;
+  role: PromptRole;
+  kind: RoundKind;
+  text: string;              // {P1}..{P11} placeholders, substituted server-side for display ONLY
+  measures: string[];        // signal names, "metric:<key>" first when it measures a verdict
+  coding: PromptCoding;
+  asksTarget: boolean;
 }
-
-/** THE 50/50 — prompts come in two voices; the night balances them. */
-export type PromptStyle = "group" | "confess";
-/** Share of QUESTION rounds per style. Sums to 1 (selfcheck asserts it). */
-export const STYLE_MIX = { group: 0.5, confess: 0.5 } as const;
-/** A confession's optional one-line note — a digest gold nugget, not an essay. */
-export const CONFESS_NOTE_MAX = 140;
-/** How long after its group twin a confess twin may be scheduled (rounds). */
-export const TWIN_WINDOW = { min: 1, max: 3 } as const;
 
 // ---------- Responses & log ----------
 export type TraitId = "loyalty" | "chaos" | "reliability" | "warmth" | "honesty" | "spice";
 export const TRAITS: TraitId[] = ["loyalty", "chaos", "reliability", "warmth", "honesty", "spice"];
 
 export type ResponseValue =
-| { kind: "pick"; target: PlayerId }                                  // ≠ self
-| { kind: "text"; text: string }                                      // ≤280 chars
-| { kind: "shout"; word: string }                                     // ≤24 chars
-| { kind: "rating"; trait: TraitId; about: "self"; value: number }    // 1..10
-| { kind: "rating"; trait: TraitId; about: PlayerId; value: number }  // 1..10, ≠ self
-| { kind: "ios"; about: PlayerId; value: number }                     // 1..7, ≠ self
-| { kind: "minigame"; score: number }
-// CONFESS: a private self-report. No "skip" — a non-answer simply never lands
-// in the log and stays MISSING (never converted to "no"). `target` is the
-// optional "…someone in this room?" subject; `note` is a one-line aside.
-| { kind: "confess"; yes: boolean; target?: PlayerId; note?: string }
-| { kind: "dare"; status: "done" | "passed"; reason?: string };       // reason REQUIRED iff passed, ≤140
+  | { kind: "pick"; target: PlayerId }                                  // != self, always
+  | { kind: "pair_pick"; pair: [PlayerId, PlayerId] }                    // one of the offered pairs
+  | { kind: "pair_vote"; pair: [PlayerId, PlayerId]; value: number }     // 1..5; >=4 counts as yes
+  | { kind: "text"; text: string }                                       // <= 280 chars
+  | { kind: "rating"; trait: TraitId; about: "self" | PlayerId; value: number } // 1..10
+  | { kind: "dare"; status: "done" | "passed"; reason?: string };        // reason REQUIRED iff passed, <=140
+
+export const TEXT_MAX_CHARS = 280;
+export const SHORT_TEXT_MAX_CHARS = 140;
+export const DARE_REASON_MAX_CHARS = 140;
 
 export interface LogRecord {
     roomId: string;
@@ -98,37 +176,47 @@ export interface LogRecord {
     coding: PromptCoding;        // denormalized from the Prompt so the engine needs no bank lookup
     value: ResponseValue;
     at: number;                  // epoch ms
-    latencyMs: number;           // round open → submit. Night-Digest fuel.
-    /** DEMO ROOMS ONLY: host identity for puppeted seats; ignored by the engine. */
-    impersonatedBy?: PlayerId;
-    /** Spotlight decoy answer: the subject's throwaway reply to the cover
-     *  round. EXCLUDED from every signal, score and claim (data-or-dead does
-     *  not apply — it answers nothing). It is digest gold only: it pairs with
-     *  the captions ("While the room captioned X, X wrote: …") and lands last
-     *  in the caption-wall reveal. */
-    decoy?: boolean;
-    /** Solo dare performer or pair-dare respondent; persisted for accountability. */
-    performerId?: PlayerId;
-    /** Self-pick is a self-image signal, never pair evidence. */
-    selfSignal?: "selfimage";
+    latencyMs: number;           // round open -> submit. Night-Digest fuel.
+    /** Which segment of the case this answer belongs to. */
+    segmentId?: string | undefined;
+    /** The band the prompt came from (internal). */
+    band?: Band | undefined;
+    /** The metric this prompt measures, when it measures one. */
+    metric?: MetricKey | undefined;
+    /** The case subject, when the case had one. */
+    subjectId?: PlayerId | undefined;
 }
 
-export interface ProfileAnswers { age: number; relationship: "single" | "dating" | "committed" | "married" | "complicated"; partnersToDate: number; longestMonths: number; crushingHere: boolean; tonight: "chaos" | "vibes" | "feelings" | "mission"; }
+// ---------- Sign-up profile ----------
+// Engine-needed only. NEVER printed on any screen, never compared against the
+// room's guesses, never sent to a client, never sent to a model. The ONLY thing
+// the engine does with a profile is the 18+ gate: the age decides whether the
+// night happens at all. Nothing else is asked, because nothing else is used —
+// there is no 'what are you here for tonight' question, no relationship history,
+// no vibe check. A guess the room makes about somebody must never be traceable
+// to what they typed at sign-up. The raw values die with the room.
+export type Gender = "woman" | "man" | "nonbinary" | "other" | "undisclosed";
+export type Sexuality = "straight" | "gay" | "bi" | "pan" | "queer" | "asexual" | "other" | "undisclosed";
+export type Attraction = "women" | "men" | "everyone" | "nobody" | "undisclosed";
+
+export interface ProfileAnswers {
+    age: number;
+    gender: Gender;
+    sexuality: Sexuality;
+    attractedTo: Attraction;
+}
+
 export const PROFILE_QUESTIONS = [
     { field: "age", label: "How old are you?", kind: "number" },
-    { field: "relationship", label: "Your relationship status?", kind: "select" },
-    { field: "partnersToDate", label: "How many people have you dated?", kind: "number" },
-    { field: "longestMonths", label: "Longest relationship (months)?", kind: "number" },
-    { field: "crushingHere", label: "Crushing on someone here? (stays secret)", kind: "boolean", secret: true },
-    { field: "tonight", label: "What are you here for tonight?", kind: "select" },
+    { field: "gender", label: "Gender", kind: "select", options: ["woman", "man", "nonbinary", "other", "undisclosed"] },
+    { field: "sexuality", label: "Sexuality", kind: "select", options: ["straight", "gay", "bi", "pan", "queer", "asexual", "other", "undisclosed"] },
+    { field: "attractedTo", label: "Who are you attracted to?", kind: "select", options: ["women", "men", "everyone", "nobody", "undisclosed"] },
 ] as const;
 
-export interface RoomMeta {
-    roomId: string;
-    players: { id: PlayerId; alias: string }[];
-    revealOptIn: PlayerId[];     // consented to private spark / one-sided / secret cards
-    profiles?: Record<PlayerId, ProfileAnswers>;
-}
+// ---------- Engine: room metadata ----------
+/** The engine's view of a room: who is in it, in order. No profile answers. */
+export interface PlayerMeta { id: PlayerId; alias: string; }
+export interface RoomMeta { roomId: string; players: PlayerMeta[]; }
 
 // ---------- Engine: pair signals ----------
 export interface PairSignal {
@@ -137,14 +225,7 @@ export interface PairSignal {
     b: PlayerId;
     pickOverlap: number;         // 0..1
     mutualPick: number;          // 0..1
-    debriefSim: number;          // 0..1; componentsUsed distinguishes measured zero from missing
-    componentsUsed: ("pickOverlap" | "mutualPick" | "debriefSim" | "iosMean" | "traitAgreement" | "confession")[];
-    /** THE SECOND VOICE (0..1): how often this pair named each other in confess
-     *  answers. Optional — absent means no confess evidence. EVIDENCE ONLY:
-     *  it counts toward the ≥3-independent-types rule and is never sufficient
-     *  alone (it carries weight 0 in the pair formula). */
-    confession?: number;
-    iosMean: number;             // 0..1
+    componentsUsed: ("pickOverlap" | "mutualPick" | "traitAgreement")[];
     traitAgreement: number;      // 0..1
     pairScore: number;           // weighted, 0..1
     coupleEvidence: number;      // 0..1
@@ -152,28 +233,43 @@ export interface PairSignal {
     negativeMutual: number;      // 0..1
 }
 
-// ---------- Engine: claims & results ----------
-export type ClaimType =
-| "ship" | "besties" | "toxic" | "rival" | "blindspot"
-| "onesided" | "consensus" | "spark";
-export type Audience = "public" | "private";
-export type Confidence = "low" | "med" | "high";
+// ---------- Engine: verdicts ----------
+// The ONLY things the reveal is allowed to say. Every verdict is backed by
+// data; if the data is weak the verdict does not exist.
+export type VerdictKind =
+  | "hates"        // "The group lowkey hates on X."
+  | "core"         // "X and Y are the core of this group."
+  | "couple"       // "A and B would lowkey be a good couple (80% said yes)."
+  | "sex"          // "C and E should just have sex."
+  | "percent"      // "30% of people here want to have sex with X."
+  | "gaycouple"    // "If X and Y were gay they'd be a good couple."
+  | "bodycount"    // "The room thinks X has the highest body count."
+  | "bestinbed"    // "The room thinks X is the best in bed here."
+  | "besties"      // "X and Y are inseparable."
+  | "rivals"       // "X and Y cannot be in the same room."
+  | "freeagent"    // "Nobody in this room is claiming X."
+  | "blindspot";   // "X thinks they're 9/10 loyal, the room said 4."
 
-export interface Claim {
+export type VerdictTone = "mild" | "spicy" | "filthy";
+
+export interface Verdict {
     id: string;
-    type: ClaimType;
-    subjects: PlayerId[];            // 1 for solo awards, 2 for pairs
-    audience: Audience;              // onesided + spark are ALWAYS private (→ Secret Cards)
-    confidence: Confidence;
-    evidence: string[];              // engine-written; the narrator quotes these
-    numbers?: Record<string, number>;
+    kind: VerdictKind;
+    subjects: PlayerId[];        // 1 for solo verdicts, 2 for pair verdicts
+    tone: VerdictTone;
+    /** The one-line verdict text, written from a template picked by data strength. */
+    text: string;
+    /** The numbers behind it — never invented, always derived from the log. */
+    numbers: Record<string, number>;
+    /** Strength of the underlying data (0..1). Templates are picked from this. */
+    strength: number;
 }
 
 export interface Results {
     roomId: string;
-    claims: Claim[];
+    verdicts: Verdict[];
     pairScores: PairSignal[];
-    freeAgent?: PlayerId;            // odd-n leftover from matching
+    freeAgent?: PlayerId | undefined;
     computedAt: number;
 }
 
@@ -182,192 +278,169 @@ export interface DigestQuote { alias: string; text: string; context: string; }
 
 export interface DigestStats {
     fastest?: { alias: string; ms: number };      // quickest finger tonight
-    slowest?: { alias: string; ms: number };      // took the FULL 90s on feelings
+    slowest?: { alias: string; ms: number };      // took the FULL timer on a feelings round
     topDodger?: { alias: string; count: number }; // most "I can't"s
-    tapWar?: { alias: string; score: number };    // minigame champion
+}
+
+export interface DigestLookChain {
+    /** The id of the player who was looking. */
+    actorId: PlayerId;
+    /** The id of the player they were looking at. */
+    targetId: PlayerId;
+    /** The alias of the player who was looking. */
+    actor: string;
+    /** The alias they were looking at — the truth, only revealed at the end. */
+    target: string;
+    /** How many people guessed right. */
+    guessedRight: number;
+    /** How many people guessed at all. */
+    guessers: number;
+    /** The actor's own reason. */
+    reason?: string | undefined;
 }
 
 export interface NightDigest {
-    quotes: DigestQuote[];                          // ≤12, verbatim, best material
+    quotes: DigestQuote[];                          // <=12, verbatim, best material
     stats: DigestStats;
     runningGags: { word: string; count: number }[]; // shout words that keep winning
     pickTeasers: string[];                          // engine-written, no finale spoilers
     dodges: { alias: string; reason: string }[];    // verbatim excuses
     selfVsRoom: { alias: string; trait: TraitId; self: number; roomMean: number }[];
+    /** The look chains played tonight — revealed only at the end. */
+    lookChains?: DigestLookChain[] | undefined;
 }
 
 // ---------- Views ----------
-export interface PlayerView { id: PlayerId; alias: string; connected: boolean; isBot: boolean; }
+export interface PlayerView { id: PlayerId; alias: string; connected: boolean; isBot: boolean; /** Lobby ready tick. */ ready: boolean; }
 
+/** One question, shown to ONE player. Aliases are already substituted. */
 export interface RoundView {
     roundId: string;
-    index: number;               // 1-based within the night
-    phase: Phase;
+    segmentId: string;
+    index: number;               // 1-based case number within the night
     kind: RoundKind;
-    promptText: string;          // aliases already substituted
-    closesAt: number;            // epoch ms
+    promptText: string;          // this player's question, aliases substituted
+    /** The small grey line under the question: who it is about and who can see it. */
+    note: string;
+    closesAt: number;            // epoch ms — the CAP, not the pace
     youSubmitted: boolean;
-    onlyPlayers?: PlayerId[];    // pair_dare/debrief rounds; everyone else watches
-    /** verdict rounds: open discussion until this epoch ms, then the secret
-     *  simultaneous pick opens (closesAt = voteOpensAt + VERDICT_VOTE_MS). */
-    voteOpensAt?: number;
-    /** false for the spotlight subject's IDLE cover screen — the phone waits
-     *  the round out without offering an input. Absent means "answer me". */
-    expectsAnswer?: boolean;
-    about?: PlayerId;
-    trait?: TraitId;
-    performer?: PlayerId;
-    submitted?: PlayerId[];
+    /** The pair being voted on (pair_vote rounds). */
+    pair?: [PlayerId, PlayerId] | undefined;
+    /** The candidate pairs to choose from (pair_pick rounds). */
+    options?: { id: string; members: [PlayerId, PlayerId]; label: string }[] | undefined;
+    /** The named player a dare is aimed at. */
+    target?: PlayerId | undefined;
+    /** The trait a rating is about. */
+    trait?: TraitId | undefined;
+    /** Whether the rating is about yourself. */
+    aboutSelf?: boolean | undefined;
+    /** Who the question is about — the case subject. */
+    subjectId?: PlayerId | undefined;
+    submitted?: PlayerId[] | undefined;
+    /**
+     * The look-chain stage: 1 = look, 2 = guess, 3 = why.
+     * Undefined for an ordinary case.
+     */
+    stage?: number | undefined;
+    /**
+     * True when this phone only WATCHES. There is no answer to give — the
+     * phone shows the line and waits.
+     */
+    passive?: boolean | undefined;
+    /** Whose look it is, on a look chain. */
+    chainActor?: PlayerId | undefined;
+    /**
+     * True when the answer stays hidden until the reveal. The room never sees
+     * it during the night.
+     */
+    hidden?: boolean | undefined;
 }
 
 export interface RoomView {    // PUBLIC — contains nothing private
     code: RoomCode;
     phase: Phase;
-    hostId: PlayerId;            // host = creator: start/skip/add_bot/custom_prompts
     players: PlayerView[];
     round: RoundView | null;
     seq: number;
-    /** Demo room: the host plays every seat from one laptop (spec §1). Demo
-     *  rooms are the only place the `demo_*` events are accepted; gameplay,
-     *  scoring and claims are identical to a real room. */
-    demo?: boolean;
-    /** Present ONLY while a reveal is pending: the players who have pressed
-     *  `ready` for it. The reveal waits for everyone (a reconnecting phone
-     *  must not miss the moment) and fires after `REVEAL_READY_GRACE_MS`
-     *  regardless. Absent at every other moment. */
-    ready?: PlayerId[];
+    /** The host laptop is connected. */
+    hostPresent?: boolean | undefined;
+    /** Present ONLY during the single end-of-night ready gate. */
+    ready?: PlayerId[] | undefined;
+    /** Lobby ready ticks — who has pressed "I'm ready" in the lobby. */
+    lobbyReady?: PlayerId[] | undefined;
+    /**
+     * The players THIS player may pick — never themselves. Present only on a
+     * player's own view; the laptop never answers, so it has no pick list.
+     */
+    pickOptions?: PlayerId[] | undefined;
+    /** Case progress: how many cases are done and how many are coming. */
+    progress?: { index: number; total: number } | undefined;
+    /** Generation progress, shown on the loading screen. */
+    generation?: { done: number; total: number } | undefined;
+    /**
+     * The public one-liner for the case that is open — the look chain's
+     * "Everybody look at X." The laptop shows it; it is never private.
+     */
+    headline?: string | undefined;
 }
 
-export interface InterludeView {
-    headline: string;
-    sub: string;
-    teaser?: string;             // Night-Digest data drop
+/** The 1–2 second beat between cases. */
+export interface BeatView {
+    label: string;
     holdMs: number;
-}
-
-export interface RevealItem { alias: string; text: string; }
-
-/**
- * CONFESS REVEAL — the room's aggregate answer. SECRECY RULES ARE HARD:
- *   • WARM tier (warmup): COUNTS ONLY. No names, no hints, no attribution.
- *   • SPICY tier (spicy/deep): YES answers are attributed (alias only, never a
- *     PlayerId); NO answers are NEVER attributed in any tier — only the count.
- *   • Notes are anonymised at warm ("someone wrote: …"), attributed at spicy.
- * A non-answer is MISSING: it is never folded into the "no" count.
- */
-export interface ConfessRevealView {
-    tier: "warm" | "spicy";
-    yes: number;                 // how many said yes (count only)
-    no: number;                  // how many said no — COUNT ONLY, never who
-    of: number;                  // players in the room this round was asked of
-    missing: number;             // phones that never answered (∉ yes, ∉ no)
-    /** SPICY only: YES answers, by alias. A "no" never appears here. */
-    attributed?: { alias: string; note?: string }[];
-    /** Notes. `alias` absent = anonymised ("someone wrote: …"). */
-    notes?: { alias?: string; text: string }[];
-}
-
-export interface RevealView {
-    roundId: string;
-    summary: string;
-    items?: RevealItem[];        // text answers, shout winner, dare outcomes…
-    holdMs: number;
-    /** Present for live moments so the phone can render the specialised
-     *  reveal instead of the generic list. */
-    kind?: RoundKind;
-    /** spotlight: the alias being watched — the caption wall's header. The
-     *  question itself is NEVER part of the reveal payload. */
-    subject?: string;
-    /** spotlight: the subject's decoy answer. It lands LAST and biggest. */
-    punchline?: string;
-    /** verdict: the Group Announcement mini-finale (anonymous bars, count-up,
-     *  then the room's answer lands). Numbers are counts only. */
-    slide?: FinaleSlide;
-    /** verdict: couple-coded prompts get confetti on the land beat. */
-    celebrate?: boolean;
-    /** confess rounds: the aggregate answer under the secrecy rules above. */
-    confess?: ConfessRevealView;
-}
-
-export type SlideBeat = "tease" | "escalate" | "land";
-
-export interface FinaleSlide {
-    beat: SlideBeat;
-    flavor?: "claim" | "quote" | "stat" | "dodge" | "group";  // "group" → Group Announcement treatment
-    claimId?: string;
-    title: string;               // pseudonym copy ("Player 3"); server swaps aliases after narration
-    body?: string;
-    numbers?: Record<string, number>;  // vote counts / shares — fuels the Group Announcement animations
-}
-
-export interface FinaleView {  // BROADCAST-SAFE — public slides only, identical on every phone
-    slides: FinaleSlide[];
-    summary: { ship?: string; besties?: string; toxic?: string; rivals?: string };
+    /** The case this beat closes (absent for room-wide beats). */
+    roundId?: string | undefined;
 }
 
 // ---------- Secret decks (private cards — ONE phone only) ----------
 // Private material NEVER rides the broadcast `finale`. Each player with
 // private material gets a personal deck via the `secrets` event, emitted only
-// on their socket. Cards are face-down and HOLD-TO-REVEAL: press and hold to
-// open, release to hide again — shoulder-surfers see nothing. A deck is a
-// bunch of facts about YOU.
-export type SecretKind = "spark" | "onesided" | "blindspot" | "roomnote" | "stat";
+// on their socket. Cards are face-down and HOLD-TO-REVEAL.
+//
+// There is exactly ONE crush card and it exists only for a MUTUAL pick:
+// "You and X like each other." Nobody is ever told about a one-sided crush,
+// who picked them, or that someone did not pick them back.
+export type SecretKind = "crush" | "blindspot" | "lookchain";
 
 export interface SecretCard {
     id: string;
     kind: SecretKind;
-    title: string;               // pseudonym copy; server swaps "Player N" → alias after narration
-    facts: string[];             // 1–4 short lines; numbers ONLY from engine claims/digest
+    title: string;               // pseudonym copy; server swaps "Player N" -> alias
+    facts: string[];             // 1-4 short lines; numbers ONLY from engine verdicts/digest
 }
 
 export interface SecretDeckView {
-    cards: SecretCard[];         // ≤ SECRET_DECK_MAX; ordered spark → onesided → blindspot → roomnote → stat
+    cards: SecretCard[];         // <= SECRET_DECK_MAX
 }
 
 export const SECRET_DECK_MAX = 6;    // cards per player, per night
-export const SECRET_HOLD_MS = 400;   // press-and-hold ramp before a card opens; release hides it again
+export const SECRET_HOLD_MS = 400;   // press-and-hold ramp before a card opens
 
-// ---------- INTERNAL: Director hypotheses (ROUND 4) ----------
-// INTERNAL — engine/server only. NEVER serialized to any client: not on
-// `state`, `round`, `reveal`, `interlude`, `finale`, `secrets`, `error`, not in
-// a room log line that leaves the process, not in any JSONL file a player can
-// read. Hypotheses are game-DIRECTION hints (what the engine privately wants
-// to probe next), never content. Players see the freshness they cause and
-// nothing else. Do not add a Hypothesis to ServerToClientEvents.
-export type HypothesisKind = "tension" | "besties" | "secret" | "selfimage" | "onesided" | "freeagent";
-export type HypothesisStatus = "open" | "supported" | "refuted" | "unresolved";
+// ---------- Finale (host laptop) ----------
+export type SlideBeat = "tease" | "escalate" | "land";
 
-export interface Hypothesis {
-    id: string;
-    kind: HypothesisKind;
-    subjects: PlayerId[];        // pseudonymous in any LLM context
-    status: HypothesisStatus;
-    strength: number;            // 0..1 — deterministic engine value
-    evidence: string[];          // engine-written, incremental
-    openedAt: number;            // epoch ms — may be a PREVIOUS night
-    lastTestedRound?: string;
+export interface FinaleSlide {
+    beat: SlideBeat;
+    flavor?: "claim" | "quote" | "stat" | "dodge" | "group";
+    title: string;               // pseudonym copy ("Player 3"); server swaps aliases after narration
+    body?: string;
+    numbers?: Record<string, number>;
 }
 
-// ---------- INTERNAL: accounts (ROUND 4) ----------
-// Server-side identity only. The client holds a token, never a hash and never
-// an email address — there is no email field anywhere in this contract, by
-// design ("store it, there is no email").
-export interface AccountInfo { username: string; createdAt: number; nightsPlayed: number; }
-// server stores: username (3–16 chars, [a-z0-9_], case-insensitive unique),
-// pinHash (scrypt), recoveryCodeHash, token seeds
+export interface FinaleView {  // BROADCAST-SAFE — public slides only, identical on every laptop
+    slides: FinaleSlide[];
+    summary: { couple?: string; core?: string; hates?: string; };
+}
 
 // ---------- Socket contract ----------
-export interface Consent { age: boolean; terms: boolean; revealOptIn: boolean; }
-
-export type JoinRole = "player" | "display";
+export interface Consent { age: boolean; terms: boolean; }
 
 export interface JoinRequest {
     roomCode: RoomCode;
-    alias: string;               // 2–14 chars
+    alias: string;               // 2-14 chars
     consent: Consent;            // age must be true (18+)
+    profile: ProfileAnswers;
     resume?: { playerId: PlayerId; secret: string };
-    role?: JoinRole;
-    profile?: ProfileAnswers;
 }
 
 export interface JoinReply {
@@ -378,44 +451,28 @@ export interface JoinReply {
     error?: string;
 }
 
-export interface SubmitRequest { roundId: string; clientUuid: string; value: ResponseValue; }
-export interface DarePassRequest { roundId: string; reason: string; }   // reason REQUIRED, ≤140
+export interface SubmitRequest { roundId: string; segmentId?: string; clientUuid: string; value: ResponseValue; }
 
 export type ClientToServerEvents = {
-    create: (p: { alias: string; consent: Consent; profile?: ProfileAnswers; role?: JoinRole; demo?: boolean }, reply: (r: JoinReply & { code?: RoomCode }) => void) => void;
     join: (p: JoinRequest, reply: (r: JoinReply) => void) => void;
-    display_join: (p: { roomCode: RoomCode }, reply: (r: { ok: boolean; state?: RoomView; error?: string }) => void) => void;
+    /** The host laptop binds to tonight's room with its token — no code to type. */
+    host_join: (p: { token: string }, reply: (r: { ok: boolean; state?: RoomView; error?: string }) => void) => void;
     submit: (p: SubmitRequest, reply: (r: { ok: boolean; error?: string }) => void) => void;
-    dare_pass: (p: DarePassRequest) => void;
-    /** "I'm ready for the pending reveal" — every player's round-trip to the
-     *  room reveal. The reveal waits for each connected player (up to
-     *  REVEAL_READY_GRACE_MS) so nobody misses the moment. */
+    /** The lobby tick: "I'm in". */
+    lobby_ready: (p: { ready: boolean }) => void;
+    /** "Ready for the results" — the ONE ready gate, at the end of the night. */
     ready: () => void;
-    start: () => void;                                   // host only
-    add_bot: () => void;                                 // host only (fill seats / solo test)
-    skip_round: () => void;                              // host only
-    custom_prompts: (p: { lines: string[] }) => void;    // host only, lobby, ≤10 lines, ≤160 chars each
-    vote_heat_down: () => void;
+    start: () => void;                                   // host laptop only
+    force_results: () => void;                           // host laptop only — skip the ready gate
+    add_bot: () => void;                                 // host laptop only (fill seats / solo test)
+    skip_round: () => void;                              // host laptop only
     delete_room: () => void;                             // ANY player
-
-    // ---------- DEMO ROOMS: host-only, demo rooms only, puppeted seats only ----------
-    // A demo room lets one host play every seat from one laptop so the whole
-    // game can be tested alone. The engine is untouched: a puppet's answers are
-    // ordinary LogRecords (plus `impersonatedBy` metadata it ignores).
-    demo_add_player: (p: { alias: string }, reply: (r: { ok: boolean; playerId?: PlayerId }) => void) => void;
-    demo_remove_player: (p: { playerId: PlayerId }) => void;
-    /** auto = the puppet answers and readies itself; manual = it waits for the host. */
-    demo_set_bot_mode: (p: { playerId: PlayerId; mode: "auto" | "manual" }) => void;
-    demo_answer_as: (p: { playerId: PlayerId; roundId: string; clientUuid: string; value: ResponseValue }) => void;
-    demo_all_ready: () => void;                          // shortcut: mark every seat ready
-    demo_speed: (p: { scale: number }) => void;          // 0.1..1.0 timer scale
 };
 
 export type ServerToClientEvents = {
     state: (p: RoomView) => void;
     round: (p: RoundView) => void;
-    reveal: (p: RevealView) => void;
-    interlude: (p: InterludeView) => void;
+    beat: (p: BeatView) => void;
     finale: (p: FinaleView) => void;          // broadcast-safe: public slides only
     secrets: (p: SecretDeckView) => void;     // ONLY the owning player's socket — NEVER broadcast
     deleted: () => void;
@@ -424,137 +481,86 @@ export type ServerToClientEvents = {
 
 // ---------- Tunables (config, not logic) ----------
 export const DEFAULT_WEIGHTS = {
-    pickOverlap: 0.30,
-    mutualPick: 0.20,
-    debriefSim: 0.20,
-    iosMean: 0.15,
-    traitAgreement: 0.15,
+    pickOverlap: 0.45,
+    mutualPick: 0.30,
+    traitAgreement: 0.25,
 } as const;
-
-export const TOXIC_WEIGHTS = { indegree: 0.6, contemptTags: 0.4 } as const;
 
 export const CONFIDENCE_RULES = {
     high: { independentSignals: 3, consensusShare: 0.70 },
     med: { independentSignals: 2, consensusShare: 0.55 },
 } as const;
 
-export const JOKER_GUARD = { sameTargetShare: 0.70, downweight: 0.5 } as const;
-
-export const MC_SIMULATIONS = 1000;   // seeded PRNG → deterministic, once per room
-
-/** verdict: seconds of open debate ("PHONES DOWN. ARGUE IT OUT.") */
-export const VERDICT_DISCUSS_MS = 90_000;
-/** verdict: simultaneous secret pick window after the debate */
-export const VERDICT_VOTE_MS = 15_000;
-/** spotlight: a short caption, not an essay */
-export const SPOTLIGHT_ANSWER_MAX = 80;
-/** spotlight: how long the caption wall holds (stack, then the punchline) */
-export const SPOTLIGHT_REVEAL_MS = 8_000;
-/** verdict: the room's answer lands, then the phase moves on */
-export const VERDICT_REVEAL_MS = 6_000;
-
-// ---------- Director tunables (ROUND 4 — INTERNAL, never player-visible) ----------
-/**
- * MID-BAND FORMATION. A suspicion only becomes a hypothesis when its
- * deterministic strength lands inside this band: strong enough to be worth
- * probing, weak enough to be a suspicion rather than a conclusion.
- *  - inside [lo, hi]      → the hypothesis forms / keeps updating;
- *  - above the band WITH ≥3 independent signals (and ≥70% consensus where it
- *    applies) → it GRADUATES to an ordinary Claim and leaves the hypothesis
- *    set (paying off at the finale like any other claim);
- *  - below the band       → noise. Never opens, and an existing one fades.
- */
-export const HYPOTHESIS_FORM_BAND = { lo: 0.35, hi: 0.65 } as const;
+/** The provider cap for one night (both lanes share one ledger). */
+export const MAX_PROVIDER_CALLS_PER_NIGHT = 8;
 
 /**
- * THE VISIBLE MAGIC — how every non-live round is chosen.
- *   test    50% — probe an OPEN hypothesis's subjects on its dimension
- *   explore 30% — least-covered (pair × dimension) cell of the coverage matrix
- *   classic 20% — bank/callback rounds as before
- * Fractions are config, not logic: retune by replaying logs (spec §14).
+ * The provider lanes. Ollama is the ONLY generator — it writes the night's
+ * questions and dares. Gemini arranges the data (analysis only).
  */
-export const ROUND_MIX = { test: 0.5, explore: 0.3, classic: 0.2 } as const;
-
-/**
- * ANTI-TELEGRAPH. Never more than this many CONSECUTIVE rounds touching the
- * same subject pair. Without it the engine machine-guns two people and the
- * room clocks the game — which is the one thing players must never be able to
- * do. A hidden rule that makes the hidden engine believable.
- */
-export const ANTI_TELEGRAPH_MAX = 2;
-
-export const ROUND_TIMERS_MS: Record<RoundKind, number> = {
-    pick: 25_000, text: 60_000, shout: 25_000, rating: 25_000, ios: 40_000,
-    minigame: 12_000, dare: 300_000, pair_dare: 330_000, debrief: 60_000,
-    // Live moments. Spotlight = 25s of captioning. Verdict = 90s of arguing
-    // with phones face-down, then 15s of secret simultaneous picking.
-    spotlight: 25_000, verdict: VERDICT_DISCUSS_MS + VERDICT_VOTE_MS,
-    // CONFESS: a private yes/no — no essay, no skip. The timer closes it.
-    confess: 20_000,
-};
-
-export const REVEAL_HOLD_MS = 4200;
-/** THE READY GATE (ROUND 4). A finished round's reveal is PENDING until every
- *  connected player presses ready — a phone in a pocket, a bathroom break or a
- *  reconnect must not cost anyone the moment. After this long the reveal fires
- *  anyway, so a single AFK phone can never stall the night. */
-export const REVEAL_READY_GRACE_MS = 20_000;
-export const INTERLUDE_HOLD_MS = 3200;
-export const GRACE_MS = 0;            // the displayed timer is the default ceiling
-export const PICK_ROUNDS_PER_PHASE = 2;
-export const SPARK_MIN_MUTUAL = 2;
-export const CONSENSUS_MIN_PICKERS = 4;
-export const ROUNDS_PER_PHASE = 4;    // warmup / spicy / deep including pick slots
-export const DARE_ROUNDS = 2;         // solo dares before the pair dare
-
-// ---------- LLM providers ----------
-// TWO INDEPENDENT LANES — deterministic code is primary everywhere (bank
-// prompts, Jaccard similarity, lexicon tags, template finale); providers only
-// augment. Each lane checks only its own key and degrades to code silently:
-//   Grok   (XAI_API_KEY)    → unhinged prompt generation ONLY.
-//   Gemini (GEMINI_API_KEY) → batched tagging and debrief analysis only; never finale narration.
-// Gemini never generates game prompts (it soft-refuses spicy); Grok never
-// analyzes or narrates. Neither key → full game, zero internet.
 export const PROVIDERS = {
-    grok: {
-        // OpenAI-compatible REST: POST {baseUrl}/chat/completions with Bearer XAI_API_KEY.
-        // grok-4-1-fast: $0.20 in / $0.50 out per 1M (verified Oct 2026) — batched,
-        // ONE call per phase (~15 candidates), in the lobby background only.
-        // VERIFY the id at https://docs.x.ai/docs/models before wiring; if it 404s,
-        // request the current one via NOTES/contract-requests.md.
-        // Envelope ≈ "R-rated movie" (verified Oct 2026): adult banter / dark
-        // humour / innuendo pass; explicit sexual acts, minors, real-person sexual
-        // content, non-consent are hard-blocked. xAI has NO per-category threshold
-        // knobs — our deterministic filter (banned patterns, length, placeholders)
-        // is the guardrail.
-        baseUrl: "https://api.x.ai/v1",
-        generate: "grok-4-1-fast", // unhinged generation + callbacks — Grok's only job
+    ollama: {
+        baseUrl: OLLAMA.baseUrl,
+        model: OLLAMA.model,
     },
     gemini: {
-        // Analysis-only lane. Batched tags and debrief similarity are local
-        // analysis aids; finale copy is deterministic/Grok and never Gemini.
-        tag: "gemini-3.5-flash-lite",       // cheap classification, one batch call
-        analyze: "gemini-3.5-flash-lite",    // pair-dare debrief judgment
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        tagModel: "gemini-2.5-flash",
+        analyzeModel: "gemini-2.5-flash",
     },
 } as const;
 
-// Hard API budget: generation 4 (one per phase) + tag 1 + debrief 1 +
-// reveal+secrets 1 = 7. "Most things are done through code" — the cap is
-// enforced in code, not vibes.
-export const MAX_PROVIDER_CALLS_PER_NIGHT = 8;
+/** Gemini model resolution — env override wins, contract default otherwise. */
+export function resolveGeminiModel(envModel?: string | undefined): string {
+    const trimmed = typeof envModel === "string" ? envModel.trim() : "";
+    return trimmed.length > 0 ? trimmed : PROVIDERS.gemini.analyzeModel;
+}
 
-/** Shared resolver for every Gemini API call site. */
-export const resolveGeminiModel = (override?: string): string =>
-    typeof override === "string" && override.trim() ? override.trim() : PROVIDERS.gemini.analyze;
-
-// Gemini-only request field: set all four adjustable filters to the most
-// permissive threshold the current API accepts ("OFF" on the new interactions
-// API; "BLOCK_NONE" on classic v1beta — agent D verifies which applies).
+/** Gemini safety thresholds — the game is adult consensual content by design. */
 export const SAFETY_OFF = [
+    { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF" },
+    { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "OFF" },
+    { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF" },
     { category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF" },
-{ category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF" },
-{ category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF" },
-{ category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "OFF" },
 ] as const;
+
+/** Confidence levels for a data-backed claim. */
+export type Confidence = "high" | "med" | "low";
+
+/**
+ * TIMING. A case ends the instant the last required person answers; the timer
+ * is only a CAP. A player who runs out of time is skipped and the game
+ * continues.
+ */
+export const ROUND_TIMERS_MS: Record<RoundKind, number> = {
+    pick: 30_000,
+    text: 45_000,
+    longtext: 75_000,
+    rating: 20_000,
+    dare: 90_000,
+    pair_vote: 30_000,
+    pair_pick: 30_000,
+};
+
+/** The 1-2s "locked in" beat between cases. */
+export const BEAT_HOLD_MS = 1_500;
+
+/** How many cases a night runs. */
+export const CASES_PER_NIGHT = 12;
+/** Ship-vote cases (random pairs) inside a night. */
+export const SHIP_VOTE_CASES = 3;
+/** Dares scattered through the night. */
+export const DARE_CASES = 2;
+/** Look chains scattered through the night (6-8, depending on the room). */
+export const LOOK_CHAIN_CASES = 6;
+export const LOOK_CHAIN_CASES_MAX = 8;
+
+/** The single ready gate at the end of the night. */
+export const READY_GATE_GRACE_MS = 30_000;
+
+/** Generation: the local model needs minutes, not seconds. */
+export const GEN_TIMEOUT_MS = 120_000;      // per batch
+export const GEN_SAFETY_CAP_MS = 180_000;   // whole generation; after this we start anyway
+export const GEN_TARGET_PROMPTS = 40;       // "14/40 ready" on the loading screen
 
 export const pseudonym = (index: number) => `Player ${index + 1}`; // ONLY this ever leaves the server

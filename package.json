@@ -17,7 +17,6 @@
     "typecheck": "node scripts/typecheck.mjs",
     "smoke:oracle": "node scripts/smoke-with-oracle.mjs",
     "smoke:verified": "tsx scripts/verified-smoke.ts",
-    "measure:sparks": "tsx scripts/spark-incidence.ts",
     "test:components": "tsx --tsconfig apps/web/scripts/tsconfig.test.json scripts/test-components.mjs"
   },
   "devDependencies": {

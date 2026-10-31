@@ -1,339 +1,371 @@
 [
   {
-    "id": "u1",
-    "phase": "spicy",
+    "id": "un-01",
+    "band": "spicy",
+    "role": "observer_subject",
     "kind": "pick",
-    "text": "Who in this room have you had a dream about that you'd never admit to? Point.",
+    "text": "Who would {P1} absolutely wreck in bed?",
     "measures": [
-      "directed desire signal"
-    ],
-    "coding": "couple",
-    "asksTarget": true,
-    "style": "group",
-    "twinId": "sc2"
-  },
-  {
-    "id": "u2",
-    "phase": "spicy",
-    "kind": "rating",
-    "text": "Rate {P2}'s freakiness 1–10. Pray they rate you back.",
-    "measures": [
-      "trait:spice",
-      "spice trait agreement",
-      "blind spot"
-    ],
-    "coding": "friction",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "u3",
-    "phase": "spicy",
-    "kind": "pick",
-    "text": "If the feeling were mutual, who here would you choose for a make-out?",
-    "measures": [
-      "couple-coding seed"
-    ],
-    "coding": "couple",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "u4",
-    "phase": "spicy",
-    "kind": "rating",
-    "text": "Rate {P3}'s flirty energy toward YOU specifically, 1–10.",
-    "measures": [
-      "trait:spice",
-      "dyadic perception gap",
-      "one-sided fuel"
-    ],
-    "coding": "couple",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "u5",
-    "phase": "spicy",
-    "kind": "text",
-    "text": "What's something someone in this room does that accidentally turns you on? You'll name them anyway.",
-    "measures": [
-      "desire tags",
-      "named target"
-    ],
-    "coding": "friction",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "u6",
-    "phase": "spicy",
-    "kind": "pick",
-    "text": "Who here could steal your partner in under an hour? Point at the threat.",
-    "measures": [
-      "rivalry",
-      "threat consensus"
-    ],
-    "coding": "rivalry",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "u7",
-    "phase": "spicy",
-    "kind": "ios",
-    "text": "How close are you and {P4} really? Circles — and the room can see you thinking.",
-    "measures": [
-      "closeness map under spicy pressure"
-    ],
-    "coding": "couple",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "u8",
-    "phase": "spicy",
-    "kind": "pick",
-    "text": "Who here has the most sexual tension with someone ELSE in this room? Point.",
-    "measures": [
-      "pick cluster",
-      "consensus"
+      "metric:best-in-bed",
+      "guess"
     ],
     "coding": "tease",
-    "asksTarget": true,
-    "style": "group"
+    "asksTarget": true
   },
   {
-    "id": "u9",
-    "phase": "spicy",
-    "kind": "rating",
-    "text": "Rate how well {P5} hides their crushes, 1–10.",
-    "measures": [
-      "trait:spice",
-      "directed perception"
-    ],
-    "coding": "friction",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "u10",
-    "phase": "spicy",
+    "id": "un-02",
+    "band": "spicy",
+    "role": "observer_subject",
     "kind": "pick",
-    "text": "Who in this room would you genuinely risk it all for? Point. No context will be provided.",
+    "text": "Who has the most hookups in this room?",
     "measures": [
-      "couple pick",
-      "high signal"
+      "metric:hookups",
+      "guess"
     ],
-    "coding": "couple",
-    "asksTarget": true,
-    "style": "group"
+    "coding": "status",
+    "asksTarget": true
   },
   {
-    "id": "u11",
-    "phase": "deep",
-    "kind": "text",
-    "text": "What's a line someone in this room crossed with you that you never brought up?",
-    "measures": [
-      "grievance tags",
-      "dyadic friction"
-    ],
-    "coding": "friction",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "u12",
-    "phase": "deep",
+    "id": "un-03",
+    "band": "spicy",
+    "role": "group",
     "kind": "pick",
-    "text": "Who here knows something about your sex life that nobody else does? Point.",
+    "text": "Who here would you suck off without being asked twice?",
     "measures": [
-      "trust map",
-      "closeness"
-    ],
-    "coding": "trust",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "u13",
-    "phase": "deep",
-    "kind": "pick",
-    "text": "Who's the first person in this room you'd tell about a wild hookup? Point.",
-    "measures": [
-      "confidant map"
-    ],
-    "coding": "trust",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "u14",
-    "phase": "deep",
-    "kind": "text",
-    "text": "What's something sexual you're insecure about that someone here has probably already guessed?",
-    "measures": [
-      "vulnerability",
-      "room-referenced"
-    ],
-    "coding": "trust",
-    "asksTarget": false,
-    "style": "group"
-  },
-  {
-    "id": "u15",
-    "phase": "deep",
-    "kind": "rating",
-    "text": "Rate {P6}'s rizz 1–10. They will see this at the finale.",
-    "measures": [
-      "trait:spice",
-      "peer rating",
-      "finale-visible"
-    ],
-    "coding": "friction",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "u16",
-    "phase": "deep",
-    "kind": "pick",
-    "text": "Who here flirts with everyone but would panic if it actually worked? Point.",
-    "measures": [
-      "status",
-      "flirt-pattern"
+      "metric:sex-desire"
     ],
     "coding": "tease",
-    "asksTarget": true,
-    "style": "group"
+    "asksTarget": true
   },
   {
-    "id": "u17",
-    "phase": "deep",
-    "kind": "ios",
-    "text": "Be honest: how close are you and {P7} ACTUALLY? Circles. No rounding down.",
+    "id": "un-04",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who has the highest body count here, and how would they prove it?",
     "measures": [
-      "closeness under pressure"
+      "metric:body-count"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "un-05",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who in this room is the best in bed, and what exactly do they do?",
+    "measures": [
+      "metric:best-in-bed"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "un-06",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who would you have sex with right now if they said yes and nobody else was watching?",
+    "measures": [
+      "metric:sex-desire"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "un-07",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pair_vote",
+    "text": "Would {P1} and {P2} be good in bed together?",
+    "measures": [
+      "metric:couple-fit"
     ],
     "coding": "couple",
-    "asksTarget": true,
-    "style": "group"
+    "asksTarget": true
   },
   {
-    "id": "u18",
-    "phase": "deep",
+    "id": "un-08",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pair_vote",
+    "text": "Hypothetically speaking, if {P1} and {P2} came out as gay, would they be a good couple?",
+    "measures": [
+      "metric:gay-hypothetical"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "un-09",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pair_pick",
+    "text": "Who in this room would make the best couple? Name two and defend your answer.",
+    "measures": [
+      "metric:couple-fit"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "un-10",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "If there were someone gay in this room, who would it be?",
+    "measures": [
+      "metric:gay-hypothetical"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "un-11",
+    "band": "spicy",
+    "role": "subject",
     "kind": "text",
-    "text": "Describe the most charged moment between you and someone in this room. One sentence. They'll know it's them.",
+    "text": "Who in this room has the best body, and what exactly are we talking about?",
     "measures": [
-      "dyadic confession",
-      "quote material"
+      "flavour:confession"
     ],
-    "coding": "couple",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "u19",
-    "phase": "dare",
-    "kind": "dare",
-    "text": "Let {P1} read your last 3 DMs with them. Out loud. Together.",
-    "measures": [
-      "dyadic transparency compliance"
-    ],
-    "coding": "trust",
-    "asksTarget": true
-  },
-  {
-    "id": "u20",
-    "phase": "dare",
-    "kind": "dare",
-    "text": "Whisper the most inappropriate compliment you can get away with into {P2}'s ear. The room watches their face.",
-    "measures": [
-      "dyadic flirt compliance"
-    ],
-    "coding": "couple",
-    "asksTarget": true
-  },
-  {
-    "id": "u21",
-    "phase": "dare",
-    "kind": "dare",
-    "text": "Let {P3} write a flirty message to someone here, but you choose whether to send it.",
-    "measures": [
-      "trust-in-agent compliance"
-    ],
-    "coding": "trust",
-    "asksTarget": true
-  },
-  {
-    "id": "u22",
-    "phase": "dare",
-    "kind": "dare",
-    "text": "Give a 30-second presentation on why {P4} is the most dangerous person in this room. Evidence required.",
-    "measures": [
-      "directed roast",
-      "verbatim material"
-    ],
-    "coding": "friction",
-    "asksTarget": true
-  },
-  {
-    "id": "u23",
-    "phase": "dare",
-    "kind": "dare",
-    "text": "Maintain eye contact with {P5} for 60 seconds. Laugh and you both restart — closer.",
-    "measures": [
-      "dyadic tension compliance"
-    ],
-    "coding": "couple",
-    "asksTarget": true
-  },
-  {
-    "id": "u24",
-    "phase": "dare",
-    "kind": "dare",
-    "text": "Hand {P6} your unlocked phone for 60 seconds. No supervision. They may not open anything. Allegedly.",
-    "measures": [
-      "trust compliance",
-      "strongest signal"
-    ],
-    "coding": "trust",
-    "asksTarget": true
-  },
-  {
-    "id": "u25",
-    "phase": "dare",
-    "kind": "dare",
-    "text": "Say the nastiest thing you can to {P7} that's still technically a compliment.",
-    "measures": [
-      "directed roast",
-      "taggable"
-    ],
-    "coding": "friction",
-    "asksTarget": true
-  },
-  {
-    "id": "u26",
-    "phase": "dare",
-    "kind": "dare",
-    "text": "Tell {P8} the exact moment you realized they were your type — or pass with a reason the room will remember.",
-    "measures": [
-      "confession",
-      "memorable pass"
-    ],
-    "coding": "couple",
-    "asksTarget": true
-  },
-  {
-    "id": "u27",
-    "phase": "dare",
-    "kind": "pair_dare",
-    "text": "You two. Five minutes alone. The group votes first: 'just talking' or 'not just talking'.",
-    "measures": [
-      "debrief similarity",
-      "big pair signal"
-    ],
-    "coding": "couple",
+    "coding": "tease",
     "asksTarget": false
+  },
+  {
+    "id": "un-12",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "text",
+    "text": "What is the most explicit thing {P1} has ever said out loud?",
+    "measures": [
+      "metric:hookups",
+      "guess"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "un-13",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who do you think {P1} has slept with more than once?",
+    "measures": [
+      "metric:hookups",
+      "guess"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "un-14",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who would {P1} cheat with if they thought nobody would find out?",
+    "measures": [
+      "metric:would-cheat",
+      "guess"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "un-15",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "text",
+    "text": "What would {P1} do to get someone into bed tonight?",
+    "measures": [
+      "metric:sex-desire",
+      "guess"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "un-16",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who in this room has been with the most people this year alone?",
+    "measures": [
+      "metric:hookups"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "un-17",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here would you cheat with?",
+    "measures": [
+      "metric:would-cheat"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "un-18",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here would snitch on you?",
+    "measures": [
+      "metric:would-snitch"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "un-19",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who in this room is the fakest person right now? Do not spare them.",
+    "measures": [
+      "metric:is-fake"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "un-20",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who in this room would you ruin a friendship for, and would you even try?",
+    "measures": [
+      "metric:ruin-friendship"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "un-21",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here is the most dangerous?",
+    "measures": [
+      "metric:most-dangerous"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "un-22",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who in this room is the weirdest human being, and what makes them weird?",
+    "measures": [
+      "metric:weirdest"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "un-23",
+    "band": "spicy",
+    "role": "subject",
+    "kind": "text",
+    "text": "What is the one thing you did in bed that you have never told anyone in this room?",
+    "measures": [
+      "flavour:confession"
+    ],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "un-24",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "Tell the room the worst hookup you have ever had. Do not skip any detail.",
+    "measures": [
+      "flavour:confession"
+    ],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "un-25",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "Describe the last time you were caught somewhere you should not have been.",
+    "measures": [
+      "flavour:confession"
+    ],
+    "coding": "tease",
+    "asksTarget": false
+  },
+  {
+    "id": "un-26",
+    "band": "spicy",
+    "role": "observer_pair",
+    "kind": "text",
+    "text": "Who do you think {P1} and {P2} should hook up with tonight instead of each other?",
+    "measures": [
+      "metric:couple-fit",
+      "guess"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "un-27",
+    "band": "spicy",
+    "role": "observer_pair",
+    "kind": "pair_vote",
+    "text": "Would {P1} and {P2} work, or would they destroy each other?",
+    "measures": [
+      "metric:couple-fit",
+      "guess"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "un-28",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "text",
+    "text": "Finish this sentence about {P1}: \"{P1} has definitely slept with...\"",
+    "measures": [
+      "metric:hookups",
+      "guess"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "un-29",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here has the biggest secret relationship history?",
+    "measures": [
+      "metric:ex"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "un-30",
+    "band": "spicy",
+    "role": "subject",
+    "kind": "pick",
+    "text": "Who in this room would you most want to sleep with tonight?",
+    "measures": [
+      "metric:sex-desire"
+    ],
+    "coding": "tease",
+    "asksTarget": true
   }
 ]

@@ -36,15 +36,16 @@ share `.env`, room logs, session secrets or API keys.
 2. Download the model once: `ollama pull dolphin-mistral`.
 3. Leave the defaults in `.env`, or set:
    ```sh
-   GEN_BASE=http://localhost:11434/v1
+   GEN_BASE=http://127.0.0.1:11434
    GEN_MODEL=dolphin-mistral
    ```
 4. Optional service check from the laptop: `curl http://localhost:11434/v1/models`.
    Then run `npm run host` normally. After changing `.env`, restart the host.
 
-`GEN_MODEL` wins over the dormant legacy `XAI_MODEL` override. Generation uses
-OpenAI-compatible `/chat/completions` without an Authorization header. It does
-not use xAI, Google, an API key, or a cloud account. Existing cloud analysis and
+`GEN_MODEL` is the whole switch — there is no other model override. Ollama's
+native `/api/chat` is tried first and OpenAI-compatible `/v1/chat/completions`
+is the fallback (both shapes parse), with no Authorization header. Generation
+uses no API key and no cloud account. Existing cloud analysis and
 reveal settings are independent and unchanged.
 
 Do **not** expose Ollama to the LAN or put its URL in browser code: players'
@@ -107,6 +108,10 @@ reveal fires anyway so one AFK phone cannot stall the night. The host's **Skip
 round** releases a pending reveal immediately.
 
 ## Reveal mode: every round, or the whole night at the end
+
+> **The v3.1 lane, parked.** Everything in this section describes the line that `origin/main` shipped and the v3.2 rebuild replaced. Its code is kept verbatim under `legacy/v3.1/` — none of it is wired into the running server, so nothing here will happen on a v3.2 night. Re-adopting any of it starts with moving its file back and making the tests in `apps/server/test` run again.
+
+v3.2 instead: one reveal, at the end of the night, on every phone at once (`FinaleView`), with the room's own copy possibly written by the `reveal` lane.
 
 `REVEAL_MODE` (optional, default **finale**) chooses how the night's reveals land.
 
@@ -316,6 +321,9 @@ is required to exercise the guard. Without this oracle the test deliberately fai
 claiming to have proved privacy or idempotence.
 
 ## Tuning the night
+
+> **The v3.1 lane, parked.** Everything in this section describes the line that `origin/main` shipped and the v3.2 rebuild replaced. Its code is kept verbatim under `legacy/v3.1/` — none of it is wired into the running server, so nothing here will happen on a v3.2 night. Re-adopting any of it starts with moving its file back and making the tests in `apps/server/test` run again.
+
 
 - `ROUND_TIMERS_MS`, `GRACE_MS` and `INTERLUDE_HOLD_MS` in `packages/shared/src/contracts.ts` control the ceilings and interlude. All required connected players answering closes a round immediately; ordinary finale-mode transitions hold for 2s. Dares and the verdict debate keep their longer timers. There is no separate confess kind.
 - `apps/server/src/schedule.ts` defines phase slots and the spicy/deep dare floor; `DARE_ROUNDS` in shared contracts sets the separate dare-phase solo count. Live moments are scheduled in `apps/server/src/game.ts`.

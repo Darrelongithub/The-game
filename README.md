@@ -10,7 +10,7 @@ scripts/selfcheck.ts              run this BEFORE spawning agents
 agents/parts/preamble.md          rules every agent follows
 agents/paste/agent-A.md … Z.md    one paste-ready prompt per agent session
 reference/research-brief.md       research + the 40 seed prompts (§1)
-reference/unhinged-tier.md        u1–u27 spicy/sexual tier (SPICY_TIER)
+reference/unhinged-tier.md        the spicy/sexual tier — always on, no switch
 reference/ui-system.md            THE UI (paste your UI code here verbatim)
 reference/ui-system-FIXES.md      7 fixes that must be applied to it
 NOTES/contract-requests.md        agents append; Agent Z resolves
@@ -19,20 +19,19 @@ NOTES/contract-requests.md        agents append; Agent Z resolves
 ## Setup (2 minutes)
 1. Put the UI code in `reference/ui-system.md` (the paste from your UI agent).
 2. Run `npx -y tsx scripts/selfcheck.ts` — must print ALL CHECKS PASSED.
-3. Copy `.env.example` → `.env`. Every setting is optional. The handwritten
-   bank runs the whole night even if every provider is unavailable.
-   - **Local generation (no key):** install Ollama on the host laptop, start its
-     service, and run `ollama pull dolphin-mistral`. The Node server connects to
-     `GEN_BASE=http://localhost:11434/v1` using `GEN_MODEL=dolphin-mistral`.
-     Phones never connect directly to Ollama. After downloading the model,
-     generation requires no internet. See `RUNBOOK.md` for setup and fallback.
-   - Existing optional cloud analysis/reveal configuration is unchanged;
-     no cloud key is needed for local generation.
+3. Copy `.env.example` → `.env`. Every key is OPTIONAL — no keys at all =
+   the handwritten bank (194 prompts) runs the whole night, fully offline:
+   - Ollama (`GEN_BASE` / `GEN_MODEL`, default `dolphin-mistral`) — the local
+     model that rewrites the night's questions and dares, with the room's real
+     names in them. `ollama pull dolphin-mistral` once and it stays offline.
+   - `GEMINI_API_KEY` (aistudio.google.com/apikey) — the analyst: it reads the
+     night's data and writes the reveal and the secret-card copy.
 
 ## Run it (game night)
 `npm run host` — builds the web app, starts the server on your LAN
-(`0.0.0.0:3001`), prints the LAN URL + a QR code in the terminal. Friends on
-the same WiFi (or your phone hotspot) scan and play. `npm start` re-hosts
+(`0.0.0.0:3001`) and prints, in the terminal: the PLAYER link, a QR code for
+it, the HOST link (the laptop that runs the night) and the room code. Friends
+on the same WiFi (or your phone hotspot) scan and play. `npm start` re-hosts
 without rebuilding.
 
 ## Spawn order (maximum parallelism)

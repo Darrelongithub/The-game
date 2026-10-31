@@ -1,18 +1,52 @@
-// Production integration of the finished packages. The small server-local
-// implementations remain available as a last-resort fallback and test seam.
+// apps/server/src/integratedServices.ts
+// Production integration of the finished packages.
+//
+// Two lanes, two jobs, and neither one decides a score.
+//
+//   • Ollama is the GENERATOR: the night's questions and dares, with the room's
+//     real names written into them. Bank-first — it is never on the critical path.
+//   • Gemini is the ANALYST: at the end of the night it gets the whole pseudonymised
+//     result set and writes the reveal and the secret-card copy. One call, and if
+//     it fails or says something the validator dislikes, the engine's own line
+//     stands.
+//
+// Every number in the room is a deterministic local computation — a model
+// response (or its timing) never changes a verdict.
 import {
-  HEAT_ORDER, MAX_PROVIDER_CALLS_PER_NIGHT,
-  type LogRecord, type NightDigest, type Prompt, type RoomMeta,
+  MAX_PROVIDER_CALLS_PER_NIGHT,
+  type FinaleSlide,
+  type LogRecord,
+  type NightDigest,
+  type Prompt,
+  type PlayerId,
+  type Results,
+  type RoomMeta,
+  type SecretCard,
 } from "../../../packages/shared/src/contracts.ts";
 import {
-  buildNightDigest, buildSecrets, computeResults, computeSignals, logRecordId,
+  buildNightDigest,
+  buildSecrets,
+  computeResults,
+  computeSignals,
 } from "../../../packages/engine/src/index.ts";
-import { buildSkeleton, SYSTEM_PROMPT, writeFinale } from "../../../packages/narrator/src/index.ts";
 import {
-  CallGuard, Provider, createPromptProvider, maxPlaceholderIndex, selectFromBank, tagBatch, tagText,
-  type FetchLike, type PromptProvider as PackagePromptProvider,
+  SYSTEM_PROMPT,
+  buildSkeleton,
+  derivePseudonyms,
+  writeFinale,
+} from "../../../packages/narrator/src/index.ts";
+import {
+  CallGuard,
+  Provider,
+  createPromptProvider,
+  type FetchLike,
+  type PromptProvider as PackagePromptProvider,
 } from "../../../packages/prompts/src/index.ts";
-import type { GameServices, HeatPhase, PromptProvider } from "./services.ts";
+import type {
+  GameServices,
+  PromptProvider,
+  PromptProviderContext,
+} from "./services.ts";
 
 /** Count actual HTTP attempts, including retries, across both provider lanes. */
 class RoomNetwork {
@@ -44,95 +78,107 @@ class RoomNetwork {
 class IntegratedPromptProvider implements PromptProvider {
   private readonly network = new RoomNetwork();
   private readonly provider: Provider;
-  private facade?: PackagePromptProvider;
-  private playerCount = 4;
-  private readonly publicTags = new Map<string, string[]>();
-  private aliases: readonly string[] = [];
-  private analysis?: Promise<void>;
+  private readonly facade: PackagePromptProvider;
+  private readonly room: string;
+  private readonly aliases: readonly string[];
+  private readonly log: (line: string) => void;
   private disposed = false;
 
-  constructor(private readonly roomId: string) {
+  constructor(context: PromptProviderContext) {
+    this.room = context.roomId;
+    this.aliases = context.aliases ?? [];
+    this.log = context.log ?? ((line: string) => console.log(line));
     this.provider = new Provider({ guard: new CallGuard(), fetchImpl: this.network.fetch as FetchLike });
-  }
-
-  setAliases(aliases: readonly string[]): void { this.aliases = [...aliases]; }
-
-  async prepare(input: { playerCount: number; usedIds: string[]; digest: NightDigest }): Promise<void> {
-    this.playerCount = input.playerCount;
     this.facade = createPromptProvider({
-      room: this.roomId, playerCount: input.playerCount, usedIds: input.usedIds, provider: this.provider, aliases: this.aliases,
+      room: context.roomId,
+      playerCount: context.playerCount,
+      seed: context.seed,
+      aliases: this.aliases,
+      log: this.log,
     });
-    // No player names or custom prompts are included. Generation never blocks
-    // play; each phase has one budgeted batch, and the bank is always ready.
-    await Promise.all(HEAT_ORDER.map((phase) => this.facade!.generateInBackground(phase, { digest: input.digest })));
   }
 
-  forPhase(phase: HeatPhase, n: number, usedIds: ReadonlySet<string>, playerCount = this.playerCount): Prompt[] {
-    const bank = selectFromBank(phase, n, { playerCount, excludeIds: [...usedIds] });
-    const generated = (this.facade?.generatedFor(phase) ?? [])
-      .filter((p) => !usedIds.has(p.id) && maxPlaceholderIndex(p.text) <= playerCount);
-    // Keep a bank prompt first while making validated generated prompts usable
-    // before an entire phase bank has been exhausted.
-    return bank.length ? [bank[0]!, ...generated, ...bank.slice(1)] : generated;
+  draw(request: { role: Prompt["role"]; count: number; kinds?: readonly import("../../../packages/shared/src/contracts.ts").RoundKind[]; metric?: string }): Prompt[] {
+    return this.facade.draw({
+      role: request.role,
+      count: request.count,
+      kinds: request.kinds,
+      metric: request.metric as never,
+    });
   }
 
-  prepareAnalysis(log: LogRecord[]): Promise<void> {
-    if (this.analysis || this.disposed) return this.analysis ?? Promise.resolve();
-    // The caller supplies pseudonymized records. Only answers already revealed
-    // publicly are eligible for classification; never classify private pair
-    // debriefs or cover answers. Cover answers are used in the public digest.
-    const records = log.filter((record) => record.roundKind !== "debrief" && record.decoy !== true && record.value.kind === "text");
-    this.analysis = (async () => {
-      const tags = await tagBatch(records.map((record) => record.value.kind === "text" ? record.value.text : ""),
-        { room: this.roomId, provider: this.provider });
-      if (!this.disposed) records.forEach((record, index) => this.publicTags.set(logRecordId(record), tags[index] ?? []));
-    })();
-    return this.analysis;
+  usedPromptIds(): string[] {
+    return this.facade.usedPromptIds();
   }
 
-  tagsFor(recordId: string): string[] | undefined { return this.publicTags.get(recordId); }
+  async generate(): Promise<Prompt[]> {
+    if (this.disposed) return [];
+    return this.facade.generate();
+  }
 
-  narrationOptions(meta: RoomMeta) {
-    const aliases = meta.players.map(player => player.alias);
-    return {
-      roster: meta.players,
-      grok: async (payload: Record<string, unknown>) => {
-        const result = await this.provider.grokJson({
-          room: this.roomId, purpose: "reveal", json: true, aliases,
-          messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: JSON.stringify(payload) }],
-        });
-        return result.result.ok ? result.value : null;
-      },
-    };
+  generationProgress(): { done: number; total: number } {
+    const state = this.facade.state;
+    return { done: state.ready, total: state.target };
+  }
+
+  /**
+   * GEMINI, THE ANALYST. The narrator hands over the night — pseudonyms, never
+   * names — and Gemini writes the reveal and the card copy for it. One call,
+   * one attempt: no key, no answer, or a bad answer means null and the engine's
+   * own copy is what the room sees.
+   */
+  async analyse(payload: Record<string, unknown>): Promise<unknown | null> {
+    if (this.disposed) return null;
+    const slides = Array.isArray(payload.slides) ? payload.slides.length : 0;
+    const cards = Array.isArray(payload.secretCards) ? payload.secretCards.length : 0;
+    const { result, value } = await this.provider.geminiJson({
+      room: this.room,
+      purpose: "reveal",
+      model: this.provider.modelFor("gemini", "reveal"),
+      system: SYSTEM_PROMPT,
+      user: JSON.stringify(payload),
+      json: true,
+      aliases: this.aliases,
+      temperature: 0.6,
+      maxTokens: 4_096,
+    });
+    if (!result.ok || value === null) {
+      this.log(`Gemini: asked ${slides + cards}, used 0 (unavailable:${result.reason ?? "empty"})`);
+      return null;
+    }
+    this.log(`Gemini: asked ${slides + cards}, answered (slides ${slides}, cards ${cards})`);
+    return value;
   }
 
   dispose(): void {
     this.disposed = true;
     this.network.dispose();
-    this.publicTags.clear();
-    this.facade = undefined;
   }
 }
 
-/** The optional observer is for in-process tests only; no client sees it. */
-export function createProductionServices(onJokerWeights?: (roomId: string, weights: ReadonlyMap<string, number>) => void): GameServices {
+/** The production wiring. The observer hook is for in-process tests only. */
+export function createProductionServices(): GameServices {
   return {
-    createPromptProvider: (context) => new IntegratedPromptProvider(typeof context === "string" ? context : context?.roomId ?? "unassigned"),
+    createPromptProvider: (context: PromptProviderContext) => new IntegratedPromptProvider(context),
     computeSignals,
-    computeResults(signals, log, meta) {
-      // Scores are always deterministic local computations: a model response
-      // (or its timing) must not change them. Private debriefs are not tagged.
-      const tags = new Map(log.filter((r) => r.roundKind !== "debrief" && r.value.kind === "text")
-        .map((r) => [logRecordId(r), r.value.kind === "text" ? tagText(r.value.text) : []]));
-      return computeResults(signals, log, meta, undefined, (id) => tags.get(id) ?? [],
-        onJokerWeights ? (weights) => onJokerWeights(meta.roomId, weights) : undefined);
-    },
+    computeResults: (log: LogRecord[], meta: RoomMeta): Results => computeResults(log, meta),
     buildNightDigest,
-    buildSecrets,
-    buildSkeleton: (results, digest, meta) => buildSkeleton(results, digest, meta?.players),
-    writeFinale: (skeleton, decks, results, digest, meta, provider) =>
-      writeFinale(skeleton, decks, results, digest,
-        provider instanceof IntegratedPromptProvider && meta ? provider.narrationOptions(meta) : { apiKey: "", roster: meta?.players }),
+    buildSecrets: (results: Results, log: LogRecord[], meta: RoomMeta): Map<PlayerId, SecretCard[]> =>
+      buildSecrets(results, log, meta),
+    buildSkeleton: (results: Results, digest: NightDigest, meta: RoomMeta): FinaleSlide[] =>
+      buildSkeleton(results, digest, derivePseudonyms(results, digest, meta.players)),
+    writeFinale: async (
+      skeleton: FinaleSlide[],
+      decks: Map<PlayerId, SecretCard[]>,
+      results: Results,
+      digest: NightDigest,
+      meta: RoomMeta,
+      provider?: PromptProvider,
+    ) =>
+      writeFinale(skeleton, decks, results, digest, {
+        roster: meta.players,
+        gemini: provider?.analyse ? (payload) => provider.analyse!(payload) : undefined,
+      }),
   };
 }
 

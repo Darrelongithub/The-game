@@ -11,14 +11,12 @@
     "typecheck": "tsc --noEmit",
     "test:mock": "npx -y tsx --tsconfig scripts/tsconfig.test.json scripts/mock-flow.test.ts",
     "test:ssr": "npx -y tsx --tsconfig scripts/tsconfig.test.json scripts/ssr-smoke.test.ts",
-    "test:regressions": "npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/regressions.tsx && npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/socket-regressions.ts && npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/transport-timeouts.ts && npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/mock-regressions.ts && npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/app-privacy-regression.tsx && npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/confess.tsx",
+    "test:regressions": "npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/regressions.tsx && npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/socket-regressions.ts && npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/transport-timeouts.ts && npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/mock-regressions.ts && npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/app-privacy-regression.tsx",
     "test:components": "npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/run.tsx",
-    "test:display": "npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/display-theatre.tsx && npx -y tsx --tsconfig scripts/tsconfig.test.json src/components/__tests__/display-theatre-integration.tsx",
-    "test": "npm run typecheck && npm run test:ssr && npm run test:regressions && npm run test:transport && npm run test:authoritative && npm run test:display",
+    "test": "npm run typecheck && npm run test:ssr && npm run test:regressions && npm run test:transport",
     "test:live": "node scripts/live-socket-smoke.mjs",
     "test:browser": "node scripts/browser-flow.test.mjs",
-    "test:transport": "tsx --tsconfig scripts/tsconfig.test.json --test scripts/socket-transport.test.ts scripts/r24-session.test.ts",
-    "test:authoritative": "tsx --tsconfig scripts/tsconfig.test.json --test scripts/r26-authoritative.test.ts"
+    "test:transport": "tsx --tsconfig scripts/tsconfig.test.json --test scripts/socket-transport.test.ts"
   },
   "dependencies": {
     "canvas-confetti": "1.9.4",

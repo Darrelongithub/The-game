@@ -1,494 +1,702 @@
 // packages/engine/src/results.ts
-// computeResults — spec §5 claims. Deterministic: the only randomness is
-// the fixed-seed Monte-Carlo behind the toxic percentile, and
-// `computedAt` is derived from the log itself (last record time) so the
-// same log always produces deep-equal Results.
+// THE VERDICTS — the only things the reveal is allowed to say.
+//
+// Rules that are not negotiable:
+//   • Every verdict is backed by data. If the data is weak, there is NO
+//     verdict — a missing line is always better than an invented one.
+//   • The allowed kinds are fixed: hates, core, couple, sex, percent,
+//     gaycouple, bodycount, bestinbed, besties, rivals, freeagent, blindspot.
+//   • Templates are picked by DATA STRENGTH (mild → spicy → filthy).
+//   • Gay-hypothetical answers are HYPOTHETICAL ONLY. The reveal never prints
+//     "X is gay" and never prints who was named in a gay-guess pick.
+//   • Copy uses "Player N" pseudonyms. The server swaps them for aliases.
+//
+// Pure: no I/O, no randomness, no Date.now().
 import {
-  CONFIDENCE_RULES,
-  SPARK_MIN_MUTUAL,
-  MC_SIMULATIONS,
-  TOXIC_WEIGHTS,
-  TRAITS,
-  type Claim,
-  type Confidence,
-  type LogRecord,
-  type PairSignal,
-  type PlayerId,
-  type PromptCoding,
-  type Results,
-  type RoomMeta,
+    type LogRecord,
+    type MetricKey,
+    type PlayerId,
+    type Results,
+    type RoomMeta,
+    type TraitId,
+    type Verdict,
+    type VerdictKind,
+    type VerdictTone,
 } from "../../shared/src/contracts.ts";
 import {
-  ENGINE_TUNING,
-  NEGATIVE_CODINGS,
-  POSITIVE_CODINGS,
-  assertScorableMeta,
-  buildIosIndex,
-  buildRatingIndex,
-  confidenceFromCount,
-  directedPicks,
-  getPicks,
-  jokerNominationWeights,
-  logRecordId,
-  meanOf,
-  pairKey,
-  playerIdsInOrder,
-  playerIdsSorted,
-  pooledPairRate,
-  pseudoOf,
-  sortedPair,
+    CLOSENESS_METRICS,
+    DESIRE_METRICS,
+    ENGINE_TUNING,
+    NEGATIVE_METRICS,
+    POINT_METRICS,
+    RIVAL_METRICS,
+    SCORN_METRICS,
+    buildRatingIndex,
+    clamp01,
+    formatNumber,
+    meanOf,
+    pairKey,
+    playerIdsInOrder,
+    pseudoOf,
+    sortedPair,
 } from "./internal.ts";
-import { maximumWeightMatching } from "./matching.ts";
-import { mulberry32 } from "./rng.ts";
-import { DEFAULT_PAIR_WEIGHTS, pairScoreOf, type PairWeights } from "./signals.ts";
+import {
+    pairPicks,
+    pairVotes,
+    pickTally,
+    tallyAcross,
+    type PairWeights,
+} from "./signals.ts";
+import { DEFAULT_WEIGHTS } from "../../shared/src/contracts.ts";
 
-const T = ENGINE_TUNING;
-
-/** Count of pair components clearing the support bars (independent signal types). */
-function pairSupportCount(s: PairSignal, pickEvidence: number): number {
-  let n = 0;
-  // Pick-derived supports must clear half STRICTLY: with only a handful of
-  // rounds in a night, an exactly-half rate (2 of 4, 3 of 6, 5 of 10) is
-  // chance-sized, not a signal.
-  if (s.componentsUsed.includes("pickOverlap") && s.pickOverlap > T.support.pickOverlap) n++;
-  if (s.componentsUsed.includes("mutualPick") && pickEvidence > T.support.mutualPick) n++;
-  if (s.componentsUsed.includes("debriefSim") && s.debriefSim > T.support.debriefSim) n++;
-  if (s.componentsUsed.includes("iosMean") && s.iosMean >= T.support.iosMean) n++;
-  if (s.componentsUsed.includes("traitAgreement") && s.traitAgreement >= T.support.traitAgreement) n++;
-  // THE SECOND VOICE: a confession naming this pair counts like any other
-  // independent type — and, on its own, it can never lift a claim past "low".
-  if (s.componentsUsed.includes("confession") && (s.confession ?? 0) >= T.support.confession) n++;
-  return n;
+export interface ResultsConfig {
+    weights?: PairWeights;
+    /** How many verdicts of one kind to allow at most. */
+    maxPerKind?: Partial<Record<VerdictKind, number>>;
 }
 
-function pairEvidenceLines(meta: RoomMeta, s: PairSignal): string[] {
-  const pa = pseudoOf(meta, s.a);
-  const pb = pseudoOf(meta, s.b);
-  const lines: string[] = [];
-  if (s.mutualPick >= T.support.mutualPick) lines.push(`${pa} and ${pb} kept picking each other.`);
-  if (s.pickOverlap >= T.support.pickOverlap) lines.push(`${pa} and ${pb} kept pointing at the same people.`);
-  if (s.iosMean >= T.support.iosMean) lines.push(`${pa} and ${pb} rated each other close.`);
-  if (s.traitAgreement >= T.support.traitAgreement) lines.push(`${pa} and ${pb} see each other clearly.`);
-  if (s.debriefSim > T.support.debriefSim) lines.push(`Their separate accounts of time together matched closely.`);
-  if (s.componentsUsed.includes("confession") && (s.confession ?? 0) >= T.support.confession) lines.push(`${pa} and ${pb} each confessed to something about the other.`);
-  if (lines.length === 0) lines.push(`${pa} and ${pb} rose to the top of the room's overall pattern.`);
-  return lines;
+const DEFAULTS_PER_KIND: Record<VerdictKind, number> = {
+    hates: 1,
+    core: 1,
+    couple: 2,
+    sex: 1,
+    percent: 3,
+    gaycouple: 1,
+    bodycount: 1,
+    bestinbed: 1,
+    besties: 2,
+    rivals: 1,
+    freeagent: 1,
+    blindspot: 2,
+};
+
+/** Tone by data strength. */
+function toneFor(strength: number): VerdictTone {
+    const b = ENGINE_TUNING.toneBands;
+    if (strength >= b.filthy) return "filthy";
+    if (strength >= b.spicy) return "spicy";
+    if (strength >= b.mild) return "mild";
+    return "mild";
 }
 
+/** Percentage string for a share 0..1. */
+const pct = (share: number): string => `${Math.round(clamp01(share) * 100)}%`;
+
+/** A stable id for a verdict. */
+let verdictSeq = 0;
+const vid = (kind: VerdictKind, ...parts: string[]): string =>
+    `${kind}-${parts.join("-")}-${verdictSeq++}`;
+
+/**
+ * Reset the verdict id counter. Only used by tests so ids are reproducible.
+ */
+export function resetVerdictIds(): void {
+    verdictSeq = 0;
+}
+
+// ---------------------------------------------------------------------------
+// helpers
+// ---------------------------------------------------------------------------
+
+/** Distinct players who picked `target` for any of `metrics`. */
+function nominatorsFor(
+    log: readonly LogRecord[],
+    target: PlayerId,
+    metrics: ReadonlySet<MetricKey>,
+): Set<PlayerId> {
+    const out = new Set<PlayerId>();
+    for (const rec of log) {
+        if (rec.value.kind !== "pick") continue;
+        if (!rec.metric || !metrics.has(rec.metric)) continue;
+        if (rec.value.target !== target) continue;
+        out.add(rec.playerId);
+    }
+    return out;
+}
+
+/** The metric the room used most to point at one person. */
+function dominantMetricFor(
+    log: readonly LogRecord[],
+    target: PlayerId,
+    metrics: ReadonlySet<MetricKey>,
+): MetricKey | undefined {
+    const counts = new Map<MetricKey, number>();
+    for (const rec of log) {
+        if (rec.value.kind !== "pick") continue;
+        if (!rec.metric || !metrics.has(rec.metric)) continue;
+        if (rec.value.target !== target) continue;
+        counts.set(rec.metric, (counts.get(rec.metric) ?? 0) + 1);
+    }
+    let best: MetricKey | undefined;
+    let bestN = 0;
+    for (const [metric, n] of counts) {
+        if (n > bestN) {
+            best = metric;
+            bestN = n;
+        }
+    }
+    return best;
+}
+
+/** How many distinct players answered a given metric at all. */
+function votersFor(log: readonly LogRecord[], metrics: ReadonlySet<MetricKey>): Set<PlayerId> {
+    const out = new Set<PlayerId>();
+    for (const rec of log) {
+        if (!rec.metric || !metrics.has(rec.metric)) continue;
+        if (rec.value.kind === "pick" || rec.value.kind === "rating" || rec.value.kind === "text") {
+            out.add(rec.playerId);
+        }
+    }
+    return out;
+}
+
+/** Every pair that was voted on, with its yes/no tally. */
+interface PairTally {
+    pair: [PlayerId, PlayerId];
+    yes: number;
+    no: number;
+    voters: number;
+}
+
+function tallyPairVotes(log: readonly LogRecord[], metric?: MetricKey): Map<string, PairTally> {
+    const out = new Map<string, PairTally>();
+    for (const v of pairVotes(log)) {
+        if (metric && v.metric !== metric) continue;
+        const key = pairKey(v.pair[0], v.pair[1]);
+        let t = out.get(key);
+        if (!t) {
+            t = { pair: sortedPair(v.pair[0], v.pair[1]), yes: 0, no: 0, voters: 0 };
+            out.set(key, t);
+        }
+        // 1..5 scale: 4 and 5 count as yes, 1 and 2 as no, 3 is a shrug.
+        if (v.value >= 4) t.yes += 1;
+        else if (v.value <= 2) t.no += 1;
+        t.voters += 1;
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// the compute
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute every verdict the night actually supports.
+ * Returns an empty verdict list rather than inventing anything.
+ */
 export function computeResults(
-  signals: PairSignal[],
-  allRecords: LogRecord[],
-  meta: RoomMeta,
-  config: PairWeights = DEFAULT_PAIR_WEIGHTS,
-  tagOf: (recordId: string) => string[] = () => [],
-  onJokerWeights?: (weights: ReadonlyMap<PlayerId, number>) => void,
+    log: readonly LogRecord[],
+    meta: RoomMeta,
+    config: ResultsConfig = {},
 ): Results {
-  assertScorableMeta(meta);
-  // Decoy answers (spotlight cover rounds) are not evidence about anyone.
-  const log = allRecords.filter((rec) => rec.decoy !== true);
-  const weights: PairWeights = { ...DEFAULT_PAIR_WEIGHTS, ...config };
-  const ids = playerIdsSorted(meta);
-  const idsInOrder = playerIdsInOrder(meta);
-  const picks = getPicks(log);
-  const optIn = new Set(meta.revealOptIn);
-
-  // Effective pair signals: pairScore re-weighted per `config` so replaying
-  // a log against new weights (spec §14) actually changes the outcome.
-  const byPair = new Map<string, PairSignal>();
-  for (const s of signals) {
-    byPair.set(pairKey(s.a, s.b), { ...s, pairScore: pairScoreOf(s, weights) });
-  }
-  const signalFor = (x: PlayerId, y: PlayerId): PairSignal => {
-    const [a, b] = sortedPair(x, y);
-    const found = byPair.get(pairKey(a, b));
-    if (found) return found;
-    const blank = {
-      room: meta.roomId, a, b,
-      pickOverlap: 0, mutualPick: 0, debriefSim: 0, iosMean: 0, traitAgreement: 0, componentsUsed: [],
-      coupleEvidence: 0, friendEvidence: 0, negativeMutual: 0,
+    const weights = config.weights ?? DEFAULT_WEIGHTS;
+    const maxPerKind = { ...DEFAULTS_PER_KIND, ...(config.maxPerKind ?? {}) };
+    const ids = playerIdsInOrder(meta);
+    const playerCount = ids.length;
+    const verdicts: Verdict[] = [];
+    const push = (v: Verdict): void => {
+        const limit = maxPerKind[v.kind] ?? 1;
+        if (verdicts.filter((x) => x.kind === v.kind).length >= limit) return;
+        verdicts.push(v);
     };
-    return { ...blank, pairScore: pairScoreOf(blank, weights) };
-  };
 
-  // ---------- consensus (computed early: toxic confidence references it) ----------
-  const consensusClaims: Claim[] = [];
-  const consensusCandidates: { roundId: string; coding: PromptCoding; target: PlayerId; votes: number; of: number; share: number }[] = [];
-  const consensusTargetByCoding = new Set<string>(); // `${coding}\u0000${target}`
-  {
-    const byRound = new Map<string, { coding: PromptCoding; votes: Map<PlayerId, PlayerId> }>();
-    for (const p of picks) {
-      let round = byRound.get(p.roundId);
-      if (!round) { round = { coding: p.coding, votes: new Map() }; byRound.set(p.roundId, round); }
-      round.votes.set(p.picker, p.target);
-    }
-    for (const [roundId, round] of byRound) {
-      if (round.coding === "neutral") continue; // consensus needs a coded prompt
-      const of = round.votes.size;
-      if (of === 0) continue;
-      const counts = new Map<PlayerId, number>();
-      for (const target of round.votes.values()) counts.set(target, (counts.get(target) ?? 0) + 1);
-      let topTarget: PlayerId | undefined;
-      let topVotes = 0;
-      for (const [target, votes] of counts) {
-        if (votes > topVotes || (votes === topVotes && (topTarget === undefined || target < topTarget))) {
-          topTarget = target;
-          topVotes = votes;
+    // ---------------- HATES: the group turns on one person ----------------
+    {
+        const voters = votersFor(log, POINT_METRICS);
+        const denom = Math.max(1, voters.size);
+        let worst:
+            | { id: PlayerId; nominators: Set<PlayerId>; share: number; metric: MetricKey | undefined }
+            | undefined;
+        for (const id of ids) {
+            const nominators = nominatorsFor(log, id, POINT_METRICS);
+            if (nominators.size < ENGINE_TUNING.hatesMinNominators) continue;
+            const share = nominators.size / denom;
+            if (share < ENGINE_TUNING.hatesMinShare) continue;
+            if (!worst || nominators.size > worst.nominators.size) {
+                worst = { id, nominators, share, metric: dominantMetricFor(log, id, POINT_METRICS) };
+            }
         }
-      }
-      if (topTarget === undefined) continue;
-      const share = topVotes / of;
-      if (of >= T.consensusMinVoters ? share < CONFIDENCE_RULES.high.consensusShare : share < 1) continue;
-      consensusTargetByCoding.add(`${round.coding}\u0000${topTarget}`);
-      consensusCandidates.push({ roundId, coding: round.coding, target: topTarget, votes: topVotes, of, share });
+        if (worst) {
+            const name = pseudoOf(meta, worst.id);
+            const strength = clamp01(worst.share * (worst.nominators.size / Math.max(1, playerCount)));
+            const tone = toneFor(strength);
+            // The room's eye lands differently when the names are about
+            // danger than when they are about a secret or a quirk.
+            const pointed = worst.metric !== undefined && SCORN_METRICS.has(worst.metric);
+            const text = pointed
+                ? tone === "filthy"
+                    ? `Everyone in this room has something on ${name}.`
+                    : tone === "spicy"
+                      ? `The room cannot stop talking about ${name}.`
+                      : `${name} is the one everybody is quietly keeping an eye on.`
+                : tone === "filthy"
+                  ? `Everyone in this room has a problem with ${name} and they all know it.`
+                  : tone === "spicy"
+                    ? `The group lowkey hates on ${name}.`
+                    : `${name} is the one everybody is quietly keeping an eye on.`;
+            push({
+                id: vid("hates", worst.id),
+                kind: "hates",
+                subjects: [worst.id],
+                tone,
+                text,
+                numbers: { nominators: worst.nominators.size, voters: voters.size, share: Number(worst.share.toFixed(3)) },
+                strength,
+            });
+        }
     }
-    // Confidence: one 70% round is a single signal type (med). It only
-    // earns high only after three independent repeated verdicts — the same
-    // target on the same coding clearing the threshold in three rounds.
-    // The n=4 Monte Carlo regression keeps random-night false highs below 2%.
-    const verdictCounts = new Map<string, number>();
-    for (const c of consensusCandidates) {
-      const k = `${c.coding}\u0000${c.target}`;
-      verdictCounts.set(k, (verdictCounts.get(k) ?? 0) + 1);
+
+    // ---------------- CORE: the two people the room orbits ----------------
+    {
+        const friendPicks = tallyAcross(log, CLOSENESS_METRICS);
+        let best: { a: PlayerId; b: PlayerId; count: number; share: number } | undefined;
+        for (const [a, setA] of friendPicks) {
+            for (const b of setA) {
+                if (a === b) continue;
+                const setB = friendPicks.get(b);
+                if (!setB || !setB.has(a)) continue; // needs BOTH directions
+                const count = Math.min(setA.size, setB.size);
+                const share = count / Math.max(1, playerCount - 1);
+                if (!best || count > best.count) best = { a, b, count, share };
+            }
+        }
+        if (best && best.count >= 2) {
+            const an = pseudoOf(meta, best.a);
+            const bn = pseudoOf(meta, best.b);
+            const strength = clamp01(best.share);
+            const text =
+                toneFor(strength) === "filthy"
+                    ? `${an} and ${bn} are the reason nobody else gets invited anywhere.`
+                    : toneFor(strength) === "spicy"
+                      ? `${an} and ${bn} are the core of this group.`
+                      : `${an} and ${bn} are the core of this group.`;
+            push({
+                id: vid("core", best.a, best.b),
+                kind: "core",
+                subjects: [best.a, best.b],
+                tone: toneFor(strength),
+                text,
+                numbers: { voters: best.count, share: Number(best.share.toFixed(3)) },
+                strength,
+            });
+        }
     }
-    for (const c of consensusCandidates) {
-      consensusClaims.push({
-        id: `consensus-${c.roundId}-${c.target}`,
-        type: "consensus",
-        subjects: [c.target],
-        audience: "public",
-        confidence: c.of >= T.consensusMinVoters && (verdictCounts.get(`${c.coding}\u0000${c.target}`) ?? 0) >= 3 ? "high" : "med",
-        evidence: [`On a ${c.coding}-coded prompt, the room kept choosing ${pseudoOf(meta, c.target)}.`],
-        numbers: { votes: c.votes, of: c.of, share: c.share },
-      });
+
+    // ---------------- COUPLE: the random-pair ship vote ----------------
+    {
+        const tallies = tallyPairVotes(log);
+        let best: PairTally | undefined;
+        for (const t of tallies.values()) {
+            if (t.yes < ENGINE_TUNING.coupleMinYes) continue;
+            const share = t.yes / Math.max(1, t.voters);
+            if (share < ENGINE_TUNING.coupleMinYesShare) continue;
+            if (!best || share > best.yes / Math.max(1, best.voters)) best = t;
+        }
+        // "Who would make the best couple here?" pair picks also count as votes.
+        if (!best) {
+            const pp = pairPicks(log);
+            const counts = new Map<string, { pair: [PlayerId, PlayerId]; n: number }>();
+            for (const p of pp) {
+                const key = pairKey(p.pair[0], p.pair[1]);
+                const c = counts.get(key);
+                if (c) c.n += 1;
+                else counts.set(key, { pair: p.pair, n: 1 });
+            }
+            for (const c of counts.values()) {
+                const share = c.n / Math.max(1, pp.length);
+                if (share >= ENGINE_TUNING.coupleMinYesShare && (!best || c.n > (best?.yes ?? 0))) {
+                    best = { pair: c.pair, yes: c.n, no: 0, voters: pp.length };
+                }
+            }
+        }
+        if (best) {
+            const an = pseudoOf(meta, best.pair[0]);
+            const bn = pseudoOf(meta, best.pair[1]);
+            const share = best.yes / Math.max(1, best.voters);
+            const strength = clamp01(share);
+            const tone = toneFor(strength);
+            const text =
+                tone === "filthy"
+                    ? `${an} and ${bn} would lowkey be a good couple (${pct(share)} said yes).`
+                    : tone === "spicy"
+                      ? `${an} and ${bn} would lowkey be a good couple (${pct(share)} said yes).`
+                      : `${an} and ${bn} would make a good couple (${pct(share)} said yes).`;
+            push({
+                id: vid("couple", best.pair[0], best.pair[1]),
+                kind: "couple",
+                subjects: [best.pair[0], best.pair[1]],
+                tone,
+                text,
+                numbers: { yes: best.yes, no: best.no, voters: best.voters, share: Number(share.toFixed(3)) },
+                strength,
+            });
+        }
+
+        // The room's worst pair is a "never" — same verdict type, other way
+        // round. It only counts when at least two people actually voted.
+        if (tallies.size >= 2) {
+            let worst: PairTally | undefined;
+            for (const t of tallies.values()) {
+                if (t.voters < 2) continue;
+                if (best && t.pair[0] === best.pair[0] && t.pair[1] === best.pair[1]) continue;
+                const share = t.yes / Math.max(1, t.voters);
+                if (!worst || share < worst.yes / Math.max(1, worst.voters)) worst = t;
+            }
+            if (worst) {
+                const an = pseudoOf(meta, worst.pair[0]);
+                const bn = pseudoOf(meta, worst.pair[1]);
+                const share = worst.yes / Math.max(1, worst.voters);
+                const strength = clamp01((1 - share) * (worst.voters / Math.max(1, playerCount)));
+                const tone = toneFor(strength);
+                const text =
+                    tone === "filthy"
+                        ? `${an} and ${bn} should never happen. Not even close. (${pct(share)} said yes.)`
+                        : tone === "spicy"
+                          ? `${an} and ${bn} should never happen (${pct(share)} said yes).`
+                          : `${an} and ${bn} are not a thing, and the room agrees (${pct(share)} said yes).`;
+                push({
+                    id: vid("couple", "never", worst.pair[0], worst.pair[1]),
+                    kind: "couple",
+                    subjects: [worst.pair[0], worst.pair[1]],
+                    tone,
+                    text,
+                    numbers: {
+                        yes: worst.yes,
+                        no: worst.no,
+                        voters: worst.voters,
+                        share: Number(share.toFixed(3)),
+                    },
+                    strength,
+                });
+            }
+        }
     }
-  }
 
-  // ---------- ship & besties: maximum-weight matchings ----------
-  // A one-way positive pick is private evidence, not a mutual public match.
-  // If the eligible graph has no complete matching, keep it partial instead
-  // of silently rerunning without the constraint and inventing pairings.
-  const mutual = (a: PlayerId, b: PlayerId, include: (coding: PromptCoding) => boolean): boolean =>
-    directedPicks(picks, a, b, include).hits > 0 && directedPicks(picks, b, a, include).hits > 0;
-  const shipMatching = maximumWeightMatching(
-    ids,
-    (a, b) => signalFor(a, b).pairScore,
-    (a, b) => mutual(a, b, (coding) => POSITIVE_CODINGS.has(coding)),
-  );
-  const bestiesMatching = maximumWeightMatching(
-    ids,
-    (a, b) => signalFor(a, b).friendEvidence,
-    (a, b) => mutual(a, b, (coding) => coding === "friendship"),
-  );
+    // ---------------- SEX: two people who picked each other ----------------
+    {
+        const desire = pickTally(log, "sex-desire");
+        let best: { a: PlayerId; b: PlayerId; n: number } | undefined;
+        for (const [a, setA] of desire) {
+            for (const b of setA) {
+                if (a === b) continue;
+                const setB = desire.get(b);
+                if (!setB || !setB.has(a)) continue;
+                const n = Math.min(setA.size, setB.size);
+                if (!best || n > best.n) best = { a, b, n };
+            }
+        }
+        if (best && best.n >= 1) {
+            const an = pseudoOf(meta, best.a);
+            const bn = pseudoOf(meta, best.b);
+            const strength = clamp01(best.n / Math.max(1, playerCount - 1));
+            const tone = toneFor(strength);
+            const text =
+                tone === "filthy"
+                    ? `${an} and ${bn} should just have sex.`
+                    : tone === "spicy"
+                      ? `${an} and ${bn} should just have sex.`
+                      : `${an} and ${bn} have a whole thing going on.`;
+            push({
+                id: vid("sex", best.a, best.b),
+                kind: "sex",
+                subjects: [best.a, best.b],
+                tone,
+                text,
+                numbers: { voters: best.n, share: Number(strength.toFixed(3)) },
+                strength,
+            });
+        }
+    }
 
-  const shipClaims: Claim[] = [];
-  for (const [a, b] of shipMatching.pairs) {
-    const s = signalFor(a, b);
-    const supports = pairSupportCount(s, s.mutualPick);
-    if (supports === 0 && s.coupleEvidence === 0 && s.friendEvidence === 0) continue; // no data, no ship
-    shipClaims.push({
-      id: `ship-${a}-${b}`,
-      type: "ship",
-      subjects: [a, b],
-      audience: "public",
-      confidence: confidenceFromCount(supports),
-      evidence: pairEvidenceLines(meta, s),
-      numbers: {
-        pairScore: s.pairScore, pickOverlap: s.pickOverlap, mutualPick: s.mutualPick,
-        debriefSim: s.debriefSim, iosMean: s.iosMean, traitAgreement: s.traitAgreement,
-        coupleEvidence: s.coupleEvidence, friendEvidence: s.friendEvidence,
-      },
-    });
-  }
+    // ---------------- PERCENT: share of OTHER players who picked X ----------------
+    {
+        const metrics: { metric: MetricKey; label: string; hot: boolean }[] = [
+            { metric: "sex-desire", label: "want to have sex with", hot: true },
+            { metric: "crush", label: "have a crush on", hot: false },
+            { metric: "body-count", label: "think has the highest body count", hot: true },
+            { metric: "best-in-bed", label: "think is the best in bed", hot: true },
+        ];
+        const others = Math.max(1, playerCount - 1);
+        for (const m of metrics) {
+            const tally = pickTally(log, m.metric);
+            const voters = votersFor(log, new Set([m.metric]));
+            if (voters.size < ENGINE_TUNING.percentMinVoters) continue;
+            for (const [target, pickers] of tally) {
+                // Share of OTHER players: the target can never be their own voter.
+                const share = pickers.size / others;
+                if (share < ENGINE_TUNING.percentMinShare) continue;
+                const name = pseudoOf(meta, target);
+                const strength = clamp01(share);
+                const tone = toneFor(strength);
+                const text = m.hot && tone === "filthy"
+                    ? `${pct(share)} of people here want to have sex with ${name}.`
+                    : m.hot && tone === "spicy"
+                      ? `${pct(share)} of people here want to have sex with ${name}.`
+                      : `${pct(share)} of the room ${m.label} ${name}.`;
+                push({
+                    id: vid("percent", m.metric, target),
+                    kind: "percent",
+                    subjects: [target],
+                    tone,
+                    text,
+                    numbers: { voters: pickers.size, eligible: others, share: Number(share.toFixed(3)) },
+                    strength,
+                });
+            }
+        }
+    }
 
-  const bestiesClaims: Claim[] = [];
-  for (const [a, b] of bestiesMatching.pairs) {
-    const s = signalFor(a, b);
-    if (s.friendEvidence === 0) continue;
-    const supports = pairSupportCount(s, s.friendEvidence);
-    bestiesClaims.push({
-      id: `besties-${a}-${b}`,
-      type: "besties",
-      subjects: [a, b],
-      audience: "public",
-      confidence: confidenceFromCount(supports),
-      evidence: pairEvidenceLines(meta, s),
-      numbers: {
-        pairScore: s.pairScore, friendEvidence: s.friendEvidence, mutualPick: s.mutualPick,
-        pickOverlap: s.pickOverlap, iosMean: s.iosMean, traitAgreement: s.traitAgreement,
-      },
-    });
-  }
+    // ---------------- GAY COUPLE: hypothetical only, never "X is gay" -------
+    // Source: the "If {P1} and {P2} were gay, would they make a good couple?"
+    // vote. The pair was on screen in the question itself, so naming it is not
+    // revealing who was named in a gay-GUESS pick. Guesses are never printed.
+    {
+        const tallies = tallyPairVotes(log, "gay-hypothetical");
+        let best: PairTally | undefined;
+        for (const t of tallies.values()) {
+            if (t.yes < ENGINE_TUNING.coupleMinYes) continue;
+            const share = t.yes / Math.max(1, t.voters);
+            if (share < ENGINE_TUNING.coupleMinYesShare) continue;
+            if (!best || share > best.yes / Math.max(1, best.voters)) best = t;
+        }
+        if (best) {
+            const an = pseudoOf(meta, best.pair[0]);
+            const bn = pseudoOf(meta, best.pair[1]);
+            const share = best.yes / Math.max(1, best.voters);
+            const strength = clamp01(share);
+            push({
+                id: vid("gaycouple", best.pair[0], best.pair[1]),
+                kind: "gaycouple",
+                subjects: [best.pair[0], best.pair[1]],
+                tone: toneFor(strength),
+                text: `If ${an} and ${bn} were gay they'd be a good couple (${pct(share)} said yes).`,
+                numbers: { yes: best.yes, voters: best.voters, share: Number(share.toFixed(3)) },
+                strength,
+            });
+        }
+    }
 
-  // ---------- spark: ship-pair + mutual couple picks + both opted in ----------
-  const sparkClaims: Claim[] = [];
-  for (const [a, b] of shipMatching.pairs) {
-    if (!optIn.has(a) || !optIn.has(b)) continue;
-    const ab = directedPicks(picks, a, b, (c) => c === "couple");
-    const ba = directedPicks(picks, b, a, (c) => c === "couple");
-    if (ab.hits < SPARK_MIN_MUTUAL || ba.hits < SPARK_MIN_MUTUAL) continue;
-    const s = signalFor(a, b);
-    // R27: a spark is an announcement, not a reward for two mutual picks.
-    // Reuse the R18 confidence machinery: at least three INDEPENDENT measured
-    // signal types (componentsUsed clearing the existing support bars) must
-    // support the pair. No new score, weight or threshold is introduced.
-    const supports = pairSupportCount(s, s.coupleEvidence);
-    if (supports < CONFIDENCE_RULES.high.independentSignals) continue;
-    sparkClaims.push({
-      id: `spark-${a}-${b}`,
-      type: "spark",
-      subjects: [a, b],
-      audience: "private", // ALWAYS private → Secret Cards
-      confidence: confidenceFromCount(supports),
-      evidence: [
-        `${pseudoOf(meta, a)} and ${pseudoOf(meta, b)} picked each other on couple-coded rounds.`,
-        ...pairEvidenceLines(meta, s).slice(0, 2),
-      ],
-      numbers: { pairScore: s.pairScore, coupleEvidence: s.coupleEvidence },
-    });
-  }
+    // ---------------- BODY COUNT: the room's champion ----------------
+    {
+        const tally = pickTally(log, "body-count");
+        let best: { id: PlayerId; n: number } | undefined;
+        for (const [id, pickers] of tally) {
+            if (!best || pickers.size > best.n) best = { id, n: pickers.size };
+        }
+        if (best && best.n >= 2) {
+            const strength = clamp01(best.n / Math.max(1, playerCount - 1));
+            const name = pseudoOf(meta, best.id);
+            const tone = toneFor(strength);
+            push({
+                id: vid("bodycount", best.id),
+                kind: "bodycount",
+                subjects: [best.id],
+                tone,
+                text:
+                    tone === "filthy"
+                        ? `The room thinks ${name} has the highest body count in here by a mile.`
+                        : `The room thinks ${name} has the highest body count.`,
+                numbers: { voters: best.n, share: Number(strength.toFixed(3)) },
+                strength,
+            });
+        }
+    }
 
-  // ---------- rivals: mutual negatives + rivalry hits, mid pair_score ----------
-  let rivalClaim: Claim | undefined;
-  {
-    let bestScore = 0;
-    for (let i = 0; i < ids.length; i++) {
-      for (let j = i + 1; j < ids.length; j++) {
-        const a = ids[i] as PlayerId;
-        const b = ids[j] as PlayerId;
-        const s = signalFor(a, b);
-        if (s.pairScore < T.rivalPairScoreMid.min || s.pairScore > T.rivalPairScoreMid.max) continue;
-        const ab = directedPicks(picks, a, b, (c) => NEGATIVE_CODINGS.has(c));
-        const ba = directedPicks(picks, b, a, (c) => NEGATIVE_CODINGS.has(c));
-        if (ab.hits < SPARK_MIN_MUTUAL || ba.hits < SPARK_MIN_MUTUAL) continue; // rivalry must be mutual
-        const rivalryRate = pooledPairRate(picks, a, b, (c) => c === "rivalry");
-        const score = s.negativeMutual + rivalryRate;
-        if (score <= bestScore) continue; // ties keep the lexicographically first pair
-        // Strictly past half: with only a handful of negative rounds, an
-        // exactly-half pooled rate (3 of 6, 6 of 12) is chance-sized. The
-        // third signal type must come from OUTSIDE the pick data (they also
-        // rate each other distant, or misread each other's traits) — the
-        // rivalry subset of the same picks is not independent evidence.
-        const distant = (s.iosMean > 0 && s.iosMean <= 0.35) || (s.traitAgreement > 0 && s.traitAgreement < 0.5);
-        const supports =
-          (s.negativeMutual > T.support.evidence ? 1 : 0) +
-          (rivalryRate > T.support.evidence ? 1 : 0) +
-          (distant ? 1 : 0);
-        const confidence: Confidence = confidenceFromCount(supports);
-        bestScore = score;
-        rivalClaim = {
-          id: `rival-${a}-${b}`,
-          type: "rival",
-          subjects: [a, b],
-          audience: "public",
-          confidence,
-          evidence: [
-            `${pseudoOf(meta, a)} and ${pseudoOf(meta, b)} kept naming each other when the prompts turned spiky.`,
-          ],
-          numbers: { negativeMutual: s.negativeMutual, rivalryRate, pairScore: s.pairScore, score },
+    // ---------------- BEST IN BED ----------------
+    {
+        const tally = pickTally(log, "best-in-bed");
+        let best: { id: PlayerId; n: number } | undefined;
+        for (const [id, pickers] of tally) {
+            if (!best || pickers.size > best.n) best = { id, n: pickers.size };
+        }
+        if (best && best.n >= 2) {
+            const strength = clamp01(best.n / Math.max(1, playerCount - 1));
+            const name = pseudoOf(meta, best.id);
+            const tone = toneFor(strength);
+            push({
+                id: vid("bestinbed", best.id),
+                kind: "bestinbed",
+                subjects: [best.id],
+                tone,
+                text:
+                    tone === "filthy"
+                        ? `The room thinks ${name} is the best in bed here. Ask them for details after.`
+                        : `The room thinks ${name} is the best in bed here.`,
+                numbers: { voters: best.n, share: Number(strength.toFixed(3)) },
+                strength,
+            });
+        }
+    }
+
+    // ---------------- BESTIES: mutual closeness ----------------
+    {
+        const closeness = tallyAcross(log, CLOSENESS_METRICS);
+        const found: { a: PlayerId; b: PlayerId; n: number }[] = [];
+        for (const [a, setA] of closeness) {
+            for (const b of setA) {
+                if (a === b) continue;
+                const setB = closeness.get(b);
+                if (!setB || !setB.has(a)) continue;
+                found.push({ a, b, n: Math.min(setA.size, setB.size) });
+            }
+        }
+        found.sort((x, y) => y.n - x.n);
+        for (const f of found.slice(0, maxPerKind.besties ?? 2)) {
+            if (f.n < 2) break;
+            const an = pseudoOf(meta, f.a);
+            const bn = pseudoOf(meta, f.b);
+            const strength = clamp01(f.n / Math.max(1, playerCount - 1));
+            push({
+                id: vid("besties", f.a, f.b),
+                kind: "besties",
+                subjects: [f.a, f.b],
+                tone: toneFor(strength),
+                text: `${an} and ${bn} are inseparable.`,
+                numbers: { voters: f.n, share: Number(strength.toFixed(3)) },
+                strength,
+            });
+        }
+    }
+
+    // ---------------- RIVALS: mutual friction ----------------
+    {
+        const neg = tallyAcross(log, RIVAL_METRICS);
+        const found: { a: PlayerId; b: PlayerId; n: number }[] = [];
+        for (const [a, setA] of neg) {
+            for (const b of setA) {
+                if (a === b) continue;
+                const setB = neg.get(b);
+                if (!setB || !setB.has(a)) continue;
+                found.push({ a, b, n: Math.min(setA.size, setB.size) });
+            }
+        }
+        found.sort((x, y) => y.n - x.n);
+        const top = found[0];
+        if (top && top.n >= 1) {
+            const an = pseudoOf(meta, top.a);
+            const bn = pseudoOf(meta, top.b);
+            const strength = clamp01(top.n / Math.max(1, playerCount - 1));
+            push({
+                id: vid("rivals", top.a, top.b),
+                kind: "rivals",
+                subjects: [top.a, top.b],
+                tone: toneFor(strength),
+                text: `${an} and ${bn} cannot be in the same room.`,
+                numbers: { voters: top.n, share: Number(strength.toFixed(3)) },
+                strength,
+            });
+        }
+    }
+
+    // ---------------- FREE AGENT: nobody is claiming X ----------------
+    {
+        const claimed = tallyAcross(log, DESIRE_METRICS);
+        const candidates = ids.filter((id) => (claimed.get(id)?.size ?? 0) === 0);
+        // Only fair if enough of the room had the chance to claim someone.
+        // Everyone answers every case, so "answered a pick" is the right proxy.
+        const asked = new Set<PlayerId>();
+        for (const record of log) {
+            if (record.value.kind === "pick") asked.add(record.playerId);
+        }
+        const askedCount = asked.size;
+        if (candidates.length > 0 && askedCount >= Math.max(2, Math.ceil(playerCount / 2))) {
+            const id = candidates[0]!;
+            const name = pseudoOf(meta, id);
+            const strength = clamp01(askedCount / Math.max(1, playerCount));
+            push({
+                id: vid("freeagent", id),
+                kind: "freeagent",
+                subjects: [id],
+                tone: toneFor(strength),
+                text: `Nobody in this room is claiming ${name}.`,
+                numbers: { asked: askedCount, share: Number(strength.toFixed(3)) },
+                strength,
+            });
+        }
+    }
+
+    // ---------------- BLIND SPOT: self-rating vs the room ----------------
+    {
+        const idx = buildRatingIndex(log);
+        const traits: TraitId[] = ["loyalty", "chaos", "reliability", "warmth", "honesty", "spice"];
+        const traitLabel: Record<TraitId, string> = {
+            loyalty: "loyal",
+            chaos: "chaotic",
+            reliability: "reliable",
+            warmth: "warm",
+            honesty: "honest",
+            spice: "hot",
         };
-      }
-    }
-    // Low-confidence negative claims are never public — rivals are omitted, not softened.
-    if (rivalClaim && rivalClaim.confidence === "low") rivalClaim = undefined;
-  }
-
-  // ---------- toxic: joker-guarded negative indegree vs seeded Monte-Carlo ----------
-  let toxicClaim: Claim | undefined;
-  {
-    const negPicks = picks.filter((p) => NEGATIVE_CODINGS.has(p.coding));
-    if (negPicks.length > 0) {
-      // Joker guard: a picker naming the same target in >70% of ALL their
-      // pick rounds gets every nomination downweighted.
-      const pickerWeight = jokerNominationWeights(log, idsInOrder);
-
-      // Optional in-process QA observer; never part of Results or socket data.
-      onJokerWeights?.(new Map(pickerWeight));
-      const rawIndegree = new Map<PlayerId, number>();
-      const weightedIndegree = new Map<PlayerId, number>();
-      const guardedWeighted = new Map<PlayerId, number>();
-      const unguardedNominators = new Map<PlayerId, Set<PlayerId>>();
-      for (const id of idsInOrder) {
-        rawIndegree.set(id, 0);
-        weightedIndegree.set(id, 0);
-        guardedWeighted.set(id, 0);
-        unguardedNominators.set(id, new Set());
-      }
-      for (const p of negPicks) {
-        const w = pickerWeight.get(p.picker) ?? 1;
-        rawIndegree.set(p.target, (rawIndegree.get(p.target) ?? 0) + 1);
-        weightedIndegree.set(p.target, (weightedIndegree.get(p.target) ?? 0) + w);
-        if (w < 1) guardedWeighted.set(p.target, (guardedWeighted.get(p.target) ?? 0) + w);
-        else unguardedNominators.get(p.target)?.add(p.picker);
-      }
-
-      // Monte-Carlo null: uniform-random targets (≠ picker) over the same
-      // negative-round structure, same per-picker joker weights. Seeded.
-      const rng = mulberry32(T.mcSeed);
-      const candidates = new Map<PlayerId, PlayerId[]>();
-      for (const id of idsInOrder) candidates.set(id, idsInOrder.filter((x) => x !== id));
-      const lessCount = new Map<PlayerId, number>(idsInOrder.map((id) => [id, 0]));
-      for (let sim = 0; sim < MC_SIMULATIONS; sim++) {
-        const totals = new Map<PlayerId, number>(idsInOrder.map((id) => [id, 0]));
-        for (const p of negPicks) {
-          const cands = candidates.get(p.picker) as PlayerId[];
-          const target = cands[Math.floor(rng() * cands.length)] as PlayerId;
-          totals.set(target, (totals.get(target) ?? 0) + (pickerWeight.get(p.picker) ?? 1));
+        const found: { id: PlayerId; trait: TraitId; self: number; room: number; raters: number }[] = [];
+        for (const id of ids) {
+            const selfMap = idx.self.get(id);
+            if (!selfMap) continue;
+            for (const trait of traits) {
+                const self = selfMap.get(trait);
+                if (self === undefined) continue;
+                const peerMap = idx.peerByRater.get(id)?.get(trait);
+                if (!peerMap) continue;
+                const ratings = [...peerMap.values()];
+                if (ratings.length < ENGINE_TUNING.blindspotMinRaters) continue;
+                const room = meanOf(ratings);
+                const gap = Math.abs(self - room);
+                if (gap < ENGINE_TUNING.blindspotMinGap) continue;
+                found.push({ id, trait, self, room, raters: ratings.length });
+            }
         }
-        for (const id of idsInOrder) {
-          if ((totals.get(id) ?? 0) < (weightedIndegree.get(id) ?? 0)) {
-            lessCount.set(id, (lessCount.get(id) ?? 0) + 1);
-          }
+        found.sort((x, y) => Math.abs(y.self - y.room) - Math.abs(x.self - x.room));
+        for (const f of found.slice(0, maxPerKind.blindspot ?? 2)) {
+            const name = pseudoOf(meta, f.id);
+            const gap = Math.abs(f.self - f.room);
+            const strength = clamp01(gap / 9);
+            const direction = f.self > f.room ? "overrated themselves" : "undersold themselves";
+            push({
+                id: vid("blindspot", f.id, f.trait),
+                kind: "blindspot",
+                subjects: [f.id],
+                tone: toneFor(strength),
+                text: `${name} thinks they're ${formatNumber(f.self)}/10 ${traitLabel[f.trait]}, the room said ${formatNumber(f.room)}.`,
+                numbers: {
+                    self: Number(f.self.toFixed(2)),
+                    room: Number(f.room.toFixed(2)),
+                    raters: f.raters,
+                    gap: Number(gap.toFixed(2)),
+                },
+                strength,
+            });
         }
-      }
-      const percentileOf = (id: PlayerId): number => (lessCount.get(id) ?? 0) / MC_SIMULATIONS;
+    }
 
-      // Contempt tag seam: density of contempt-tagged texts AUTHORED by the
-      // player. tagOf defaults to empty → density 0 (spec: contemptTags = 0 for now).
-      const densityOf = (id: PlayerId): number => {
-        let authored = 0;
-        let contempt = 0;
-        for (const rec of log) {
-          if (rec.playerId !== id || rec.value.kind !== "text") continue;
-          authored++;
-          if (tagOf(logRecordId(rec)).includes("contempt")) contempt++;
+    const freeAgent = verdicts.find((v) => v.kind === "freeagent")?.subjects[0];
+    return {
+        roomId: meta.roomId,
+        verdicts,
+        pairScores: [],
+        ...(freeAgent ? { freeAgent } : {}),
+        computedAt: 0,
+    };
+}
+
+/**
+ * Who is who is nobody's business. A verdict may put the room's own
+ * hypothetical in front of the room — "If Kofi and Zuri were gay they'd be a
+ * good couple" is what the whole room was just asked to vote on — but it may
+ * never state, imply or tease out a person's orientation, and it never names
+ * who a gay-GUESS pick pointed at (that metric has no verdict path at all).
+ */
+const ORIENTATION_CLAIM =
+    /\b(?:is|was|be|been|sounds|seems|looks|turned out)\s+(?:actually\s+|really\s+|secretly\s+|finally\s+|clearly\s+)?(?:gay|lesbian|bi|bisexual|queer|straight|hetero|homosexual|asexual|pansexual)\b/i;
+const COMING_OUT = /\bcame out\b|\b(?:out|in) the closet\b|\bcloseted\b|\bout as\b/i;
+
+/** True when a piece of copy describes somebody instead of asking about them. */
+export function orientationLeak(text: string): boolean {
+    return ORIENTATION_CLAIM.test(text) || COMING_OUT.test(text);
+}
+
+export function assertNoOrientationLeak(results: Results): void {
+    for (const v of results.verdicts) {
+        if (orientationLeak(v.text)) {
+            throw new Error(`engine: verdict ${v.id} leaks an orientation claim`);
         }
-        return authored === 0 ? 0 : contempt / authored;
-      };
-
-      let candidate: PlayerId | undefined;
-      let candidateScore = -1;
-      for (const id of ids) {
-        const score = TOXIC_WEIGHTS.indegree * percentileOf(id) + TOXIC_WEIGHTS.contemptTags * densityOf(id);
-        if (score > candidateScore) { candidateScore = score; candidate = id; }
-      }
-      if (candidate !== undefined) {
-        const weighted = weightedIndegree.get(candidate) ?? 0;
-        const pct = percentileOf(candidate);
-        const guardedShare = weighted === 0 ? 0 : (guardedWeighted.get(candidate) ?? 0) / weighted;
-        const frictionConsensus =
-          consensusTargetByCoding.has(`friction\u0000${candidate}`) ||
-          consensusTargetByCoding.has(`rivalry\u0000${candidate}`);
-        let supports = 0;
-        if (pct >= T.toxicEmitPercentile) supports++;
-        if ((unguardedNominators.get(candidate)?.size ?? 0) >= 3) supports++;
-        if (frictionConsensus) supports++;
-        if (densityOf(candidate) > 0) supports++;
-        // If most of the case rests on joker-guarded pickers, it is one
-        // person's bit, not the room's verdict: cap at low → never public.
-        const confidence: Confidence = guardedShare > 0.5 ? "low" : confidenceFromCount(supports);
-        if (weighted > 0 && pct >= T.toxicEmitPercentile && confidence !== "low") {
-          const raw = rawIndegree.get(candidate) ?? 0;
-          toxicClaim = {
-            id: `toxic-${candidate}`,
-            type: "toxic",
-            subjects: [candidate],
-            audience: "public",
-            confidence,
-            evidence: [
-              `In the spiky rounds the room pointed at ${pseudoOf(meta, candidate)} far beyond chance.`,
-            ],
-            numbers: {
-              votes: raw,
-              of: negPicks.length,
-              share: negPicks.length === 0 ? 0 : raw / negPicks.length,
-              weightedVotes: weighted,
-              percentile: pct,
-              score: candidateScore,
-            },
-          };
-        }
-      }
     }
-  }
-
-  // ---------- blind spots: |self − groupMean| per evaluative trait ----------
-  const blindspotClaims: Claim[] = [];
-  {
-    const ratings = buildRatingIndex(log);
-    for (const id of idsInOrder) {
-      for (const trait of TRAITS) {
-        const self = ratings.self.get(id)?.get(trait);
-        const raters = ratings.peerByRater.get(id)?.get(trait);
-        if (self === undefined || !raters || raters.size < T.blindspotMinRaters) continue;
-        const peerValues = [...raters.values()];
-        const groupMean = meanOf(peerValues);
-        const spread = Math.max(...peerValues) - Math.min(...peerValues);
-        const gap = Math.abs(self - groupMean);
-        if (gap < T.blindspotMinGap) continue;
-        // Peer agreement must be tight (range <= 1) to count: five random
-        // ratings spanning 2 points happens by chance far too often.
-        const supports =
-          (raters.size >= 3 ? 1 : 0) + (spread <= 1 ? 1 : 0) + (gap >= 3 ? 1 : 0);
-        const confidence = confidenceFromCount(supports);
-        blindspotClaims.push({
-          id: `blindspot-${id}-${trait}`,
-          type: "blindspot",
-          subjects: [id],
-          // Factual self-vs-room numbers may travel privately at low
-          // confidence (Secret Cards); they only go public at med+.
-          audience: confidence === "low" ? "private" : "public",
-          confidence,
-          evidence: [`${pseudoOf(meta, id)} rates their own ${trait} differently from the room.`],
-          numbers: { self, groupMean, spread, gap, raters: raters.size },
-        });
-      }
-    }
-  }
-
-  // ---------- one-sided: high pick rate one way, low the other ----------
-  const onesidedClaims: Claim[] = [];
-  {
-    const ios = buildIosIndex(log);
-    for (const from of ids) {
-      for (const to of ids) {
-        if (from === to) continue;
-        const fwd = directedPicks(picks, from, to, (c) => POSITIVE_CODINGS.has(c));
-        if (fwd.total < T.onesided.minPositivePicks) continue;
-        const rev = directedPicks(picks, to, from, (c) => POSITIVE_CODINGS.has(c));
-        if (fwd.rate < T.onesided.minRate) continue;
-        if (rev.rate > T.onesided.maxReverseRate) continue;
-        if (fwd.rate - rev.rate < T.onesided.minGap) continue;
-        const iosFwd = ios.get(from)?.get(to);
-        const iosRev = ios.get(to)?.get(from);
-        const iosAsym = iosFwd !== undefined && iosFwd >= 5 && (iosRev === undefined || iosRev <= 3);
-        // Independent types only: the pick asymmetry itself, plus IOS
-        // asymmetry when present. (Raw hit count is the same pick signal,
-        // so it never double-counts toward confidence.)
-        const supports = 1 + (iosAsym ? 1 : 0);
-        onesidedClaims.push({
-          id: `onesided-${from}-${to}`,
-          type: "onesided",
-          subjects: [from, to], // picker first — the card lands on the picker's phone
-          audience: "private", // ALWAYS private
-          confidence: confidenceFromCount(supports),
-          evidence: [
-            `${pseudoOf(meta, from)} kept choosing ${pseudoOf(meta, to)}; those picks rarely came back.`,
-          ],
-          numbers: { rate: fwd.rate, reverseRate: rev.rate, hits: fwd.hits, of: fwd.total },
-        });
-      }
-    }
-  }
-
-  const claims: Claim[] = [
-    ...shipClaims,
-    ...bestiesClaims,
-    ...sparkClaims,
-    ...(rivalClaim ? [rivalClaim] : []),
-    ...(toxicClaim ? [toxicClaim] : []),
-    ...consensusClaims,
-    ...blindspotClaims,
-    ...onesidedClaims,
-  ];
-
-  const freeAgent = shipMatching.unmatched.length === 1 ? shipMatching.unmatched[0] : undefined;
-  const computedAt = log.length === 0 ? 0 : Math.max(...log.map((r) => r.at));
-
-  return {
-    roomId: meta.roomId,
-    claims,
-    pairScores: signals.map((s) => signalFor(s.a, s.b)),
-    ...(freeAgent !== undefined ? { freeAgent } : {}),
-    computedAt,
-  };
 }

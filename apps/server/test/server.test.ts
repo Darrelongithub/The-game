@@ -1,237 +1,309 @@
+// apps/server/test/server.test.ts
+// The wire: the boot banner, the socket protocol, one night over a socket.
+//
+// The acceptance list this covers:
+//   • `npm run host` prints a PLAYER link + QR and a HOST link.
+//   • A phone joins with the room code; the laptop binds with the host token.
+//   • The laptop never holds a player seat.
+//   • One question per phone, with the small grey line under it.
+//   • Different pairs get different questions; the subject has their own.
+//   • The case closes as soon as the last required person answers.
+//   • One ready gate, then the laptop reveal.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { networkInterfaces, tmpdir } from "node:os";
-import { join } from "node:path";
-import { test } from "node:test";
-import { io, type Socket } from "socket.io-client";
-import type { ClientToServerEvents, LogRecord, Prompt, ResponseValue, RoundView, ServerToClientEvents } from "../../../packages/shared/src/contracts.ts";
-import { bootBanner, createGameServer, lanAddresses, selectLanAddress } from "../src/server.ts";
-import { choosePhaseCandidate } from "../src/game.ts";
-import { fallbackServices, type GameServices } from "../src/services.ts";
+import { describe, it } from "node:test";
+import { io as ioClient, type Socket } from "socket.io-client";
+import { bootBanner, createGameServer } from "../src/server.ts";
+import type {
+  RoundView,
+  RoomView,
+  SecretDeckView,
+} from "../../../packages/shared/src/contracts.ts";
+import { adultProfile, ManualClock, testServices } from "./helpers.ts";
 
-type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
-const limit = <T>(promise: Promise<T>, ms = 6000): Promise<T> => new Promise((resolve, reject) => {
-  const timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms);
-  promise.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
-});
-const event = <T>(socket: Client, name: string): Promise<T> => new Promise((resolve) => (socket as any).once(name, resolve));
-async function socketFor(port: number): Promise<Client> {
-  const socket: Client = io(`http://127.0.0.1:${port}`, { transports: ["polling", "websocket"], reconnection: false, autoConnect: false });
-  socket.on("error", () => {}); socket.on("state", (view) => { if (view.ready) socket.emit("ready"); });
-  const ready = event<void>(socket, "connect"); socket.connect(); await limit(ready); return socket;
+const ALIASES = ["Wanjiru", "Dee", "Kofi", "Zuri", "Tayo"];
+
+/** A predictable but varied random source. */
+function makeRand(): () => number {
+  let n = 0;
+  return () => {
+    n += 1;
+    return (n * 0.6180339887498949) % 1;
+  };
 }
 
-test("generated prompts take non-pick slots before bank while host prompts stay first", () => {
-  const prompt = (id: string, source: Prompt["source"], kind: Prompt["kind"]): Prompt => ({ id, source, phase: "warmup", kind, text: "Who here would make the group laugh on a long trip?", coding: "friendship", measures: ["pick"], asksTarget: true });
-  const bankShout = prompt("bank-shout", "bank", "shout"), generatedPick = prompt("generated-pick", "grok", "pick"), hostPick = prompt("host-pick", "host", "pick");
-  assert.equal(choosePhaseCandidate([bankShout, generatedPick], "shout", true), generatedPick, "generated material fills an otherwise non-pick slot");
-  assert.equal(choosePhaseCandidate([bankShout, generatedPick], "shout", false), bankShout, "pick-density slots preserve their requested kind");
-  assert.equal(choosePhaseCandidate([generatedPick, hostPick], "pick", true), hostPick, "host-authored prompts retain precedence");
-});
+/** Everything a socket has received, in order. */
+interface Recorder {
+  socket: Socket;
+  events: { event: string; payload: unknown }[];
+  last<T>(event: string): T | undefined;
+  all<T>(event: string): T[];
+}
 
-test("same-origin HTTP static export and preview-proxy Socket.IO origins", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "reveal-http-")), web = join(dir, "web"), data = join(dir, "data");
-  const server = createGameServer({ revealMode: "round", dataDir: data, webDir: web });
-  const port = await server.listen(0, "127.0.0.1", false), base = `http://127.0.0.1:${port}`;
-  t.after(async () => { await server.close(); rmSync(dir, { recursive: true, force: true }); });
-  let response = await fetch(`${base}/`); assert.equal(response.status, 200); assert.match(await response.text(), /web app has not been built/i);
-  mkdirSync(web); writeFileSync(join(web, "index.html"), "<h1>Game export</h1>"); writeFileSync(join(web, "app.js"), "console.log('ok')");
-  response = await fetch(`${base}/`); assert.match(await response.text(), /Game export/);
-  response = await fetch(`${base}/some/client/route`); assert.match(await response.text(), /Game export/);
-  response = await fetch(`${base}/app.js`); assert.match(await response.text(), /console.log/);
-  response = await fetch(`${base}/missing.js`); assert.equal(response.status, 404);
-  const endpoint = `${base}/socket.io/?EIO=4&transport=polling`;
-  response = await fetch(endpoint, { headers: { Origin: "https://evil.example" } }); assert.equal(response.status, 403);
-  response = await fetch(endpoint, { headers: { Origin: "https://preview.e2b.app", "X-Forwarded-Host": "preview.e2b.app" } }); assert.equal(response.status, 200);
-});
-
-test("LAN banner includes every non-loopback IPv4 URL and a QR code", () => {
-  const fake: ReturnType<typeof networkInterfaces> = {
-    lo: [{ address: "127.0.0.1", family: "IPv4", internal: true, cidr: "127.0.0.1/8", netmask: "255.0.0.0", mac: "00:00:00:00:00:00" }],
-    wlan0: [{ address: "192.168.1.20", family: "IPv4", internal: false, cidr: "192.168.1.20/24", netmask: "255.255.255.0", mac: "00:00:00:00:00:01" }],
-    docker0: [{ address: "172.17.0.1", family: "IPv4", internal: false, cidr: "172.17.0.1/16", netmask: "255.255.0.0", mac: "00:00:00:00:00:03" }],
-    hotspot: [{ address: "10.0.0.2", family: "IPv4", internal: false, cidr: "10.0.0.2/24", netmask: "255.255.255.0", mac: "00:00:00:00:00:02" }],
-  };
-  assert.deepEqual(lanAddresses(fake), ["192.168.1.20", "10.0.0.2", "172.17.0.1"]);
-  assert.equal(selectLanAddress(fake), "192.168.1.20", "QR selection follows the printed private-LAN preference order");
-  const original = console.log, output: string[] = [];
-  try { console.log = (...args: unknown[]) => output.push(args.join(" ")); bootBanner(3001, "0.0.0.0", fake); } finally { console.log = original; }
-  const text = output.join("\n");
-  assert.match(text, /http:\/\/localhost:3001/); assert.match(text, /http:\/\/192\.168\.1\.20:3001/); assert.match(text, /http:\/\/10\.0\.0\.2:3001/);
-  assert.match(text, /Scan to join/); assert.ok(output.length > 4, "QR code was rendered");
-});
-
-test("display-role sockets get only public stage and finale events", { timeout: 12000 }, async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "reveal-display-"));
-  const server = createGameServer({ revealMode: "round", dataDir: dir, botDelayMs: [1, 2], revealHoldMs: 1, interludeHoldMs: 1, roundTimers: { pick: 1000, text: 1000, shout: 1000, rating: 1000, ios: 1000, minigame: 1000, dare: 1000, pair_dare: 1000, debrief: 1000 }, graceMs: 10 });
-  const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port), display = await socketFor(port);
-  t.after(async () => { host.disconnect(); display.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
-  const profile = { age: 30, relationship: "single" as const, partnersToDate: 1, longestMonths: 6, crushingHere: false, tonight: "vibes" as const };
-  const made = await new Promise<any>(resolve => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile }, resolve));
-  const joined = await new Promise<any>(resolve => display.emit("display_join", { roomCode: made.code }, resolve));
-  assert.equal(joined.ok, true); assert.equal(joined.you, undefined); assert.equal(joined.secret, undefined);
-  assert.equal(joined.state.phase, "lobby");
-  for (let i = 0; i < 3; i++) host.emit("add_bot");
-  host.on("round", () => host.emit("skip_round"));
-  host.on("interlude", () => host.emit("skip_round"));
-  const roundEvent = event<RoundView>(display, "round"), finaleEvent = event(display, "finale");
-  let privateDecks = 0; display.on("secrets", () => privateDecks++);
-  const displayError = event<{ code: string }>(display, "error"); display.emit("start");
-  assert.equal((await limit(displayError)).code, "NOT_IN_ROOM", "display role cannot control the game");
-  host.emit("start");
-  const round = await limit(roundEvent);
-  assert.equal(round.kind, "pick");
-  assert.equal(round.about, undefined); assert.equal(round.trait, undefined); assert.equal(round.performer, undefined); assert.equal(round.onlyPlayers, undefined);
-  assert.ok(await limit(finaleEvent, 10000));
-  await new Promise(resolve => setTimeout(resolve, 20));
-  assert.equal(privateDecks, 0, "display role never receives per-player secret decks");
-});
-
-test("persisted JSONL replays to the same results after two server restarts", { timeout: 15000 }, async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "reveal-replay-"));
-  const outcomes: unknown[] = [];
-  let notify!: () => void;
-  let ready = new Promise<void>(resolve => { notify = resolve; });
-  const services: GameServices = {
-    ...fallbackServices,
-    computeResults(signals, log, meta) {
-      const result = fallbackServices.computeResults(signals, log, meta);
-      outcomes.push(structuredClone(result)); notify(); return result;
+function record(socket: Socket): Recorder {
+  const events: { event: string; payload: unknown }[] = [];
+  for (const name of ["state", "round", "beat", "finale", "secrets", "deleted"]) {
+    socket.on(name, (payload: unknown) => { events.push({ event: name, payload }); });
+  }
+  return {
+    socket,
+    events,
+    last<T>(event: string): T | undefined {
+      const list = events.filter((e) => e.event === event);
+      return list.length ? (list[list.length - 1]!.payload as T) : undefined;
+    },
+    all<T>(event: string): T[] {
+      return events.filter((e) => e.event === event).map((e) => e.payload as T);
     },
   };
-  const profile = { age: 29, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" as const };
-  let server = createGameServer({ revealMode: "round", dataDir: dir, services, roundTimers: { pick: 10000 }, graceMs: 1000 });
-  let port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
-  const guests: Client[] = [];
-  t.after(async () => { host.disconnect(); guests.forEach(c => c.disconnect()); await server.close(); rmSync(dir, { recursive: true, force: true }); });
-  const made = await new Promise<any>(resolve => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile }, resolve));
-  for (let i = 0; i < 3; i++) {
-    const guest = await socketFor(port); guests.push(guest);
-    await new Promise(resolve => guest.emit("join", { roomCode: made.code, alias: `Replay${i}`, consent: { age: true, terms: true, revealOptIn: true }, profile }, resolve));
+}
+
+/** Wait until a condition holds (or give up). */
+async function waitUntil(check: () => boolean, timeoutMs = 8_000): Promise<void> {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > timeoutMs) throw new Error("timed out waiting for the server");
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  const activeRound = event<RoundView>(host, "round"); host.emit("start");
-  const round = await limit(activeRound);
-  assert.equal(round.kind, "pick");
-  const accepted = await new Promise<{ ok: boolean }>(resolve => host.emit("submit", { roundId: round.roundId, clientUuid: "replay-one", value: { kind: "pick", target: "p2" } }, resolve));
-  assert.equal(accepted.ok, true);
-  const logFile = readdirSync(dir).find(name => name.endsWith(".jsonl"))!;
-  const rawLog = readFileSync(join(dir, logFile), "utf8"); assert.equal(rawLog.trim().split("\\n").length, 1);
-  await server.close(); host.disconnect(); guests.forEach(c => c.disconnect());
+}
 
-  const waitForReplay = async (count: number) => {
-    if (outcomes.length >= count) return;
-    ready = new Promise<void>(resolve => { notify = resolve; });
-    const timer = setTimeout(() => { throw new Error("room replay timed out"); }, 6000);
-    try { while (outcomes.length < count) await ready; } finally { clearTimeout(timer); }
-  };
-  server = createGameServer({ revealMode: "round", dataDir: dir, services });
-  await waitForReplay(1);
-  port = await server.listen(0, "127.0.0.1", false);
-  const resumed = await socketFor(port), finale = event(resumed, "finale");
-  const joined = await new Promise<any>(resolve => resumed.emit("join", { roomCode: made.code, alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, resume: { playerId: made.you, secret: made.secret } }, resolve));
-  assert.equal(joined.ok, true);
-  assert.equal(joined.state.phase, "finale");
-  assert.ok(await limit(finale));
-  await server.close(); resumed.disconnect();
-
-  ready = new Promise<void>(resolve => { notify = resolve; });
-  server = createGameServer({ revealMode: "round", dataDir: dir, services });
-  await waitForReplay(2);
-  assert.deepEqual(outcomes[1], outcomes[0], "same persisted JSONL yields deeply equal Results after restart");
-  await server.close();
-});
-
-test("three built-in bots answer on the production 600–3500ms delay", { timeout: 7000 }, async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "reveal-bots-delay-")), server = createGameServer({ revealMode: "round", dataDir: dir });
-  const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
-  t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
-  const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" } }, resolve));
-  assert.ok(made.ok);
-  for (let i = 0; i < 3; i++) host.emit("add_bot");
-  const records = new Promise<LogRecord[]>((resolve) => {
-    host.on("state", () => {
-      const names = readdirSync(dir); if (!names.length) return;
-      const text = readFileSync(join(dir, names.find((name) => name.endsWith(".jsonl"))!), "utf8").trim();
-      const rows: LogRecord[] = text ? text.split("\n").map((line) => JSON.parse(line)) : [];
-      if (rows.length >= 3) resolve(rows);
+/** Emit and wait for the acknowledgement. */
+function ask<T>(socket: Socket, event: string, payload: unknown): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`no reply to "${event}"`)), 8_000);
+    socket.emit(event as never, payload as never, (reply: T) => {
+      clearTimeout(timer);
+      resolve(reply);
     });
   });
-  host.emit("start");
-  const rows = await limit(records, 5000);
-  assert.equal(rows.length, 3);
-  for (const row of rows) { assert.ok(row.latencyMs >= 590, `latency ${row.latencyMs}ms`); assert.ok(row.latencyMs <= 3750, `latency ${row.latencyMs}ms`); assert.equal(row.value.kind, "pick"); }
-});
+}
 
-test("one host and three in-server bots can finish the entire game without API keys", { timeout: 10000 }, async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "reveal-bots-full-"));
-  let prepared = false, readBank = false, writerStarted = false;
-  const services: GameServices = {
-    ...fallbackServices,
-    createPromptProvider: () => ({
-      forPhase() { readBank = true; throw new Error("provider unavailable"); },
-      prepare() { prepared = true; return new Promise<void>(() => {}); },
-    }),
-    writeFinale() { writerStarted = true; return new Promise(() => {}); },
-  };
-  const server = createGameServer({ revealMode: "round", dataDir: dir, services, writerTimeoutMs: 20, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, verdictDiscussMs: 0, roundTimers: { spotlight: 300, verdict: 300, confess: 300 } });
-  const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
-  t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
-  const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" } }, resolve));
-  for (let i = 0; i < 3; i++) host.emit("add_bot");
-  const done = event(host, "finale"), seen = new Set<string>();
-  host.on("round", (round: RoundView) => {
-    if (round.youSubmitted || seen.has(round.roundId) || (round.onlyPlayers && !round.onlyPlayers.includes(made.you))) return;
-    seen.add(round.roundId);
-    let value: ResponseValue;
-    switch (round.kind) {
-      case "pick": value = { kind: "pick", target: "p2" }; break;
-      case "shout": value = { kind: "shout", word: "vibes" }; break;
-      case "text": case "debrief": value = { kind: "text", text: "I enjoyed a great conversation with someone here." }; break;
-      case "rating": value = { kind: "rating", trait: round.trait!, about: round.about!, value: 7 }; break;
-      case "ios": value = { kind: "ios", about: round.about!, value: 5 }; break;
-      case "minigame": value = { kind: "minigame", score: 23 }; break;
-      case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
-      case "spotlight": value = { kind: "text", text: "Watching the room right now." }; break;
-      case "confess": value = { kind: "confess", yes: true }; break;
-      case "verdict": value = { kind: "pick", target: "p2" }; break;
-    }
-    host.emit("submit", { roundId: round.roundId, clientUuid: `host-${round.roundId}`, value }, () => {});
+/** The whole server, wired to a manual clock. */
+async function bootServer() {
+  const clock = new ManualClock();
+  const server = createGameServer({
+    services: testServices(),
+    now: clock.now,
+    rand: makeRand(),
+    setTimer: clock.setTimer,
+    clearTimer: clock.clearTimer,
   });
-  host.emit("start"); await limit(done, 5000);
-  const rows: LogRecord[] = readFileSync(join(dir, readdirSync(dir).find((name) => name.endsWith(".jsonl"))!), "utf8").trim().split("\n").map((line) => JSON.parse(line));
-  const bots = rows.filter((r) => r.playerId !== made.you);
-  assert.ok(prepared && readBank && writerStarted, "hung/failed providers were exercised without blocking play");
-  assert.ok(bots.length > 30); assert.ok(bots.some((r) => r.roundKind === "pair_dare")); assert.ok(bots.some((r) => r.roundKind === "debrief"));
-  assert.ok(bots.every((r) => r.value.kind !== "pick" || r.value.target !== r.playerId));
-});
-
-
-test("delete during pending narration purges data and suppresses late finale/secrets", { timeout: 8000 }, async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "reveal-delete-pending-"));
-  let signalStarted!: () => void, releaseWriter!: () => void;
-  const started = new Promise<void>((resolve) => { signalStarted = resolve; });
-  const services: GameServices = {
-    ...fallbackServices,
-    buildSecrets: () => new Map([["p1", [{ id: "private", kind: "stat", title: "Only you", facts: ["PRIVATE_CARD"] }]]]),
-    writeFinale(slides, decks) {
-      signalStarted();
-      return new Promise((resolve) => { releaseWriter = () => resolve({ slides, decks }); });
+  const port = await server.listen(0, "127.0.0.1", false);
+  const room = server.rooms.nightRoom!;
+  const recorders: Recorder[] = [];
+  const connect = (): Recorder => {
+    const socket = ioClient(`http://127.0.0.1:${port}`, { transports: ["websocket"], forceNew: true });
+    const rec = record(socket);
+    recorders.push(rec);
+    return rec;
+  };
+  return {
+    clock,
+    server,
+    room,
+    connect,
+    recorders,
+    async close() {
+      for (const rec of recorders) rec.socket.disconnect();
+      await server.close();
     },
   };
-  const server = createGameServer({ revealMode: "round", dataDir: dir, services, writerTimeoutMs: 5000, botDelayMs: [10000, 10000], revealHoldMs: 10000, interludeHoldMs: 10000 });
-  const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
-  t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
-  const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" } }, resolve));
-  for (let i = 0; i < 3; i++) host.emit("add_bot");
-  let publicOrPrivateEvents = 0;
-  host.on("finale", () => publicOrPrivateEvents++); host.on("secrets", () => publicOrPrivateEvents++);
-  host.on("round", () => host.emit("skip_round")); host.on("reveal", () => host.emit("skip_round")); host.on("interlude", () => host.emit("skip_round"));
-  host.emit("start"); await limit(started);
-  const deleted = event<void>(host, "deleted"); host.emit("delete_room"); await limit(deleted);
-  assert.deepEqual(readdirSync(dir), []);
-  releaseWriter(); await new Promise((resolve) => setTimeout(resolve, 30));
-  assert.equal(publicOrPrivateEvents, 0, "late provider response must not resurrect a deleted room");
-  const another = await socketFor(port);
-  const rejected = await new Promise<any>((resolve) => another.emit("join", { roomCode: made.code, alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" }, resume: { playerId: made.you, secret: made.secret } }, resolve));
-  another.disconnect(); assert.equal(rejected.ok, false);
+}
+
+/** Let the server breathe, then move the night forward. */
+async function tick(clock: ManualClock, ms = 2_000): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  clock.advance(ms);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+}
+
+/**
+ * Answer whatever is open on the phones right now.
+ *
+ * A look chain runs in stages: the actor answers, then everybody else, then
+ * the actor again. A phone that is only WATCHING has no answer to give.
+ */
+async function answerOpen(
+  phones: Recorder[],
+  roster: string[],
+  answered: Set<string>,
+): Promise<void> {
+  for (let guard = 0; guard < 20; guard++) {
+    const views = phones.map((p) => p.last<RoundView>("round")!);
+    let pending = 0;
+    for (let index = 0; index < phones.length; index++) {
+      const view = views[index];
+      if (!view || view.passive) continue; // only watching
+      const key = `${index}:${view.segmentId}`;
+      if (answered.has(key)) continue;
+      pending += 1;
+      const reply = await ask<{ ok: boolean; error?: string }>(phones[index]!.socket, "submit", {
+        roundId: view.roundId,
+        value: answerFor(view, roster, roster[index]!),
+      });
+      assert.equal(reply.ok, true, reply.error);
+      answered.add(key);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    if (pending === 0) {
+      // Nothing left to answer — either the stage moved on or the case closed.
+      const after = phones.map((p) => p.last<RoundView>("round")!);
+      const moved = after.some((v, i) => !v || !views[i] || v.segmentId !== views[i]!.segmentId);
+      if (!moved) return;
+    }
+  }
+}
+
+/** The answer a phone would send for the question it was given. */
+function answerFor(view: RoundView, roster: string[], me: string): unknown {
+  const other = roster.find((id) => id !== me)!;
+  switch (view.kind) {
+    case "pick": return { kind: "pick", target: other };
+    case "rating":
+      return {
+        kind: "rating",
+        trait: view.trait ?? "chaos",
+        about: view.aboutSelf ? "self" : (view.subjectId ?? "self"),
+        value: 7,
+      };
+    case "dare": return { kind: "dare", status: "done" };
+    case "pair_vote": return { kind: "pair_vote", pair: view.pair ?? [other, roster[1]!], value: 4 };
+    case "pair_pick": return { kind: "pair_pick", pair: view.options?.[0]?.members ?? [other, roster[1]!] };
+    default: return { kind: "text", text: "An honest answer." };
+  }
+}
+
+describe("the boot banner", () => {
+  it("prints a PLAYER link with a QR and a HOST link", () => {
+    const lines: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => { lines.push(args.map(String).join(" ")); };
+    try {
+      bootBanner(
+        3001,
+        "0.0.0.0",
+        { eth0: [{ address: "192.168.1.24", family: "IPv4", internal: false }] } as never,
+        { code: "WXYZ", hostToken: "tokentokentokentoken12" },
+      );
+    } finally {
+      console.log = original;
+    }
+    const out = lines.join("\n");
+    assert.match(out, /PLAYER link/i);
+    assert.match(out, /http:\/\/192\.168\.1\.24:3001\/\?room=WXYZ/);
+    assert.match(out, /HOST link/i);
+    assert.match(out, /http:\/\/192\.168\.1\.24:3001\/host\?token=tokentokentokentoken12/);
+    assert.match(out, /[█▀▄]/, "a QR code is printed");
+  });
+});
+
+describe("the wire", () => {
+  it("runs a night from join to reveal", async () => {
+    const { clock, server, room, connect, close } = await bootServer();
+    try {
+      // ---- the laptop binds with the host token, no code typed ----
+      const host = connect();
+      await waitUntil(() => host.socket.connected);
+      const hostReply = await ask<{ ok: boolean }>(host.socket, "host_join", { token: room.hostToken });
+      assert.equal(hostReply.ok, true, "the host link binds the room");
+      const badHost = await ask<{ ok: boolean }>(connect().socket, "host_join", { token: "nope" });
+      assert.equal(badHost.ok, false, "a wrong token does not bind");
+
+      // ---- the phones join with the code ----
+      const phones: Recorder[] = [];
+      for (const alias of ALIASES) {
+        const phone = connect();
+        await waitUntil(() => phone.socket.connected);
+        const reply = await ask<{ ok: boolean; you?: string }>(phone.socket, "join", {
+          roomCode: room.code,
+          alias,
+          profile: adultProfile,
+          consent: { age: true },
+        });
+        assert.equal(reply.ok, true, `${alias} joined`);
+        assert.ok(reply.you, "the phone gets its player id");
+        phones.push(phone);
+      }
+
+      // The laptop sees the roster but holds no seat.
+      await waitUntil(() => (host.last<RoomView>("state")?.players.length ?? 0) === ALIASES.length);
+      const hostState = host.last<RoomView>("state")!;
+      assert.equal(hostState.phase, "lobby");
+      assert.equal(hostState.pickOptions, undefined, "the laptop never picks");
+
+      // ---- Start ----
+      host.socket.emit("start");
+      await waitUntil(() => phones.every((p) => p.all("round").length > 0));
+      const views = phones.map((p) => p.last<RoundView>("round")!);
+
+      // One question per phone, with the small grey line under it.
+      for (const view of views) {
+        assert.ok(view.promptText.length > 0, "a question is on the phone");
+        assert.ok(view.note.length > 0, "the grey line is on the phone");
+        assert.ok(!/\{P\d/.test(view.promptText), "no raw placeholder");
+      }
+
+      // The room does not see one shared question: pairs differ, the subject
+      // has their own.
+      const questions = new Set(views.map((v) => v.promptText));
+      assert.ok(questions.size >= 2, "different groups get different questions");
+
+      // ---- Answer, and the case closes on the last answer ----
+      const roster = hostState.players.map((p) => p.id);
+      const answered = new Set<string>();
+      await answerOpen(phones, roster, answered);
+
+      // The next case arrives after the beat. (Not every phone gets a
+      // question in every case — a ship vote leaves the couple out — so the
+      // room itself is the witness.)
+      const firstRoundId = views[0]!.roundId;
+      await tick(clock);
+      await waitUntil(() => (host.last<RoomView>("state")?.progress?.index ?? 0) >= 2);
+      const moved = phones.some((p) => {
+        const round = p.last<RoundView>("round");
+        return Boolean(round) && round!.roundId !== firstRoundId;
+      });
+      assert.ok(moved, "the night moves on");
+
+      // ---- Run the rest of the night (the host skips the cases) ----
+      for (let i = 0; i < 60 && server.rooms.get(room.code)!.phase === "play"; i++) {
+        host.socket.emit("skip_round");
+        await tick(clock);
+      }
+      assert.equal(server.rooms.get(room.code)!.phase, "results", "the night ends at the gate");
+
+      // ---- ONE ready gate, then the reveal ----
+      for (const phone of phones) phone.socket.emit("ready");
+      await waitUntil(() => phones.every((p) => p.all("finale").length > 0));
+      assert.equal(server.rooms.get(room.code)!.revealed, true);
+
+      // No data, no card: nothing was answered, so nobody gets a deck.
+      for (const phone of phones) {
+        assert.equal(phone.all<SecretDeckView>("secrets").length, 0, "no card, no deck");
+      }
+    } finally {
+      await close();
+    }
+  });
+
+  it("refuses a join with a bad code and an underage player", async () => {
+    const { room, connect, close } = await bootServer();
+    try {
+      const phone = connect();
+      await waitUntil(() => phone.socket.connected);
+      const wrong = await ask<{ ok: boolean }>(phone.socket, "join", {
+        roomCode: "ZZZZ", alias: "Wanjiru", profile: adultProfile, consent: { age: true },
+      });
+      assert.equal(wrong.ok, false, "a bad code does not join");
+      const young = await ask<{ ok: boolean }>(phone.socket, "join", {
+        roomCode: room.code, alias: "Wanjiru", profile: { ...adultProfile, age: 16 }, consent: { age: true },
+      });
+      assert.equal(young.ok, false, "an underage player does not join");
+      const noConsent = await ask<{ ok: boolean }>(phone.socket, "join", {
+        roomCode: room.code, alias: "Wanjiru", profile: adultProfile, consent: { age: false },
+      });
+      assert.equal(noConsent.ok, false, "no 18+ consent, no seat");
+    } finally {
+      await close();
+    }
+  });
 });

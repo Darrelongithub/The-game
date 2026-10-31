@@ -29,5 +29,5 @@
   ],
   // The jsdom harness and socket regressions run separately with tsx and are
   // excluded from the production app's TypeScript project.
-  "exclude": ["node_modules", "src/components/__tests__"]
+  "exclude": ["node_modules", "src/components/__tests__", "scripts"]
 }

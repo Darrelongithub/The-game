@@ -1,176 +1,282 @@
 [
   {
-    "id": "dd1",
-    "phase": "dare",
+    "id": "dr-01",
+    "band": "dare",
+    "role": "dare",
     "kind": "dare",
-    "text": "Let {P1} post one story from your gallery. They pick; you get one veto.",
-    "measures": [
-      "trust compliance"
-    ],
-    "coding": "trust",
+    "text": "{P1}, read your last text message out loud. All of it.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
     "asksTarget": true
   },
   {
-    "id": "dd2",
-    "phase": "dare",
+    "id": "dr-02",
+    "band": "dare",
+    "role": "dare",
     "kind": "dare",
-    "text": "Compliment {P2} three times, no repeats. The room grades sincerity out loud.",
-    "measures": [
-      "affection compliance"
-    ],
+    "text": "{P1}, call the person you texted most this week. Right now. Out loud.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-03",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, let someone in this room go through your camera roll for ten seconds.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-04",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, say out loud who in this room you would kiss if they asked you to.",
+    "measures": ["metric:crush", "dare"],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-05",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, let the room pick your profile picture for the next hour.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-06",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, compliment the person who annoys you most in this room. Genuinely.",
+    "measures": ["flavour:dare"],
     "coding": "friendship",
     "asksTarget": true
   },
   {
-    "id": "dd3",
-    "phase": "dare",
+    "id": "dr-07",
+    "band": "dare",
+    "role": "dare",
     "kind": "dare",
-    "text": "Do your best impression of {P3} until someone laughs.",
-    "measures": [
-      "affectionate roast",
-      "verbatim material"
-    ],
-    "coding": "friendship",
+    "text": "{P1}, post a story right now with the caption of someone's choice in this room.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
     "asksTarget": true
   },
   {
-    "id": "dd4",
-    "phase": "dare",
+    "id": "dr-08",
+    "band": "dare",
+    "role": "dare",
     "kind": "dare",
-    "text": "Read the last 3 messages between you and {P4} out loud.",
-    "measures": [
-      "dyadic transparency"
-    ],
+    "text": "{P1}, hand your phone to someone in this room and let them post one thing from it.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-09",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, do your best impression of someone in this room.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-10",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, say the name of every person here you would cheat with. All of them.",
+    "measures": ["metric:would-cheat", "dare"],
     "coding": "friction",
     "asksTarget": true
   },
   {
-    "id": "dd5",
-    "phase": "dare",
-    "kind": "pair_dare",
-    "text": "You two: five minutes alone. Everyone else guesses what you talked about.",
-    "measures": [
-      "debrief similarity"
-    ],
-    "coding": "couple",
-    "asksTarget": false
-  },
-  {
-    "id": "dd6",
-    "phase": "dare",
+    "id": "dr-11",
+    "band": "dare",
+    "role": "dare",
     "kind": "dare",
-    "text": "30-second toast to {P5}. Mean it.",
-    "measures": [
-      "sincerity under pressure"
-    ],
-    "coding": "friendship",
+    "text": "{P1}, read the last thing you searched on your phone. Out loud. All of it.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
     "asksTarget": true
   },
   {
-    "id": "dd7",
-    "phase": "dare",
+    "id": "dr-12",
+    "band": "dare",
+    "role": "dare",
     "kind": "dare",
-    "text": "Show the last photo you took of yourself \u2014 {P6} captions it out loud.",
-    "measures": [
-      "directed roast-lite"
-    ],
-    "coding": "status",
-    "asksTarget": true
-  },
-  {
-    "id": "dd8",
-    "phase": "dare",
-    "kind": "dare",
-    "text": "Say the nicest and the meanest TRUE thing about {P7} \u2014 to their face.",
-    "measures": [
-      "honesty to face",
-      "tags both ways"
-    ],
+    "text": "{P1}, let someone here check your phone's call history for fifteen seconds.",
+    "measures": ["flavour:dare"],
     "coding": "friction",
     "asksTarget": true
   },
   {
-    "id": "dd9",
-    "phase": "dare",
-    "kind": "debrief",
-    "text": "Separately: what did you two actually talk about?",
-    "measures": [
-      "pair debrief",
-      "debrief similarity"
-    ],
+    "id": "dr-13",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, kiss the person to your left. Just on the cheek. You have been warned.",
+    "measures": ["metric:crush", "dare"],
     "coding": "couple",
-    "asksTarget": false
-  },
-  {
-    "id": "dd10",
-    "phase": "dare",
-    "kind": "dare",
-    "text": "Rank everyone here by who would win an argument with you, and defend it out loud.",
-    "measures": [
-      "status ranking",
-      "defended live"
-    ],
-    "coding": "status",
-    "asksTarget": false
-  },
-  {
-    "id": "dd11",
-    "phase": "dare",
-    "kind": "dare",
-    "text": "Call {P2} by a nickname you've never used out loud. They must keep a straight face.",
-    "measures": [
-      "affection compliance",
-      "directed tease"
-    ],
-    "coding": "friendship",
     "asksTarget": true
   },
   {
-    "id": "dd12",
-    "phase": "dare",
+    "id": "dr-14",
+    "band": "dare",
+    "role": "dare",
     "kind": "dare",
-    "text": "Let {P4} choose your profile picture for 24 hours. No veto this time.",
-    "measures": [
-      "trust compliance",
-      "status ranking"
-    ],
-    "coding": "trust",
+    "text": "{P1}, for the next ten minutes you have to speak in a fake accent of someone's choice.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
     "asksTarget": true
   },
   {
-    "id": "dd13",
-    "phase": "dare",
-    "kind": "pair_dare",
-    "text": "You two: three minutes. Pick the one thing you'd never tell this room.",
-    "measures": [
-      "debrief similarity",
-      "secrecy signal"
-    ],
+    "id": "dr-15",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, send a text to your most recent ex right now. Just one word. Let them stew.",
+    "measures": ["flavour:dare"],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-16",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, tell the room the worst date you have ever been on. Leave nothing out.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-17",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, hold eye contact with someone of the opposite gender in this room for a full fifteen seconds.",
+    "measures": ["metric:crush", "dare"],
     "coding": "couple",
-    "asksTarget": false
-  },
-  {
-    "id": "dd14",
-    "phase": "dare",
-    "kind": "dare",
-    "text": "Let {P3} read the last thing you typed and deleted. Out loud.",
-    "measures": [
-      "dyadic transparency",
-      "directed trust"
-    ],
-    "coding": "trust",
     "asksTarget": true
   },
   {
-    "id": "dd15",
-    "phase": "dare",
+    "id": "dr-18",
+    "band": "dare",
+    "role": "dare",
     "kind": "dare",
-    "text": "Give everyone here a two-word nickname, to their faces. No edits.",
-    "measures": [
-      "status ranking",
-      "room-wide read"
-    ],
+    "text": "{P1}, swap one item of clothing with someone in this room.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-19",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, let the room vote on what you did after your last break-up.",
+    "measures": ["flavour:dare"],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-20",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, say out loud the highest number you have ever been with. Just the number.",
+    "measures": ["metric:body-count", "dare"],
     "coding": "status",
-    "asksTarget": false
+    "asksTarget": true
+  },
+  {
+    "id": "dr-21",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, turn your phone over and let someone here ask you three questions. You have to answer.",
+    "measures": ["flavour:dare"],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-22",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, admit who in this room you would drop for someone else. Say the name.",
+    "measures": ["metric:crush", "dare"],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-23",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, show everyone your music taste. Play one song. No skipping.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-24",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, tell the room how many people you have ghosted. Own it.",
+    "measures": ["metric:is-fake", "dare"],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-25",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, say the name of someone here you would never kiss. And say why.",
+    "measures": ["metric:crush", "dare"],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-26",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, hand someone here your phone and let them send one message to anyone in your contacts.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-27",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, tell the room your most controversial opinion about attraction. Out loud.",
+    "measures": ["flavour:dare"],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-28",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, let the room pick who you are doing for the rest of the night.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
+    "asksTarget": true
   }
 ]

@@ -1,27 +1,27 @@
 // packages/prompts/src/provider.ts
 // TWO INDEPENDENT LANES. Code carries the night; providers only garnish.
 //
-//   Local OpenAI-compatible generation (GEN_BASE / GEN_MODEL), no key.
-//   Grok (XAI_API_KEY) → existing validated reveal call only.
-//   Gemini (GEMINI_API_KEY) → analysis (tags, debrief similarity) + narration.
+//   Ollama  (GEN_BASE / GEN_MODEL)  → the local model that writes the night's
+//                                     questions and dares, and the one-line
+//                                     verdicts. No API key, no cloud, no cost.
+//   Gemini (GEMINI_API_KEY)         → analysis only (it arranges the data).
 //
 // Rules this file enforces:
-//   • Cloud lanes check their own keys; a missing key means that lane returns
-//     `no-key` without touching the network. Nothing here ever throws.
+//   • Each lane checks only its own key/config; a missing key means that lane
+//     returns `no-key` without touching the network. Nothing here throws.
 //   • Both lanes spend from ONE CallGuard (per room, MAX_PROVIDER_CALLS_PER_NIGHT).
-//   • 8s AbortController timeout. Refusals / 429 / timeouts return a reason so
-//     callers fall back to the bank or to deterministic code, silently.
-//   • Only pseudonyms leave the server — `redactAliases` scrubs any alias a
+//   • Only pseudonyms leave the server for GEMINI — `redactAliases` scrubs any alias a
 //     caller forgot to strip before a payload is serialized.
 import {
   PROVIDERS,
   SAFETY_OFF,
   resolveGeminiModel,
 } from "../../shared/src/contracts.ts";
+import { aliasPattern } from "../../../lib/aliases.ts";
 import { CallGuard, callGuard, type CallPurpose } from "./guard.ts";
-import { aliasPattern, replaceAliasTokens } from "../../../lib/aliases.ts";
+import { ollamaConfig, type OllamaConfig } from "./ollama.ts";
 
-export type Lane = "grok" | "gemini";
+export type Lane = "ollama" | "gemini";
 
 export type ProviderFailReason =
   | "no-key"
@@ -42,7 +42,7 @@ export interface LaneResult {
   text?: string;
   reason?: ProviderFailReason;
   status?: number;
-  /** Physical HTTP requests made (0 for no-key/budget; ≤2 with a schema/safety retry). */
+  /** Physical HTTP requests made (0 for no-key/budget). */
   requests: number;
 }
 
@@ -67,23 +67,19 @@ export interface ChatMessage {
 }
 
 export interface ProviderOptions {
-  xaiApiKey?: string | null;
   geminiApiKey?: string | null;
   fetchImpl?: FetchLike;
   guard?: CallGuard;
-  genBaseUrl?: string;
-  genModel?: string;
-  grokBaseUrl?: string;
   geminiBaseUrl?: string;
-  grokModel?: string;
   geminiTagModel?: string;
   geminiAnalyzeModel?: string;
   timeoutMs?: number;
+  /** Ollama wiring — defaults to the GEN_* environment variables. */
+  ollama?: Partial<OllamaConfig>;
   env?: Record<string, string | undefined>;
 }
 
 const DEFAULT_TIMEOUT_MS = 8_000;
-const GROK_ENDPOINT = "/chat/completions";
 
 function envOf(opts: ProviderOptions): Record<string, string | undefined> {
   if (opts.env) return opts.env;
@@ -96,11 +92,16 @@ function keyOf(value: string | null | undefined): string | null {
   return trimmed.length === 0 ? null : trimmed;
 }
 
-/** Rewrite eligible aliases in one whole-word pass (shared R22 policy). */
+
+/** Rewrite any known alias to a neutral in-room reference (pseudonyms only). */
 export function redactAliases(text: string, aliases: readonly string[] | undefined): string {
   if (!text || !aliases || aliases.length === 0) return text;
-  return replaceAliasTokens(text, aliases.filter((alias) => typeof alias === "string")
-    .map((alias) => ({ alias, replacement: "someone in the room" })));
+  let out = text.normalize("NFC");
+  for (const alias of aliases) {
+    const pattern = typeof alias === "string" ? aliasPattern(alias) : null;
+    if (pattern) out = out.replace(pattern, "someone in the room");
+  }
+  return out;
 }
 
 /** True when a payload still contains a real alias (used by tests/asserts). */
@@ -157,11 +158,7 @@ function classifyFailure(status: number, body: string): ProviderFailReason {
   if (status === 429) return "rate-limit";
   if (status === 408 || status === 504) return "timeout";
   const lower = body.toLowerCase();
-  if (
-    status === 400 ||
-    status === 403 ||
-    status === 422
-  ) {
+  if (status === 400 || status === 403 || status === 422) {
     if (
       lower.includes("policy") ||
       lower.includes("safety") ||
@@ -190,21 +187,6 @@ export function geminiSafetySettings(threshold: "classic" | "literal" = "classic
   }));
 }
 
-export interface GrokRequest {
-  room: string;
-  messages: ChatMessage[];
-  /** Default "generate" — Grok's only job. */
-  purpose?: CallPurpose;
-  temperature?: number;
-  maxTokens?: number;
-  /** Ask for `response_format: {type:"json_object"}` (retried without it on 400). */
-  json?: boolean;
-  model?: string;
-  timeoutMs?: number;
-  /** Any known player aliases to scrub before the payload leaves the process. */
-  aliases?: readonly string[];
-}
-
 export interface GeminiRequest {
   room: string;
   purpose: CallPurpose;
@@ -219,122 +201,129 @@ export interface GeminiRequest {
 }
 
 /**
- * The lane client. Construct one per server process (or per room harness in
- * tests) and pass it to `generateBatch` / `tagBatch` / `debriefBatch`.
+ * The lane client. Construct one per room: Ollama generates the night's
+ * questions and dares, Gemini analyses the answers into the reveal.
  */
 export class Provider {
   readonly guard: CallGuard;
-  private readonly xaiKey: string | null;
+  readonly ollama: OllamaConfig;
   private readonly geminiKey: string | null;
   private readonly fetchImpl: FetchLike | null;
-  private readonly genBaseUrl: string;
-  private readonly genModel: string;
-  private readonly grokBaseUrl: string;
   private readonly geminiBaseUrl: string;
-  private readonly grokModel: string;
   private readonly geminiTagModel: string;
   private readonly geminiAnalyzeModel: string;
   private readonly timeoutMs: number;
 
   constructor(opts: ProviderOptions = {}) {
     const env = envOf(opts);
-    this.xaiKey = keyOf(opts.xaiApiKey !== undefined ? opts.xaiApiKey : env.XAI_API_KEY);
     this.geminiKey = keyOf(opts.geminiApiKey !== undefined ? opts.geminiApiKey : env.GEMINI_API_KEY);
-    // The model id in contracts.ts is the contract default; XAI_MODEL lets the
-    // host override it at game time without a contract change (ids drift).
-    this.genBaseUrl = (keyOf(opts.genBaseUrl) ?? keyOf(env.GEN_BASE) ?? "http://localhost:11434/v1").replace(/\/+$/, "");
-    this.genModel = keyOf(opts.genModel) ?? keyOf(env.GEN_MODEL) ?? keyOf(env.XAI_MODEL) ?? "dolphin-mistral";
-    this.grokModel = opts.grokModel ?? keyOf(env.XAI_MODEL) ?? PROVIDERS.grok.generate;
     this.geminiTagModel = opts.geminiTagModel ?? resolveGeminiModel(keyOf(env.GEMINI_MODEL) ?? undefined);
     this.geminiAnalyzeModel = opts.geminiAnalyzeModel ?? resolveGeminiModel(keyOf(env.GEMINI_MODEL) ?? undefined);
-    this.grokBaseUrl = (opts.grokBaseUrl ?? PROVIDERS.grok.baseUrl).replace(/\/+$/, "");
     this.geminiBaseUrl = (opts.geminiBaseUrl ?? "https://generativelanguage.googleapis.com/v1beta").replace(/\/+$/, "");
     this.guard = opts.guard ?? callGuard;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.ollama = { ...ollamaConfig(env), ...(opts.ollama ?? {}) };
     const fetchCandidate = opts.fetchImpl ?? (typeof fetch === "function" ? (fetch as unknown as FetchLike) : null);
     this.fetchImpl = fetchCandidate;
   }
 
-  /** Explicit env-reading constructor (keys, XAI_MODEL override, timeouts). */
+  /** Explicit env-reading constructor (keys, models, timeouts). */
   static fromEnv(opts: ProviderOptions = {}): Provider {
     return new Provider(opts);
   }
 
   // ---------- lane probes ----------
-  /** Grok generation lane; reveal purpose is reserved for one validated narration request. */
+  /** The local model: always available in principle — it needs no key. */
   canGenerate(): boolean {
     return this.fetchImpl !== null;
   }
 
-  /** Gemini lane: tagging and debrief analysis only. */
+  /**
+   * Gemini lane: the night's data goes in, the reveal and the secret-card copy
+   * come out. Needs an API key, so it is optional by nature — the engine's own
+   * copy stands when it is not there.
+   */
   canAnalyze(): boolean {
     return this.geminiKey !== null && this.fetchImpl !== null;
   }
 
-  lanes(): { grok: boolean; gemini: boolean } {
-    return { grok: this.canGenerate(), gemini: this.canAnalyze() };
+  lanes(): { ollama: boolean; gemini: boolean } {
+    return { ollama: this.canGenerate(), gemini: this.canAnalyze() };
   }
 
   modelFor(lane: Lane, purpose: CallPurpose = "generate"): string {
-    if (lane === "grok") return purpose === "generate" ? this.genModel : this.grokModel;
-    if (purpose === "reveal") throw new Error("Gemini finale narration is disabled; use templates/Grok.");
-    if (purpose === "tag") return this.geminiTagModel;
+    if (lane === "ollama") return this.ollama.model;
     return this.geminiAnalyzeModel;
   }
 
-  // ---------- Grok lane ----------
-  async grok(req: GrokRequest): Promise<LaneResult> {
+  // ---------- Ollama lane ----------
+  /**
+   * The local model. This is where the night's questions and dares come from.
+   * A missing model, a refused request or a timeout returns a reason so the
+   * caller falls back to the bank, silently.
+   */
+  async ollamaChat(req: {
+    room: string;
+    messages: ChatMessage[];
+    purpose?: CallPurpose;
+    temperature?: number;
+    maxTokens?: number;
+    timeoutMs?: number;
+    aliases?: readonly string[];
+  }): Promise<LaneResult> {
+    const lane: Lane = "ollama";
     const purpose = req.purpose ?? "generate";
-    const lane: Lane = "grok";
-    const generating = purpose === "generate";
-    const baseUrl = generating ? this.genBaseUrl : this.grokBaseUrl;
-    const key = generating ? null : this.xaiKey;
-    if ((!generating && key === null) || this.fetchImpl === null) return { ok: false, lane, reason: "no-key", requests: 0 };
+    if (this.fetchImpl === null) return { ok: false, lane, reason: "disabled", requests: 0 };
     if (!this.guard.tryConsume(req.room, purpose)) return { ok: false, lane, reason: "budget", requests: 0 };
 
-    const messages = req.messages.map((m) => ({
-      role: m.role,
-      content: redactAliases(m.content, req.aliases),
-    }));
-    const baseBody: Record<string, unknown> = {
-      model: req.model ?? this.modelFor(lane, purpose),
-      messages,
-      temperature: req.temperature ?? 0.9,
-      max_tokens: req.maxTokens ?? 1_600,
-      stream: false,
-    };
+    // The local lane is NOT scrubbed: the night's questions are about these
+    // exact people, and the model writes them better when it can read the
+    // names. Nothing leaves this machine.
+    const messages = req.messages.map((m) => ({ role: m.role, content: m.content }));
 
-    let result = await this.postJsonLane(lane, `${baseUrl}${GROK_ENDPOINT}`, {
-      body: req.json === false ? baseBody : { ...baseBody, response_format: { type: "json_object" } },
-      key,
-      timeoutMs: req.timeoutMs ?? this.timeoutMs,
-    });
-
-    // Some model builds reject `response_format`; retry once without it and
-    // strict-parse the fenced JSON instead. Retries share the consumed slot.
-    if (!result.ok && result.status === 400 && req.json !== false) {
-      result = await this.postJsonLane(lane, `${baseUrl}${GROK_ENDPOINT}`, {
-        body: baseBody,
-        key,
-        timeoutMs: req.timeoutMs ?? this.timeoutMs,
+    const controller = new AbortController();
+    const timeoutMs = req.timeoutMs ?? this.ollama.timeoutMs;
+    const timer = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
+    try {
+      const response = await this.fetchImpl(`${this.ollama.baseUrl}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: this.ollama.model,
+          messages,
+          temperature: req.temperature ?? 0.9,
+          max_tokens: req.maxTokens ?? 1_600,
+          stream: false,
+        }),
+        signal: controller.signal,
       });
+      const raw = await response.text();
+      if (!response.ok) {
+        return { ok: false, lane, reason: classifyFailure(response.status, raw), status: response.status, requests: 1 };
+      }
+      const text = extractText(lane, raw);
+      if (!text || text.trim().length === 0) {
+        return { ok: false, lane, reason: "empty", status: response.status, requests: 1 };
+      }
+      return { ok: true, lane, text, status: response.status, requests: 1 };
+    } catch (error) {
+      const name = (error as { name?: string } | null)?.name;
+      const aborted = name === "AbortError" || controller.signal.aborted;
+      return { ok: false, lane, reason: aborted ? "timeout" : "network", requests: 1 };
+    } finally {
+      clearTimeout(timer);
     }
-    return result;
-  }
-
-  /** Grok + loose JSON parse. Invalid JSON → ok:false, reason "parse". */
-  async grokJson(req: GrokRequest): Promise<{ result: LaneResult; value: unknown }> {
-    const result = await this.grok({ ...req, json: req.json ?? true });
-    if (!result.ok) return { result, value: null };
-    const value = parseJsonLoose(result.text);
-    if (value === null) return { result: { ...result, ok: false, reason: "parse" }, value: null };
-    return { result, value };
   }
 
   // ---------- Gemini lane ----------
+  /**
+   * One Gemini call. This is the analysis lane: it reads the night (already
+   * pseudonymised by the narrator) and writes the copy the room sees. Aliases
+   * are scrubbed on the way out — unlike the local lane, which is handed the
+   * real names because the questions have to sound like they are about people.
+   */
   async gemini(req: GeminiRequest): Promise<LaneResult> {
     const lane: Lane = "gemini";
-    if (req.purpose === "reveal") return { ok: false, lane, reason: "disabled", requests: 0 };
     if (this.geminiKey === null || this.fetchImpl === null) return { ok: false, lane, reason: "no-key", requests: 0 };
     if (!this.guard.tryConsume(req.room, req.purpose)) return { ok: false, lane, reason: "budget", requests: 0 };
 
@@ -352,9 +341,6 @@ export class Provider {
     });
 
     const result = await this.postGemini(url, buildBody("classic"), req.timeoutMs ?? this.timeoutMs);
-    // If the endpoint rejects the safety field (classic v1beta expects
-    // BLOCK_NONE, the newer API expects the literal "OFF"), retry once with the
-    // contract's literal thresholds. Either way this stays ONE budgeted call.
     if (!result.ok && result.status === 400) {
       return this.postGemini(url, buildBody("literal"), req.timeoutMs ?? this.timeoutMs);
     }
@@ -424,7 +410,7 @@ export function extractText(lane: Lane, raw: string): string | null {
   const parsed = parseJsonLoose(raw);
   if (!parsed || typeof parsed !== "object") return null;
   const body = parsed as Record<string, unknown>;
-  if (lane === "grok") {
+  if (lane === "ollama") {
     const choices = body.choices;
     if (Array.isArray(choices) && choices.length > 0) {
       const first = choices[0] as Record<string, unknown>;
@@ -432,13 +418,16 @@ export function extractText(lane: Lane, raw: string): string | null {
       const content = message?.content;
       if (typeof content === "string") return content;
       if (Array.isArray(content)) {
-        // Some builds return content parts.
         const joined = content
           .map((part) => (part && typeof part === "object" ? String((part as Record<string, unknown>).text ?? "") : ""))
           .join("");
         if (joined) return joined;
       }
     }
+    // Native Ollama shape.
+    const nativeMessage = body.message as Record<string, unknown> | undefined;
+    if (nativeMessage && typeof nativeMessage.content === "string") return nativeMessage.content;
+    if (typeof body.response === "string") return body.response;
     return null;
   }
   const candidates = body.candidates;
@@ -452,7 +441,6 @@ export function extractText(lane: Lane, raw: string): string | null {
         .join("");
       if (joined.trim().length > 0) return joined;
     }
-    // Blocked / safety-filtered candidate: no text at all.
     return null;
   }
   return null;

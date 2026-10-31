@@ -1,12 +1,18 @@
 // packages/prompts/src/index.ts
-// Public surface of @reveal/prompts (Agent D — PROMPTS & PROVIDERS).
+// Public surface of @reveal/prompts.
 //
-//   • bank/      the fallback bank: ≥15 prompts/phase, u1–u27 behind SPICY_TIER
-//   • filter.ts  the deterministic guardrail (schema, dedupe, banned, data-or-dead)
-//   • provider.ts two independent lanes (Grok generation / Gemini analysis)
-//   • analyze.ts code-first tags + token-Jaccard, one optional Gemini refinement
-//   • generate.ts ONE batched Grok call per phase, filtered, callbacks verified
-//   • facade.ts  PromptProvider.forPhase(phase, n, used) — bank-first
+//   • bank/     193 prompts, band + role tagged; the unhinged tier loads FIRST
+//   • ollama.ts the local model that writes the night's questions and dares —
+//               and the only place a prompt may be dropped (four reasons)
+//   • provider.ts the Gemini lane, which reads the night's data and writes
+//               the reveal
+//   • generate.ts the batched generation run, spicy first, safety-capped
+//   • facade.ts PromptProvider — bank-first, never blocks the game
+//
+// There is no content filter. This is a party for the people in the room, not
+// an app that ships: the only things that stop a line being played are that it
+// names nobody in the room, repeats one already accepted, runs past
+// MAX_PROMPT_CHARS, or is a refusal.
 export {
   CallGuard,
   PURPOSE_SLOTS,
@@ -25,7 +31,6 @@ export {
   type ChatMessage,
   type FetchLike,
   type GeminiRequest,
-  type GrokRequest,
   type Lane,
   type LaneResult,
   type ProviderFailReason,
@@ -33,129 +38,70 @@ export {
 } from "./provider.ts";
 
 export {
-  BANK_PHASES,
-  PHASE_KINDS,
+  BANK,
+  BANK_BANDS,
+  BAND_ORDER,
+  BAND_KINDS,
   RAW_BANK,
-  UNHINGED_IDS,
   bankCounts,
-  bankForPhase,
+  bankForBand,
+  bankTotal,
   loadBank,
   maxPlaceholderIndex,
+  metricOf,
   placeholderIndexes,
+  promptTypeKey,
+  seededShuffle,
+  selectBand,
   selectFromBank,
-  spicyTierEnabled,
   type BankEntry,
-  type BankOptions,
-  type PromptPhase,
   type SelectOptions,
 } from "./bank/index.ts";
 
-// Live moments (ROUND 3) — spotlight / verdict seeds + the decoy cover pool.
-// Kept OUT of loadBank(): they are scheduled by the server's live-moment
-// planner, never mixed into the per-phase prompt pool.
 export {
-  DECOYS,
-  RAW_LIVE,
-  SPOTLIGHT_IDLE_LINE,
-  liveCounts,
-  liveKindInPhase,
-  livePrompt,
-  liveSeeds,
-  type DecoySeed,
-  type LiveKind,
-  type LiveOptions,
-  type LiveSeed,
-} from "./bank/live/index.ts";
+  BAND_BATCH_SIZE,
+  GEN_SAFETY_CAP_MS,
+  GEN_TARGET_PROMPTS,
+  OLLAMA_DEFAULT_BASE,
+  OLLAMA_DEFAULT_MODEL,
+  OLLAMA_DEFAULT_TIMEOUT_MS,
+  REFUSAL_PATTERNS,
+  callOllama,
+  fillNames,
+  formatReasons,
+  generateNightWithOllama,
+  isMetaCommentary,
+  isRefusal,
+  normalizeForMatch,
+  ollamaConfig,
+  parseLines,
+  parseOllamaText,
+  rephraseSystemPrompt,
+  rephraseUserPrompt,
+  restoreNames,
+  validateGenerated,
+  type OllamaBatchReport,
+  type OllamaBankPrompt,
+  type OllamaConfig,
+  type OllamaDropReason,
+  type OllamaFetch,
+  type OllamaMessage,
+  type OllamaRequest,
+  type OllamaResult,
+  type OllamaRunReport,
+  type OllamaValidation,
+} from "./ollama.ts";
 
 export {
-  BANNED_PATTERNS,
-  CODINGS,
-  DUPLICATE_JACCARD,
-  EVALUATIVE_TRAITS,
-  HARD_BLOCKED,
-  MAX_PROMPT_CHARS,
-  MIN_PROMPT_CHARS,
-  ROOM_REFERENCES,
-  ROUND_KINDS,
-  badPlaceholder,
-  checkBanned,
-  checkDataOrDead,
-  checkHardBlocked,
-  containsVerbatimQuote,
-  filterCandidates,
-  hasRoomReference,
-  isRoomDirected,
-  normalizeCandidate,
-  normalizeCoding,
-  normalizeKind,
-  normalizeStyle,
-  normalizeMeasures,
-  type BannedRule,
-  type Dropped,
-  type DropReason,
-  type FilterContext,
-  type Verdict,
-} from "./filter.ts";
-
-export {
-  LEXICON,
-  NEGATIVE_TAGS,
-  POSITIVE_TAGS,
-  TAG_TAXONOMY,
-  codingToTags,
-  contemptDensity,
-  debriefBatch,
-  debriefSimilarity,
-  isTag,
-  primaryTag,
-  tagBatch,
-  tagText,
-  type AnalyzeOptions,
-  type DebriefBatchOptions,
-  type Tag,
-  type TagBatchOptions,
-} from "./analyze.ts";
-
-export {
-  callbackQuotes,
-  checkCallbackIntegrity,
-  confessionFewShots,
-  ensureCallbackShare,
-  generateBatch,
-  generateBatchReport,
-  groupFewShots,
-  pseudonymizedDigest,
+  generateNight,
+  seedPromptsForBand,
   type GenerateBatchInput,
   type GenerateBatchReport,
   type GenerateDrop,
 } from "./generate.ts";
 
 export {
-  DEFAULT_HOST_PHASE,
-  MAX_HOST_CHARS,
-  MAX_HOST_LINES,
-  inferKind,
-  parseHostLines,
-  type HostPromptRejection,
-  type HostPromptResult,
-} from "./custom.ts";
-
-export {
-  TRAIT_MEASURE_PREFIX,
-  inferTrait,
-  traitOfPrompt,
-} from "./trait.ts";
-
-export {
-  STOPWORDS,
-  clamp01,
-  jaccard,
-  normalizeForDedupe,
-  tokenSet,
-  tokenize,
-} from "./text.ts";
-
-export {
+  OPENING_SPICY_PROMPTS,
   PromptProvider,
   createPromptProvider,
   type GenerationState,
@@ -163,18 +109,20 @@ export {
 } from "./facade.ts";
 
 export {
-  DEFAULT_WEIGHTS,
   MAX_PROVIDER_CALLS_PER_NIGHT,
+  OLLAMA,
   PROVIDERS,
   ROUND_TIMERS_MS,
-  SAFETY_OFF,
   SECRET_DECK_MAX,
-  SPICY_TIER,
   TRAITS,
+  resolveGeminiModel,
   pseudonym,
+  type Band,
+  type MetricKey,
   type NightDigest,
   type Prompt,
   type PromptCoding,
+  type PromptRole,
   type RoundKind,
   type TraitId,
 } from "../../shared/src/contracts.ts";

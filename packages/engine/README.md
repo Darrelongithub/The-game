@@ -76,12 +76,11 @@ numerals other than the pseudonym — every quantity lives in
 - **besties** — the same matching on reciprocal friendship-coded picks,
   weighted by `friendEvidence`. `Results.freeAgent` comes from the *ship*
   matching only when there is exactly one unmatched player.
-- **spark** (private, always) — ship pairs with ≥ `SPARK_MIN_MUTUAL` (2)
-  couple-coded picks in *each* direction, both players in `revealOptIn`, and
-  high confidence: at least `CONFIDENCE_RULES.high.independentSignals` (3)
-  independent measured signal types clearing the existing support bars.
-  Mutual picks alone never announce a spark; `buildSecrets` also refuses any
-  spark claim below high confidence.
+The deck has three kinds in v3.2 — `crush`, `blindspot`, `lookchain`
+(`SecretKind` in `packages/shared/src/contracts.ts`). The `spark` and `toxic`
+cards this file used to describe, and the per-round `revealOptIn` gate behind
+them, belong to the v3.1 line; they are documented where that code now lives,
+in `legacy/v3.1/`.
 - **toxic** — negative indegree over friction/rivalry pick rounds.
   Joker guard: a picker whose most-named target exceeds `0.70` of *all*
   their picks is downweighted ×`0.5`. Percentile = share of

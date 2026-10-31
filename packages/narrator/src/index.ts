@@ -1,36 +1,50 @@
-// packages/narrator/src/index.ts — Agent E public surface.
+// packages/narrator/src/index.ts — public surface.
 //
-// The server (Agent F) needs exactly two calls:
+// The server needs exactly two calls:
 //
-//   const skeleton = buildSkeleton(results, digest, meta.players);
-//   const { slides, decks } = await writeFinale(skeleton, secrets, results, digest, { roster: meta.players });
-//   emit finale { slides, summary }  →  then per-socket secrets { cards }
+//   const ps = derivePseudonyms(results, digest, meta.players);
+//   const skeleton = buildSkeleton(results, digest, ps);
+//   const { slides, decks } = await writeFinale(skeleton, decks, results, digest, { roster: meta.players });
+//   emit finale { slides }  →  then per-socket secrets { cards }
 //
 // …or the one-call facade:
 //
-//   const { slides, decks } = await narrateNight({ results, digest, decks, roster: meta.players });
+//   const { slides, decks } = await narrateNight(results, digest, decks, { roster: meta.players });
 //
 // `slides` are broadcast-safe: public only, "Player N" tokens only.
 // `applyAliasesToSlides` / `applyAliasesToDecks` do the deterministic
-// "Player N" → alias swap the server owns (spec §7). `decks` must only ever be
-// emitted to the owning socket.
-
+// "Player N" → alias swap the server owns. `decks` must only ever be emitted
+// to the owning socket.
 export {
   buildSkeleton,
   clip,
-  bodyFromEvidence,
+  isNeverCouple,
+  slideForLookChain,
+  slideForVerdict,
+  slideForQuote,
+  slideForDodge,
+  slideForStat,
+  summaryFor,
   isPublishable,
-  pickContradiction,
   sourceOf,
   registerSource,
   conservativeSource,
-  normalizeTitle,
   NARRATOR_TUNING,
+  type SkeletonSource,
 } from "./slides.ts";
-export type { SkeletonSource } from "./slides.ts";
 
-export { writeFinale, narrateNight, SYSTEM_PROMPT } from "./write.ts";
-export type { WriteOptions, FinaleCopy } from "./write.ts";
+export {
+  SYSTEM_PROMPT,
+  buildRequestPayload,
+  finaleSummary,
+  flattenCards,
+  mergeCards,
+  mergeSlides,
+  narrateNight,
+  normalizeTitle,
+  writeFinale,
+} from "./write.ts";
+export type { FinaleCopy, FinaleSummary, FlatCard, WriteOptions } from "./write.ts";
 
 export {
   BANNED_PHRASES,

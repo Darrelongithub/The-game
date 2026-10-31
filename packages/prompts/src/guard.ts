@@ -2,23 +2,21 @@
 // ONE shared call counter for BOTH provider lanes, counted per room, in memory.
 //
 // Spec §6: "Hard cap: ≤ MAX_PROVIDER_CALLS_PER_NIGHT provider calls per night."
-// and "generation 4 (one per phase) + tag 1 + debrief 1 + reveal+secrets 1 = 7".
+// The night spends: generation 4 (one batch per band) + the reveal 1 = 5.
 // So the guard enforces two things:
 //   1. a per-room TOTAL cap (MAX_PROVIDER_CALLS_PER_NIGHT), and
-//   2. per-purpose slot caps (batching is the budget: one tag batch, one debrief
-//      batch, one reveal call, one generation batch per phase).
-// Both lanes spend from the same counter — a Grok batch and a Gemini batch each
-// cost one call, and neither can starve past the cap.
+//   2. per-purpose slot caps (batching IS the budget: one generation batch per
+//      band, one Gemini call for the finale copy).
+// Both lanes spend from the same counter — an Ollama batch and a Gemini call
+// each cost one call, and neither can starve past the cap.
 import { MAX_PROVIDER_CALLS_PER_NIGHT } from "../../shared/src/contracts.ts";
 
-export type CallPurpose = "generate" | "tag" | "analyze" | "reveal";
+export type CallPurpose = "generate" | "reveal";
 
-/** Per-room, per-night slot caps. Sum = 7, one below the hard cap of 8. */
+/** Per-room, per-night slot caps. Sum = 5, well under the hard cap of 8. */
 export const PURPOSE_SLOTS: Readonly<Record<CallPurpose, number>> = Object.freeze({
-  generate: 4, // ONE batch per phase (warmup / spicy / deep / dare)
-  tag: 1,      // ONE tag batch for the whole night
-  analyze: 1,  // ONE debrief-similarity batch
-  reveal: 1,   // finale slides + secret cards, ONE call
+  generate: 4, // ONE batch per band (spicy / warmup / deep / dare)
+  reveal: 1,   // finale slides + secret cards, ONE Gemini call
 });
 
 export interface GuardSnapshot {

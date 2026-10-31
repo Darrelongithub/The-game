@@ -8,7 +8,9 @@ import { ALIAS_REPLACE_MIN } from "../../../lib/aliases.ts";
 
 const players = [{ id: "p1", alias: "Ali" }, { id: "p2", alias: "Mo" }, { id: "p3", alias: "May" }];
 const digest: NightDigest = { quotes: [], stats: {}, runningGags: [], pickTeasers: [], dodges: [], selfVsRoom: [] };
-const results: Results = { roomId: "r22", claims: [], pairScores: [], computedAt: 1000 };
+// v3.2 Results has no `claims` — the verdict list is what the roster is derived
+// from, and this test passes an explicit roster, so the shape change is all it needs.
+const results: Results = { roomId: "r22", verdicts: [], pairScores: [], computedAt: 1000 };
 
 test("R22: alias replacement uses whole words, skips short names, and is idempotent", () => {
   assert.equal(ALIAS_REPLACE_MIN, 3);

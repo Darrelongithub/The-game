@@ -1,0 +1,327 @@
+[
+  {
+    "id": "s1",
+    "phase": "spicy",
+    "kind": "pick",
+    "text": "Who here is pretending not to notice the chemistry in this room?",
+    "measures": [
+      "social awareness"
+    ],
+    "coding": "status",
+    "asksTarget": true,
+    "style": "group"
+  },
+  {
+    "id": "s2",
+    "phase": "spicy",
+    "kind": "pick",
+    "text": "Who here could flirt their way into your attention without even trying?",
+    "measures": [
+      "flirt-pattern signal"
+    ],
+    "coding": "tease",
+    "asksTarget": true,
+    "style": "group",
+    "twinId": "sc5"
+  },
+  {
+    "id": "s3",
+    "phase": "spicy",
+    "kind": "text",
+    "text": "What was your first spark of attraction to someone in this room, if any?",
+    "measures": [
+      "past-meets-present tags"
+    ],
+    "coding": "friction",
+    "asksTarget": true,
+    "style": "group",
+    "twinId": "sc10"
+  },
+  {
+    "id": "s4",
+    "phase": "spicy",
+    "kind": "rating",
+    "text": "Rate {P2} on spice from 1 to 10 when they are flirting with this group.",
+    "measures": [
+      "trait:spice",
+      "self-spice baseline",
+      "blind-spot fuel"
+    ],
+    "coding": "neutral",
+    "asksTarget": false,
+    "style": "group"
+  },
+  {
+    "id": "s5",
+    "phase": "spicy",
+    "kind": "pick",
+    "text": "Between {P1} and {P2}, who would you be tempted to kiss if it were mutual?",
+    "measures": [
+      "couple-coding seed"
+    ],
+    "coding": "couple",
+    "asksTarget": true,
+    "style": "group",
+    "twinId": "sc3"
+  },
+  {
+    "id": "s6",
+    "phase": "spicy",
+    "kind": "text",
+    "text": "Which person here has surprised you with their flirting, and what did they do?",
+    "measures": [
+      "first-impression tags"
+    ],
+    "coding": "friction",
+    "asksTarget": true,
+    "style": "group"
+  },
+  {
+    "id": "s7",
+    "phase": "spicy",
+    "kind": "pick",
+    "text": "Between {P1} and {P2}, who would win a flirtatious staring contest with you?",
+    "measures": [
+      "rivalry seed"
+    ],
+    "coding": "rivalry",
+    "asksTarget": true,
+    "style": "group"
+  },
+  {
+    "id": "s8",
+    "phase": "spicy",
+    "kind": "ios",
+    "text": "How close would you want to get to {P3} if the chemistry was mutual?",
+    "measures": [
+      "closeness map"
+    ],
+    "coding": "friendship",
+    "asksTarget": true,
+    "style": "group"
+  },
+  {
+    "id": "s9",
+    "phase": "spicy",
+    "kind": "pick",
+    "text": "Who here has the most rizz and is wasting it on this group?",
+    "measures": [
+      "rizz ranking"
+    ],
+    "coding": "status",
+    "asksTarget": true,
+    "style": "group"
+  },
+  {
+    "id": "s10",
+    "phase": "spicy",
+    "kind": "text",
+    "text": "What is the boldest flirt you have wanted to send someone in this room?",
+    "measures": [
+      "harmless-confession tags"
+    ],
+    "coding": "friction",
+    "asksTarget": true,
+    "style": "group"
+  },
+  {
+    "id": "s11",
+    "phase": "spicy",
+    "kind": "pick",
+    "text": "Who here would make a crush obvious before they ever admitted it?",
+    "measures": [
+      "status reads",
+      "friction tags"
+    ],
+    "coding": "status",
+    "asksTarget": true,
+    "style": "group"
+  },
+  {
+    "id": "s12",
+    "phase": "spicy",
+    "kind": "rating",
+    "text": "Rate {P5} on spice from 1 to 10 when they flirt with someone here.",
+    "measures": [
+      "trait:spice",
+      "peer spice read",
+      "trait agreement"
+    ],
+    "coding": "status",
+    "asksTarget": true,
+    "style": "group"
+  },
+  {
+    "id": "s13",
+    "phase": "spicy",
+    "kind": "text",
+    "text": "Whose attention in this room feels most tempting when they turn on the charm?",
+    "measures": [
+      "grievance tags",
+      "status reads"
+    ],
+    "coding": "friction",
+    "asksTarget": true,
+    "style": "group"
+  },
+  {
+    "id": "s14",
+    "phase": "spicy",
+    "kind": "pick",
+    "text": "Who here could turn a completely innocent compliment into flirting?",
+    "measures": [
+      "status reads",
+      "criticism tags"
+    ],
+    "coding": "friction",
+    "asksTarget": true,
+    "style": "group"
+  },
+  {
+    "id": "s15",
+    "phase": "spicy",
+    "kind": "rating",
+    "text": "Rate {P3} on spice from 1 to 10 when they notice chemistry in this room.",
+    "measures": [
+      "trait:warmth",
+      "peer warmth read"
+    ],
+    "coding": "friendship",
+    "asksTarget": true,
+    "style": "group"
+  },
+  {
+    "id": "sc1",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever sent a nude to someone in this room?",
+    "measures": [
+      "self-report",
+      "sexual history signal"
+    ],
+    "coding": "couple",
+    "asksTarget": true,
+    "style": "confess"
+  },
+  {
+    "id": "sc2",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever fantasized about someone else in this room?",
+    "measures": [
+      "self-report",
+      "desire signal"
+    ],
+    "coding": "couple",
+    "asksTarget": true,
+    "style": "confess",
+    "twinId": "u1"
+  },
+  {
+    "id": "sc3",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever hooked up with someone from this friend group?",
+    "measures": [
+      "self-report",
+      "hookup signal"
+    ],
+    "coding": "couple",
+    "asksTarget": true,
+    "style": "confess",
+    "twinId": "s5"
+  },
+  {
+    "id": "sc4",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever kissed someone in this room and told nobody?",
+    "measures": [
+      "self-report",
+      "secret-kiss signal"
+    ],
+    "coding": "couple",
+    "asksTarget": true,
+    "style": "confess"
+  },
+  {
+    "id": "sc5",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever flirted with someone here to get something you wanted?",
+    "measures": [
+      "self-report",
+      "flirt-pattern signal"
+    ],
+    "coding": "tease",
+    "asksTarget": true,
+    "style": "confess",
+    "twinId": "s2"
+  },
+  {
+    "id": "sc6",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever been turned on by someone in this room mid-argument?",
+    "measures": [
+      "self-report",
+      "tension signal"
+    ],
+    "coding": "couple",
+    "asksTarget": true,
+    "style": "confess"
+  },
+  {
+    "id": "sc7",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever checked someone here's location without telling them?",
+    "measures": [
+      "self-report",
+      "trust signal"
+    ],
+    "coding": "trust",
+    "asksTarget": true,
+    "style": "confess"
+  },
+  {
+    "id": "sc8",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever had a dream about someone here you can't unsee?",
+    "measures": [
+      "self-report",
+      "desire signal"
+    ],
+    "coding": "couple",
+    "asksTarget": true,
+    "style": "confess"
+  },
+  {
+    "id": "sc9",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever typed a message to someone here and deleted it before sending?",
+    "measures": [
+      "self-report",
+      "hesitation signal"
+    ],
+    "coding": "tease",
+    "asksTarget": true,
+    "style": "confess"
+  },
+  {
+    "id": "sc10",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever judged someone here before you actually met them?",
+    "measures": [
+      "self-report",
+      "first-impression signal"
+    ],
+    "coding": "status",
+    "asksTarget": true,
+    "style": "confess",
+    "twinId": "s3"
+  }
+]

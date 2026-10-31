@@ -1,53 +1,66 @@
 // packages/prompts/src/bank/index.ts
-// FALLBACK BANK — the code-first primary implementation of every prompt.
+// THE PROMPT BANK — the code-first primary implementation of every question.
 //
-// Loads one JSON file per phase (spec §6: "≥15 prompts per phase in
-// packages/prompts/src/bank/") plus the unhinged tier u1–u27, which is only
-// included when SPICY_TIER is on. ZERO network, ZERO provider calls: this file
-// alone makes a full night playable offline.
+// v3.2 shape: the bank is no longer organised in PHASES (the night has no
+// phase names) but in HEAT BANDS, and every prompt carries the ROLE it plays
+// inside a case:
 //
-// Every entry carries `id, phase, kind, text, measures, coding, asksTarget`
-// (the Prompt contract minus `source`, which the loader stamps as "bank").
+//   subject          asked to the case subject — a real question of their own
+//   observer_subject asked to an observer pair — about the case subject
+//   observer_pair    asked to an observer pair — about ANOTHER pair in the room
+//   group            asked to everyone — results are counts only
+//   solo             the odd leftover observer gets a spicy prompt of their own
+//   dare             aimed at a named player
+//
+// LOADER ORDER: the spicy tier and the unhinged tier come FIRST. The night
+// starts hot; the tame prompts are the tail, not the opening.
+//
+// ZERO network, ZERO provider calls: this file alone makes a full night
+// playable offline.
 import { readFileSync } from "node:fs";
 import {
   MAX_PLAYERS,
-  SPICY_TIER,
+  type Band,
+  type MetricKey,
   type Prompt,
   type PromptCoding,
-  type PromptStyle,
+  type PromptRole,
   type RoundKind,
 } from "../../../shared/src/contracts.ts";
-
-export type PromptPhase = Prompt["phase"];
 
 /** A bank row as authored in JSON — everything except `source`. */
 export type BankEntry = Omit<Prompt, "source">;
 
-export const BANK_PHASES: readonly PromptPhase[] = ["warmup", "spicy", "deep", "dare"] as const;
+/** The four heat bands. Warmup/spicy/deep are question bands; dare is its own. */
+export const BANK_BANDS: readonly Band[] = ["warmup", "spicy", "deep", "dare"] as const;
 
-/** Round kinds that make sense in each phase (spec §3 + the bank's own mix). */
-export const PHASE_KINDS: Record<PromptPhase, readonly RoundKind[]> = {
-  // "confess" — THE SECOND VOICE: a private self-report round. Same question to
-  // everyone, answered about themselves (yes/no + optional target + note).
-  warmup: ["pick", "text", "shout", "rating", "ios", "minigame", "confess"],
-  spicy: ["pick", "text", "shout", "rating", "ios", "minigame", "confess"],
-  deep: ["pick", "text", "shout", "rating", "ios", "minigame", "confess"],
-  dare: ["dare", "pair_dare", "debrief"],
+/**
+ * Generation order for the local model: spicy FIRST, so that if generation
+ * times out the hottest prompts already exist.
+ */
+export const BAND_ORDER: readonly Band[] = ["spicy", "warmup", "deep", "dare"];
+
+/** Round kinds that make sense per band. */
+export const BAND_KINDS: Record<Band, readonly RoundKind[]> = {
+  warmup: ["pick", "text", "longtext", "rating"],
+  spicy: ["pick", "text", "longtext", "rating", "pair_vote", "pair_pick"],
+  deep: ["pick", "text", "longtext", "rating", "pair_vote", "pair_pick"],
+  dare: ["dare"],
 };
 
-const BANK_FILES: Record<PromptPhase, string> = {
+const BANK_FILES: Record<Band, string> = {
   warmup: "warmup.json",
   spicy: "spicy.json",
   deep: "deep.json",
   dare: "dare.json",
 };
 
+/** The unhinged tier — loaded BEFORE the seed prompts. */
 const UNHINGED_FILE = "unhinged.json";
 
 function readJson<T>(file: string): T {
   // Server-side package: read relative to this module so it works from any cwd
-  // and under tsx / node --test / the game server alike (no import attributes,
-  // no bundler assumptions).
+  // and under tsx / node --test / the game server alike.
   const url = new URL(file, import.meta.url);
   return JSON.parse(readFileSync(url, "utf8")) as T;
 }
@@ -55,12 +68,18 @@ function readJson<T>(file: string): T {
 function readBankFile(file: string): BankEntry[] {
   const rows = readJson<BankEntry[]>(file);
   if (!Array.isArray(rows)) throw new Error(`bank file ${file} is not an array`);
+  for (const row of rows) {
+    if (!row.id || !row.text) throw new Error(`bank file ${file} has a row without id/text`);
+    if (!BANK_BANDS.includes(row.band)) throw new Error(`bank row ${row.id} has unknown band ${row.band}`);
+    if (!row.role) throw new Error(`bank row ${row.id} has no role`);
+    if (!row.kind) throw new Error(`bank row ${row.id} has no kind`);
+  }
   return rows;
 }
 
 /** Raw rows, keyed by file — handy for tests and for the host's prompt preview. */
-export const RAW_BANK: { phases: Record<PromptPhase, BankEntry[]>; unhinged: BankEntry[] } = {
-  phases: {
+export const RAW_BANK: { bands: Record<Band, BankEntry[]>; unhinged: BankEntry[] } = {
+  bands: {
     warmup: readBankFile(BANK_FILES.warmup),
     spicy: readBankFile(BANK_FILES.spicy),
     deep: readBankFile(BANK_FILES.deep),
@@ -69,66 +88,46 @@ export const RAW_BANK: { phases: Record<PromptPhase, BankEntry[]>; unhinged: Ban
   unhinged: readBankFile(UNHINGED_FILE),
 };
 
-/** u1–u27 — spicy-tier only (spec §6). Never sent to any provider. */
-export const UNHINGED_IDS: readonly string[] = RAW_BANK.unhinged.map((e) => e.id);
-
 /**
- * SPICY_TIER resolution: contracts.ts is the source of truth (default true),
- * but the host may switch the tier off for a tamer night via `SPICY_TIER=false`
- * in `.env` — no contract edit needed.
+ * Whole bank. ORDER MATTERS:
+ *   1. the unhinged tier — the hottest prompts in the game, loaded FIRST
+ *   2. the spicy band seeds
+ *   3. warmup
+ *   4. deep
+ *   5. dare
+ * The night is shuffled from this pool with a nightly seed, so the loader
+ * order decides the TONE of a night (hot first) rather than the exact
+ * sequence (which is shuffled).
  */
-export function spicyTierEnabled(env: Record<string, string | undefined> = readEnv()): boolean {
-  const raw = env.SPICY_TIER;
-  if (raw === undefined || raw.trim() === "") return SPICY_TIER;
-  return !["false", "0", "off", "no", "n"].includes(raw.trim().toLowerCase());
-}
-
-function readEnv(): Record<string, string | undefined> {
-  // `process` is always present server-side; guard anyway so the bank can be
-  // imported by tooling without node types.
-  return typeof process !== "undefined" && process.env ? process.env : {};
-}
-
-export interface BankOptions {
-  /** Include the unhinged tier (default: SPICY_TIER / env override). */
-  spicy?: boolean;
-}
-
-/**
- * Whole bank, deterministic order: warmup → spicy → deep → dare, authored
- * order inside each phase, unhinged tier appended after its phase's seeds.
- */
-export function loadBank(opts: BankOptions = {}): Prompt[] {
-  const spicy = opts.spicy ?? spicyTierEnabled();
+export function loadBank(): Prompt[] {
   const out: Prompt[] = [];
-  const stamp = (row: BankEntry): Prompt => ({
-    ...row,
-    source: "bank",
-    // Back-compat: an untagged row is a GROUP question ("Who here…").
-    style: row.style ?? (row.kind === "confess" ? "confess" : "group"),
-  });
-  for (const phase of BANK_PHASES) {
-    for (const row of RAW_BANK.phases[phase]) out.push(stamp(row));
-    if (spicy) {
-      for (const row of RAW_BANK.unhinged) {
-        if (row.phase === phase) out.push(stamp(row));
-      }
-    }
-  }
+  const push = (rows: BankEntry[]) => {
+    for (const row of rows) out.push({ ...row, source: "bank" });
+  };
+  push(RAW_BANK.unhinged);
+  push(RAW_BANK.bands.spicy);
+  push(RAW_BANK.bands.warmup);
+  push(RAW_BANK.bands.deep);
+  push(RAW_BANK.bands.dare);
   return out;
 }
 
-/** The default bank for this process (SPICY_TIER / env resolved once). */
+/** The bank, for this process, in order. */
 export const BANK: readonly Prompt[] = loadBank();
 
-export function bankForPhase(phase: PromptPhase, opts: BankOptions = {}): Prompt[] {
-  return loadBank(opts).filter((p) => p.phase === phase);
+export function bankForBand(band: Band): Prompt[] {
+  return loadBank().filter((p) => p.band === band);
 }
 
-export function bankCounts(opts: BankOptions = {}): Record<PromptPhase, number> {
-  const counts: Record<PromptPhase, number> = { warmup: 0, spicy: 0, deep: 0, dare: 0 };
-  for (const p of loadBank(opts)) counts[p.phase] += 1;
+export function bankCounts(): Record<Band, number> {
+  const counts: Record<Band, number> = { warmup: 0, spicy: 0, deep: 0, dare: 0 };
+  for (const p of loadBank()) counts[p.band] += 1;
   return counts;
+}
+
+/** Total prompts available tonight. */
+export function bankTotal(): number {
+  return loadBank().length;
 }
 
 // ---------- placeholders ----------
@@ -152,46 +151,155 @@ export function maxPlaceholderIndex(text: string): number {
   return idx.length === 0 ? 0 : idx[idx.length - 1]!;
 }
 
+// ---------- metrics ----------
+/** The metric a prompt measures, if any ("metric:crush" → "crush"). */
+export function metricOf(prompt: Pick<Prompt, "measures">): MetricKey | undefined {
+  for (const m of prompt.measures) {
+    if (m.startsWith("metric:")) return m.slice("metric:".length) as MetricKey;
+  }
+  return undefined;
+}
+
+/**
+ * The prompt's TYPE — the thing that must never repeat back to back.
+ *
+ * Two prompts are "the same type" when they ask for the same KIND of answer
+ * about the same THING (kind + metric). The night never plays two of the same
+ * type in a row, so the room never hears two "pick the hottest person here"
+ * questions in a row.
+ */
+export function promptTypeKey(prompt: Pick<Prompt, "kind" | "measures" | "coding">): string {
+  return `${prompt.kind}:${metricOf(prompt) ?? prompt.coding}`;
+}
+
 // ---------- selection ----------
-export interface SelectOptions extends BankOptions {
+export interface SelectOptions {
   /** Players in the room — prompts needing a higher {Pn} are skipped. */
   playerCount?: number;
   /** Ids already used tonight (never repeat a prompt). */
   excludeIds?: readonly string[];
-  /** Optional filter (e.g. only "pick" kinds for a given slot). */
+  /** Only prompts with this role. */
+  role?: PromptRole;
+  /** Only prompts of these roles. */
+  roles?: readonly PromptRole[];
+  /** Only these round kinds. */
   kinds?: readonly RoundKind[];
-  /** Optional coding filter. */
+  /** Only these bands. */
+  bands?: readonly Band[];
+  /** Only these codings. */
   coding?: readonly PromptCoding[];
+  /** Only prompts carrying this metric. */
+  metric?: MetricKey;
+  /** Seeded shuffle (nightly). Same seed → same selection. */
+  seed?: number;
 }
 
-/** Deterministic, repeat-free slice of the bank for a phase. */
-export function selectFromBank(phase: PromptPhase, n: number, opts: SelectOptions = {}): Prompt[] {
+/** mulberry32 — small, fast, seedable. Same seed → same night. */
+export function seededShuffle<T>(items: readonly T[], seed: number): T[] {
+  let a = seed >>> 0;
+  const rand = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    const tmp = out[i]!;
+    out[i] = out[j]!;
+    out[j] = tmp;
+  }
+  return out;
+}
+
+/**
+ * Deterministic, repeat-free slice of the bank.
+ *
+ * The pool is shuffled with the nightly seed FIRST, so the selection varies
+ * night to night but is reproducible for a given seed. Selection then prefers
+ * a SPREAD of kinds and metrics so two same-type prompts never land back to
+ * back, and never returns the same template twice.
+ */
+export function selectFromBank(n: number, opts: SelectOptions = {}): Prompt[] {
   const exclude = new Set(opts.excludeIds ?? []);
   const playerCount = Math.max(1, Math.min(MAX_PLAYERS, opts.playerCount ?? MAX_PLAYERS));
   const kinds = opts.kinds ? new Set(opts.kinds) : null;
+  const roles = opts.roles ? new Set(opts.roles) : opts.role ? new Set([opts.role]) : null;
+  const bands = opts.bands ? new Set(opts.bands) : null;
   const codings = opts.coding ? new Set(opts.coding) : null;
-  const pool = bankForPhase(phase, opts).filter((p) => {
+  const pool = loadBank().filter((p) => {
     if (exclude.has(p.id)) return false;
     if (kinds && !kinds.has(p.kind)) return false;
+    if (roles && !roles.has(p.role)) return false;
+    if (bands && !bands.has(p.band)) return false;
     if (codings && !codings.has(p.coding)) return false;
+    if (opts.metric && metricOf(p) !== opts.metric) return false;
     if (maxPlaceholderIndex(p.text) > playerCount) return false;
     return true;
   });
-  // Prefer a spread of round kinds instead of three picks in a row: take one
-  // of each kind in bank order, then fill the remainder in bank order. Fully
-  // deterministic (no randomness — spec §0.1).
+  if (pool.length === 0) return [];
+  const shuffled = seededShuffle(pool, opts.seed ?? 0);
+  if (n <= 0) return [];
+
   const picked: Prompt[] = [];
-  const seenKinds = new Set<RoundKind>();
-  for (const p of pool) {
-    if (picked.length >= n) break;
-    if (!seenKinds.has(p.kind)) {
-      seenKinds.add(p.kind);
-      picked.push(p);
+  const taken = new Set<string>();
+  const push = (p: Prompt): void => {
+    picked.push(p);
+    taken.add(p.id);
+  };
+  // Two prompts are "the same kind of thing" when they ask the same KIND for
+  // the same METRIC. That is the pairing that reads as a repeat, even when the
+  // codings differ ("who would you sleep with" twice in a row is one joke).
+  const adjacencyKey = (p: Prompt): string => `${p.kind}|${metricOf(p) ?? "none"}`;
+  const lastKey = (): string => (picked.length ? adjacencyKey(picked[picked.length - 1]!) : "");
+  const deferred: Prompt[] = [];
+
+  const fill = (accept: (p: Prompt) => boolean): void => {
+    for (const p of shuffled) {
+      if (picked.length >= n) return;
+      if (taken.has(p.id)) continue;
+      if (!accept(p)) continue;
+      if (adjacencyKey(p) === lastKey()) {
+        deferred.push(p);
+        continue;
+      }
+      push(p);
     }
-  }
-  for (const p of pool) {
+  };
+
+  // Pass 1: one of each type (kind + metric + coding) — kills same-type
+  // back-to-back before anything else is considered.
+  const seenTypes = new Set<string>();
+  fill((p) => {
+    const key = promptTypeKey(p);
+    if (seenTypes.has(key)) return false;
+    seenTypes.add(key);
+    return true;
+  });
+
+  // Pass 2: fill the rest, still never landing the same kind twice in a row.
+  fill(() => true);
+
+  // Pass 3: a thin pool still fills the slot (adjacency allowed, never a
+  // repeated template).
+  for (const p of deferred) {
     if (picked.length >= n) break;
-    if (!picked.includes(p)) picked.push(p);
+    if (taken.has(p.id)) continue;
+    push(p);
   }
-  return picked.slice(0, Math.max(0, n));
+  return picked.slice(0, n);
+}
+
+/**
+ * The whole night's worth of prompts for one band, shuffled with the nightly
+ * seed. The server asks for bands in BAND_ORDER (spicy first).
+ */
+export function selectBand(
+  band: Band,
+  n: number,
+  opts: SelectOptions = {},
+): Prompt[] {
+  return selectFromBank(n, { ...opts, bands: [band] });
 }

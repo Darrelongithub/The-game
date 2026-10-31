@@ -1,15 +1,18 @@
 "use client";
+// components/RoomApp.tsx — the phone's phase router.
+//
+// lobby → generating → play → results → (the reveal)
+//
+// The laptop has its own page (src/app/host/page.tsx). This one is the phone.
 import { useEffect, useState } from "react";
-import type { ProfileAnswers, Consent } from "@shared/contracts.ts";
+import type { Consent, ProfileAnswers, RoomCode } from "@shared/contracts.ts";
 import { AnimatePresence, motion } from "framer-motion";
 import dynamic from "next/dynamic";
 import { useRoom } from "@/lib/useRoom";
 import { ConnectionLostOverlay } from "@/components/ConnectionLostOverlay";
-import { GlassCard } from "@/components/GlassCard";
 import { GlowButton } from "@/components/GlowButton";
 import { Flame } from "@/components/Flame";
 import { pageVariants } from "@/lib/motion";
-import { DemoPanel } from "@/components/DemoPanel";
 
 const loading = () => <main className="screen flex items-center justify-center" aria-busy="true">Getting things ready…</main>;
 const JoinScreen = dynamic(() => import("@/components/JoinScreen").then((m) => m.JoinScreen), { loading });
@@ -20,14 +23,12 @@ export function RoomApp() {
   const room = useRoom();
   const [joining, setJoining] = useState(false);
 
-  const handleCreate = async (alias: string, consent: Consent, profile: ProfileAnswers, options?: { demo?: boolean }) => {
-    setJoining(true);
-    try {
-      return await room.createRoom(alias, consent, profile, options);
-    } finally { setJoining(false); }
-  };
-
-  const handleJoin = async (code: Parameters<typeof room.joinRoom>[0], alias: string, consent: Consent, profile: ProfileAnswers) => {
+  const handleJoin = async (
+    code: RoomCode,
+    alias: string,
+    consent: Consent,
+    profile: ProfileAnswers,
+  ) => {
     setJoining(true);
     try {
       return await room.joinRoom(code, alias, consent, profile);
@@ -41,7 +42,6 @@ export function RoomApp() {
 
   return (
     <>
-      {/* Clear the old room synchronously, including any revealed private card. */}
       <AnimatePresence key={inRoom ? "in-room" : "without-room"} mode="wait">
         {!inRoom && room.hasSession ? (
           <motion.div key="resuming" variants={pageVariants} initial="initial" animate="animate" exit="exit">
@@ -53,7 +53,6 @@ export function RoomApp() {
               hasSession={room.hasSession}
               busy={joining}
               error={room.error}
-              onCreate={handleCreate}
               onJoin={handleJoin}
             />
           </motion.div>
@@ -62,36 +61,13 @@ export function RoomApp() {
             <LobbyScreen
               view={view!}
               you={room.you}
-              code={room.code}
-              isHost={room.isHost}
-              mode={room.mode}
-              busy={joining}
-              onStart={room.start}
-              onAddBot={room.addBot}
-              onCustomPrompts={room.setCustomPrompts}
+              onReady={() => room.setLobbyReady(!room.youAreLobbyReady)}
               onDelete={room.deleteRoom}
-              onHeatDown={room.voteHeatDown}
-              demoPanel={view!.demo ? <DemoPanel
-                players={view!.players}
-                you={room.you}
-                phase={view!.phase}
-                round={room.round}
-                awaitingReady={room.awaitingReady}
-                onAddPlayer={(alias) => void room.demoAddPlayer(alias)}
-                onRemovePlayer={room.demoRemovePlayer}
-                onSetMode={room.demoSetBotMode}
-                onAnswerAs={room.demoAnswerAs}
-                onAllReady={room.demoAllReady}
-                onSpeed={room.demoSpeed}
-              /> : undefined}
             />
           </motion.div>
         ) : view!.phase === "closed" ? (
           <motion.div key="closed" variants={pageVariants} initial="initial" animate="animate" exit="exit">
-            <ClosedScreen
-              message={room.error ?? "That's the night. The room is closed."}
-              onNew={room.reset}
-            />
+            <ClosedScreen message={room.error ?? "That's the night. The room is closed."} onNew={room.reset} />
           </motion.div>
         ) : (
           // Do not transform this wrapper: the finale and room controls are
@@ -129,7 +105,7 @@ function ResumeSplash({ onGiveUp }: { onGiveUp: () => void }) {
         Same phone, same seat. Your answers are still where you left them.
       </p>
       {slow && (
-        <GlassCard className="mt-2 p-5 w-full max-w-sm">
+        <div className="glass-card mt-2 p-5 w-full max-w-sm">
           <p className="text-sm text-white/60 mb-3">
             The server isn&apos;t answering. It may have gone to sleep, or you&apos;re
             off the WiFi.
@@ -137,7 +113,7 @@ function ResumeSplash({ onGiveUp }: { onGiveUp: () => void }) {
           <GlowButton variant="accent" className="w-full" onClick={onGiveUp}>
             Start over
           </GlowButton>
-        </GlassCard>
+        </div>
       )}
     </main>
   );

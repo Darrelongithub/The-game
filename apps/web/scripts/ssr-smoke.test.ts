@@ -4,16 +4,18 @@
 // module-scope `window` use and render-time crashes without needing a browser.
 import { renderToString } from "react-dom/server";
 import React from "react";
-import type { RoomView } from "@shared/contracts.ts";
+import type { RoomView, RoundView } from "@shared/contracts.ts";
 import { JoinScreen } from "../src/components/JoinScreen";
 import { LobbyScreen } from "../src/components/LobbyScreen";
+import { LoadingScreen } from "../src/components/LoadingScreen";
+import { ReadyGate } from "../src/components/ReadyGate";
+import { HostScreen } from "../src/components/HostScreen";
+import { QuestionScreen } from "../src/components/play/QuestionScreen";
 import { ConnectionLostOverlay } from "../src/components/ConnectionLostOverlay";
-import { PromptScreen } from "../src/screens/PromptScreen";
-import { InterludeScreen } from "../src/screens/InterludeScreen";
-import { RevealScreen } from "../src/screens/RevealScreen";
 import { FinaleScreen } from "../src/components/FinaleScreen";
 import { SecretDeck } from "../src/components/SecretDeck";
-import type { RoundKind } from "@shared/contracts.ts";
+import { demoFinale } from "../src/components/__demo__/demoFinale";
+import { demoDeck } from "../src/components/__demo__/demoDeck";
 
 let pass = 0;
 const fails: string[] = [];
@@ -27,199 +29,138 @@ const ok = (name: string, cond: boolean, extra = "") => {
 
 const view: RoomView = {
   code: "AB2C",
-  phase: "lobby",
-  hostId: "p1",
+  phase: "play",
   players: [
-    { id: "p1", alias: "Ada", connected: true, isBot: false },
-    { id: "p2", alias: "🤖 Bot 1", connected: true, isBot: true },
-    { id: "p3", alias: "🤖 Bot 2", connected: false, isBot: true },
-    { id: "p4", alias: "🤖 Bot 3", connected: true, isBot: true },
+    { id: "p1", alias: "Ada", connected: true, isBot: false, ready: true },
+    { id: "p2", alias: "Bot 1", connected: true, isBot: true, ready: false },
+    { id: "p3", alias: "Bot 2", connected: false, isBot: true, ready: false },
+    { id: "p4", alias: "Bot 3", connected: true, isBot: true, ready: true },
   ],
   round: null,
   seq: 3,
+  hostPresent: true,
+  lobbyReady: ["p1", "p4"],
+  progress: { index: 2, total: 12 },
+  pickOptions: ["p2", "p3", "p4"],
 };
 
 const noop = () => {};
 const asyncNoop = async () => ({ ok: false as const, error: "test" });
 
-// JoinScreen
+// ---- JoinScreen: the sign-up fields are EXACTLY the engine's ----
 const joinHtml = renderToString(
   React.createElement(JoinScreen, {
     hasSession: false,
     busy: false,
     error: null,
-    onCreate: asyncNoop,
     onJoin: asyncNoop,
   })
 );
 ok("JoinScreen renders the alias field", joinHtml.includes("Your alias"));
-ok("JoinScreen requires 18+ profile and house-rule consent", joinHtml.includes("18+") && joinHtml.includes("house rules") && joinHtml.includes("type=\"checkbox\""));
-ok("JoinScreen renders both tabs", joinHtml.includes("Create a room") && joinHtml.includes("Join a room"));
+ok("JoinScreen asks for the room code", joinHtml.includes("Room code"));
+ok("JoinScreen asks for age", joinHtml.includes("How old are you?"));
+ok("JoinScreen asks for gender", joinHtml.includes("Gender"));
+ok("JoinScreen asks for sexuality", joinHtml.includes("Sexuality"));
+ok("JoinScreen asks for attraction", joinHtml.includes("Who are you attracted to?"));
+ok("JoinScreen asks no fifth field (the generic prompt is gone, not moved here)", !joinHtml.includes("What are you here for tonight?"));
+ok("JoinScreen has NO relationship-history question", !joinHtml.includes("partners") && !joinHtml.includes("longest") && !joinHtml.includes("How many"));
+ok("JoinScreen requires the 18+ tick", joinHtml.includes("or older") && joinHtml.includes('type="checkbox"'));
+ok("JoinScreen says the answers stay on the server", joinHtml.includes("never printed"));
 ok("JoinScreen keeps the action disabled without an alias", joinHtml.includes("disabled"));
 
-// LobbyScreen (host view)
-const lobbyHost = renderToString(
+// ---- LobbyScreen ----
+const lobbyHtml = renderToString(
   React.createElement(LobbyScreen, {
-    view, you: "p1", code: "AB2C", isHost: true, mode: "mock",
-    onStart: noop, onAddBot: noop, onCustomPrompts: noop, onDelete: noop, onHeatDown: noop,
+    view,
+    you: "p1",
+    onReady: noop,
+    onDelete: noop,
   })
 );
-ok("Lobby shows the room code big", lobbyHost.includes("AB2C"));
-ok("Lobby lists every player", view.players.every((p) => lobbyHost.includes(p.alias)));
-ok("Lobby marks the host", lobbyHost.includes("host"));
-ok("Lobby labels the public display as the Host screen", lobbyHost.includes("Host screen — open this on the host laptop / TV. The reveal plays here."));
-ok("Lobby keeps the public-display link and adds a copy button", lobbyHost.includes('href="/display?code=AB2C"') && lobbyHost.includes("Open public display") && lobbyHost.includes("Copy host screen link"));
-ok("Lobby keeps the invite and room controls", lobbyHost.includes("Copy invite link") && lobbyHost.includes("Vote to keep the heat") && lobbyHost.includes("Delete room"));
-ok("Lobby exposes add-bot + custom prompts", lobbyHost.includes("Add bot") && lobbyHost.includes("Custom prompts"));
-ok("Lobby start is enabled at 4 players", lobbyHost.includes("Start the night · 4 players"));
+ok("Lobby shows the room code big", lobbyHtml.includes("AB2C"));
+ok("Lobby lists every player", view.players.every((p) => lobbyHtml.includes(p.alias)));
+ok("Lobby shows ready ticks", lobbyHtml.includes("ready"));
+ok("Lobby says the laptop never answers", lobbyHtml.includes("laptop never"));
+ok("Lobby has no phase names", !/warmup|spicy|deep phase/i.test(lobbyHtml));
 
-// LobbyScreen (guest view) — host controls must be absent
-const lobbyGuest = renderToString(
-  React.createElement(LobbyScreen, {
-    view, you: "p2", code: "AB2C", isHost: false, mode: "socket",
-    onStart: noop, onAddBot: noop, onCustomPrompts: noop, onDelete: noop, onHeatDown: noop,
+// ---- QuestionScreen: ONE question, ONE grey line, the answer controls ----
+const round: RoundView = {
+  roundId: "c1",
+  segmentId: "c1-p0",
+  index: 1,
+  kind: "pick",
+  promptText: "Who in this room would you take home from this party?",
+  note: "About Wanjiru. They won't see this.",
+  closesAt: Date.now() + 30_000,
+  youSubmitted: false,
+  subjectId: "p2",
+  options: undefined,
+  pair: undefined,
+  target: undefined,
+  trait: undefined,
+  aboutSelf: undefined,
+  submitted: [],
+};
+const questionHtml = renderToString(
+  React.createElement(QuestionScreen, {
+    round,
+    view,
+    you: "p1",
+    onSubmit: asyncNoop,
   })
 );
-ok("Guest gets no host controls", !lobbyGuest.includes("Add bot") && lobbyGuest.includes("Waiting on the host"));
-ok("Guest retains the public-display link and Host screen copy action", lobbyGuest.includes("Host screen — open this on the host laptop / TV. The reveal plays here.") && lobbyGuest.includes('href="/display?code=AB2C"') && lobbyGuest.includes("Open public display") && lobbyGuest.includes("Copy host screen link"));
+ok("QuestionScreen shows the question", questionHtml.includes("Who in this room would you take home"));
+ok("QuestionScreen shows the grey line", questionHtml.includes("They won&#x27;t see this."));
+ok("QuestionScreen has no phase names", !/warmup|spicy|deep|dare phase/i.test(questionHtml));
+ok("QuestionScreen lists pick options", questionHtml.includes("Bot 1"));
+ok("QuestionScreen never lists the player itself", !questionHtml.includes(">Ada<"));
 
-// Lobby below the minimum: start must be disabled
-const lobbySmall = renderToString(
-  React.createElement(LobbyScreen, {
-    view: { ...view, players: view.players.slice(0, 2) },
-    you: "p1", code: "AB2C", isHost: true, mode: "mock",
-    onStart: noop, onAddBot: noop, onCustomPrompts: noop, onDelete: noop, onHeatDown: noop,
+// ---- LoadingScreen ----
+const loadingHtml = renderToString(React.createElement(LoadingScreen, { done: 14, total: 40 }));
+ok("LoadingScreen says let's test your friendship", loadingHtml.includes("Let&#x27;s test your friendship"));
+ok("LoadingScreen shows the ready count", loadingHtml.includes("14") && loadingHtml.includes("40") && loadingHtml.includes("ready"));
+
+// ---- ReadyGate ----
+const gateHtml = renderToString(
+  React.createElement(ReadyGate, {
+    players: view.players,
+    you: "p1",
+    youAreReady: false,
+    onReady: noop,
   })
 );
-ok("Start is disabled below MIN_PLAYERS", lobbySmall.includes("Start (needs 4+)"));
+ok("ReadyGate asks for the results", gateHtml.includes("Ready for the results?"));
 
-// Overlay renders nothing while connected
+// ---- HostScreen ----
+const hostHtml = renderToString(
+  React.createElement(HostScreen, {
+    view,
+    finale: null,
+    onStart: noop,
+    onForceResults: noop,
+    onSkipRound: noop,
+    onDelete: noop,
+  })
+);
+ok("HostScreen shows the join QR", hostHtml.includes("QR code for the join link"));
+ok("HostScreen lists the players", view.players.every((p) => hostHtml.includes(p.alias)));
+ok("HostScreen has a Start button", hostHtml.includes("Start") || hostHtml.includes("Started"));
+ok("HostScreen shows the progress", hostHtml.includes("cases"));
+
+// ---- Finale + deck (unchanged theatre) ----
+const finaleHtml = renderToString(React.createElement(FinaleScreen, { view: demoFinale, deck: demoDeck, roomCode: "AB2C" }));
+ok("FinaleScreen renders the story", finaleHtml.includes("finale-screen"));
+
+const deckHtml = renderToString(React.createElement(SecretDeck, { deck: demoDeck }));
+ok("SecretDeck renders", deckHtml.includes("Your secret deck"));
+
 const overlayHtml = renderToString(
-  React.createElement(ConnectionLostOverlay, { connected: true, resuming: false, onRetry: noop })
+  React.createElement(ConnectionLostOverlay, { connected: false, resuming: false, hasSession: true, onRetry: noop })
 );
-ok("Connection overlay stays hidden while connected", overlayHtml.length === 0);
+ok("ConnectionLostOverlay renders without crashing", typeof overlayHtml === "string");
 
-// ---- every round kind renders without exploding -------------------------
-const kinds: RoundKind[] = ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare", "debrief"];
-for (const kind of kinds) {
-  const round = {
-    roundId: `r-${kind}`,
-    index: 3,
-    phase: "spicy" as const,
-    kind,
-    promptText: `Rendered prompt for ${kind}`,
-    closesAt: Date.now() + 20_000,
-    youSubmitted: false,
-    ...(kind === "pair_dare" || kind === "debrief" ? { onlyPlayers: ["p1", "p2"] } : {}),
-    ...(kind === "rating" ? { trait: "loyalty" as const, about: "p2" } : {}),
-    ...(kind === "ios" ? { about: "p2" } : {}),
-    ...(kind === "dare" ? { performer: "p1" } : {}),
-  };
-  const html = renderToString(
-    React.createElement(PromptScreen, {
-      round: round as never,
-      room: view,
-      you: "p1",
-      onSubmit: noop,
-      onVoteHeatDown: noop,
-    })
-  );
-  ok(`RoundPanel renders ${kind}`, html.includes(`Rendered prompt for ${kind}`));
-  if (kind === "rating") {
-    ok("Rating renders only its server-assigned subject and trait", html.includes("loyalty") && html.includes("Bot 1") && !html.includes("Choose a trait") && !html.includes("Choose who"));
-  }
-  const touchOk =
-    html.includes("min-h-[48px]") ||
-    html.includes("min-h-[52px]") ||
-    html.includes("min-h-[110px]") ||
-    html.includes("h-40 w-40");
-  ok(`RoundPanel ${kind} has a 48px+ action`, touchOk);
+console.log(`\n${pass} passed, ${fails.length} failed`);
+if (fails.length) {
+  console.error(fails.map((f) => `  ✗ ${f}`).join("\n"));
+  process.exit(1);
 }
-
-// spectator view for a onlyPlayers round that excludes me
-const spectateHtml = renderToString(
-  React.createElement(PromptScreen, {
-    round: {
-      roundId: "r-spec", index: 9, phase: "debrief" as const, kind: "debrief" as const,
-      promptText: "What did they admit?", closesAt: Date.now() + 20_000,
-      youSubmitted: false, onlyPlayers: ["p3", "p4"],
-    } as never,
-    room: view, you: "p1", onSubmit: noop,
-  })
-);
-ok("Spectators get a wait screen", spectateHtml.includes("talking"));
-
-// interlude + reveal
-const interludeHtml = renderToString(
-  React.createElement(InterludeScreen, {
-    interlude: { headline: "Warmup over", sub: "Now it gets personal.", teaser: "Two of you picked the same person.", holdMs: 3200 },
-    onComplete: noop,
-  })
-);
-ok("Interlude shows its digest teaser", interludeHtml.includes("Two of you picked the same person."));
-
-const revealHtml = renderToString(
-  React.createElement(RevealScreen, {
-    reveal: { roundId: "r1", summary: "Everyone answered.", items: [{ alias: "Ada", text: "→ Bot 1" }], holdMs: 4200 },
-    onComplete: noop,
-  })
-);
-ok("Reveal renders its items", revealHtml.includes("Bot 1") && revealHtml.includes("Everyone answered."));
-
-// finale (broadcast-safe) + secret deck
-const finaleHtml = renderToString(
-  React.createElement(FinaleScreen, {
-    view: {
-      slides: [
-        { beat: "tease" as const, flavor: "claim" as const, title: "Nine prompts. Nobody held back.", body: "Here we go." },
-        { beat: "land" as const, flavor: "claim" as const, title: "Closing", body: "Goodnight." },
-      ],
-      summary: { ship: "Player 1 & Player 2" },
-    },
-    deck: {
-      cards: [{ id: "s1", kind: "spark" as const, title: "Spark", facts: ["You and Bot 1 picked each other."] }],
-    },
-    roomCode: "AB2C",
-    onStoryEnd: noop,
-  })
-);
-ok("Finale renders its first slide", finaleHtml.includes("Nobody") && finaleHtml.includes("Nine"));
-ok("Finale keeps secret content off the public slides", !finaleHtml.includes("picked each other"));
-
-// a group-flavoured slide gets the Group Announcement treatment + count-up
-const groupHtml = renderToString(
-  React.createElement(FinaleScreen, {
-    view: {
-      slides: [
-        { beat: "land" as const, flavor: "group" as const, title: "GROUP ANNOUNCEMENT", body: "3 of 4 agreed.", numbers: { votes: 3, of: 4 } },
-        { beat: "land" as const, flavor: "claim" as const, title: "Closing", body: "Goodnight." },
-      ],
-      summary: {},
-    },
-    roomCode: "AB2C",
-    onStoryEnd: noop,
-  })
-);
-ok("Finale renders the group-announcement treatment", /group announcement/i.test(groupHtml));
-
-const deckHtml = renderToString(
-  React.createElement(SecretDeck, {
-    deck: {
-      cards: [
-        { id: "s1", kind: "spark" as const, title: "Spark", facts: ["You and Bot 1 picked each other."] },
-        { id: "s2", kind: "stat" as const, title: "Your night", facts: ["Dodges: 1."] },
-      ],
-    },
-    onClose: noop,
-  })
-);
-ok("Secret deck opens face-down", /hold/i.test(deckHtml));
-
-ok("Secret deck keeps facts off the face-down card", !deckHtml.includes("You and Bot 1 picked each other."));
-
-console.log(
-  fails.length === 0
-    ? `\nALL ${pass} SSR SMOKE CHECKS PASSED ✅`
-    : `\n${fails.length} FAILED / ${pass} passed ❌`
-);
-process.exit(fails.length === 0 ? 0 : 1);

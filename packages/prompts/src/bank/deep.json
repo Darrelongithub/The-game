@@ -1,277 +1,417 @@
 [
-  {
-    "id": "d1",
-    "phase": "deep",
+{
+    "id": "dp-01",
+    "band": "deep",
+    "role": "observer_subject",
     "kind": "text",
-    "text": "What do people in this room get wrong about you in the first five minutes?",
-    "measures": [
-      "vulnerability",
-      "room perception"
-    ],
-    "coding": "trust",
-    "asksTarget": false,
-    "style": "group",
-    "twinId": "dc1"
-  },
-  {
-    "id": "d2",
-    "phase": "deep",
-    "kind": "ios",
-    "text": "Pick the person you trust most in this room. Circles.",
-    "measures": [
-      "trust map"
-    ],
-    "coding": "trust",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "d3",
-    "phase": "deep",
-    "kind": "rating",
-    "text": "How honest has {P2} been with this group tonight, from 1 to 10?",
-    "measures": [
-      "trait:honesty",
-      "honesty self-check",
-      "blind-spot fuel"
-    ],
-    "coding": "neutral",
-    "asksTarget": false,
-    "style": "group"
-  },
-  {
-    "id": "d4",
-    "phase": "deep",
+    "text": "What is the thing {P1} is most afraid of people finding out?",
+    "measures": ["flavour:friction"],
+    "coding": "friction",
+    "asksTarget": true
+},
+{
+    "id": "dp-02",
+    "band": "deep",
+    "role": "subject",
     "kind": "text",
-    "text": "What are you proud of that nobody in this room knows about?",
-    "measures": [
-      "hidden pride"
-    ],
-    "coding": "trust",
-    "asksTarget": false,
-    "style": "group"
-  },
-  {
-    "id": "d5",
-    "phase": "deep",
+    "text": "What is the thing you would tell a therapist but not this room?",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
+},
+{
+    "id": "dp-03",
+    "band": "deep",
+    "role": "group",
     "kind": "pick",
-    "text": "Between {P1} and {P2}, who has changed more since you met them?",
+    "text": "Who here do you think has the biggest secret?",
+    "measures": ["metric:secret"],
+    "coding": "friction",
+    "asksTarget": true
+},
+{
+    "id": "dp-04",
+    "band": "deep",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here would you call first if your life fell apart tonight?",
+    "measures": ["metric:trust"],
+    "coding": "friendship",
+    "asksTarget": true
+},
+{
+    "id": "dp-05",
+    "band": "deep",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who do you think {P1} would take a bullet for?",
     "measures": [
-      "growth witness"
+        "metric:trust",
+        "guess"
     ],
     "coding": "friendship",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "d6",
-    "phase": "deep",
+    "asksTarget": true
+},
+{
+    "id": "dp-06",
+    "band": "deep",
+    "role": "observer_subject",
     "kind": "text",
-    "text": "What fear have you never said out loud to this group?",
+    "text": "What would {P1} do if they found out you liked them?",
+    "measures": ["flavour:couple"],
+    "coding": "couple",
+    "asksTarget": true
+},
+{
+    "id": "dp-07",
+    "band": "deep",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here has the most to lose from what is going on in this room?",
+    "measures": ["metric:betrayal"],
+    "coding": "friction",
+    "asksTarget": true
+},
+{
+    "id": "dp-08",
+    "band": "deep",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here has broken someone's heart the most recently?",
+    "measures": ["metric:ex"],
+    "coding": "friction",
+    "asksTarget": true
+},
+{
+    "id": "dp-09",
+    "band": "deep",
+    "role": "subject",
+    "kind": "pick",
+    "text": "Who in this room have you never told how you really feel about them?",
+    "measures": ["metric:crush"],
+    "coding": "couple",
+    "asksTarget": true
+},
+{
+    "id": "dp-10",
+    "band": "deep",
+    "role": "observer_pair",
+    "kind": "text",
+    "text": "What is the tension between {P1} and {P2} really about?",
     "measures": [
-      "fear reveal",
-      "vulnerability"
+        "metric:betrayal",
+        "guess"
     ],
-    "coding": "trust",
-    "asksTarget": false,
-    "style": "group",
-    "twinId": "dc2"
-  },
-  {
-    "id": "d7",
-    "phase": "deep",
-    "kind": "rating",
-    "text": "Rate {P4}'s warmth 1\u201310. They'll see it eventually.",
+    "coding": "rivalry",
+    "asksTarget": true
+},
+{
+    "id": "dp-11",
+    "band": "deep",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who do you think {P1} would betray first if it meant everyone else was safe?",
     "measures": [
-      "trait:warmth",
-      "peer warmth read",
-      "trait agreement"
+        "metric:betrayal",
+        "guess"
     ],
     "coding": "friction",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "d8",
-    "phase": "deep",
+    "asksTarget": true
+},
+{
+    "id": "dp-12",
+    "band": "deep",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here is the most fake?",
+    "measures": ["metric:is-fake"],
+    "coding": "friction",
+    "asksTarget": true
+},
+{
+    "id": "dp-13",
+    "band": "deep",
+    "role": "observer_subject",
     "kind": "text",
-    "text": "When did this group last genuinely surprise you?",
+    "text": "What did {P1} do that they have never admitted to anyone here?",
+    "measures": ["flavour:friction"],
+    "coding": "friction",
+    "asksTarget": true
+},
+{
+    "id": "dp-14",
+    "band": "deep",
+    "role": "subject",
+    "kind": "text",
+    "text": "What is the thing you are most proud of that nobody here knows about?",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
+},
+{
+    "id": "dp-15",
+    "band": "deep",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here has the most money and the least to show for it?",
+    "measures": ["metric:money"],
+    "coding": "status",
+    "asksTarget": true
+},
+{
+    "id": "dp-16",
+    "band": "deep",
+    "role": "observer_subject",
+    "kind": "rating",
+    "trait": "loyalty",
+    "text": "How loyal is {P1}, 1 to 10?",
+    "measures": ["trait:loyalty"],
+    "coding": "trust",
+    "asksTarget": true
+},
+{
+    "id": "dp-17",
+    "band": "deep",
+    "role": "subject",
+    "kind": "rating",
+    "trait": "loyalty",
+    "text": "How loyal are you, 1 to 10?",
+    "measures": ["trait:loyalty"],
+    "coding": "trust",
+    "asksTarget": false
+},
+{
+    "id": "dp-18",
+    "band": "deep",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who do you think {P1} is closest to in this room?",
     "measures": [
-      "group history"
+        "metric:closest",
+        "guess"
     ],
     "coding": "friendship",
-    "asksTarget": false,
-    "style": "group"
-  },
-  {
-    "id": "d9",
-    "phase": "deep",
-    "kind": "ios",
-    "text": "Where do you actually want to be with {P5} a year from now? Circles.",
+    "asksTarget": true
+},
+{
+    "id": "dp-19",
+    "band": "deep",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here is holding a grudge right now?",
     "measures": [
-      "trajectory"
+        "metric:would-snitch",
+        "guess"
+    ],
+    "coding": "rivalry",
+    "asksTarget": true
+},
+{
+    "id": "dp-20",
+    "band": "deep",
+    "role": "observer_subject",
+    "kind": "text",
+    "text": "What is the worst thing {P1} has ever done to a friend?",
+    "measures": [
+        "metric:ruin-friendship",
+        "guess"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+},
+{
+    "id": "dp-21",
+    "band": "deep",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here would you take a secret to the grave?",
+    "measures": ["metric:trust"],
+    "coding": "trust",
+    "asksTarget": true
+},
+{
+    "id": "dp-22",
+    "band": "deep",
+    "role": "solo",
+    "kind": "text",
+    "text": "What is the thing you would do over again if you could live one night again?",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
+},
+{
+    "id": "dp-23",
+    "band": "deep",
+    "role": "observer_pair",
+    "kind": "text",
+    "text": "Could {P1} and {P2} be honest with each other for one full night? Why?",
+    "measures": [
+        "metric:trust",
+        "guess"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+},
+{
+    "id": "dp-24",
+    "band": "deep",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who would {P1} go to war with?",
+    "measures": [
+        "metric:ruin-friendship",
+        "guess"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+},
+{
+    "id": "dp-25",
+    "band": "deep",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here is the biggest liar?",
+    "measures": ["metric:is-fake"],
+    "coding": "friction",
+    "asksTarget": true
+},
+{
+    "id": "dp-26",
+    "band": "deep",
+    "role": "subject",
+    "kind": "text",
+    "text": "What is the last thing you did that you would describe as unforgivable?",
+    "measures": ["flavour:confession"],
+    "coding": "friction",
+    "asksTarget": false
+},
+{
+    "id": "dp-27",
+    "band": "deep",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who do you think {P1} would pick between their ex and the person they like now?",
+    "measures": [
+        "metric:ex",
+        "guess"
     ],
     "coding": "couple",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "d10",
-    "phase": "deep",
-    "kind": "text",
-    "text": "Kindest thing someone here has ever done for you.",
-    "measures": [
-      "gratitude",
-      "affection tags"
-    ],
-    "coding": "friendship",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "d11",
-    "phase": "deep",
+    "asksTarget": true
+},
+{
+    "id": "dp-28",
+    "band": "deep",
+    "role": "group",
     "kind": "pick",
-    "text": "Who here would you want beside you at a funeral? Point.",
+    "text": "Who here do you think is going to cry tonight?",
     "measures": [
-      "trust network",
-      "values reveal"
+        "metric:crier",
+        "flavour:chaos"
     ],
-    "coding": "trust",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "d12",
-    "phase": "deep",
+    "coding": "tease",
+    "asksTarget": true
+},
+{
+    "id": "dp-29",
+    "band": "deep",
+    "role": "observer_subject",
     "kind": "text",
-    "text": "What's something you've never told anyone here, but they've probably guessed?",
+    "text": "What does {P1} want more than anything, and why are they not going for it?",
+    "measures": ["flavour:roast"],
+    "coding": "status",
+    "asksTarget": true
+},
+{
+    "id": "dp-30",
+    "band": "deep",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here would you trust to keep a secret overnight?",
     "measures": [
-      "vulnerability tags",
-      "quote material"
+        "metric:trust",
+        "flavour:closeness"
     ],
     "coding": "trust",
-    "asksTarget": false,
-    "style": "group"
-  },
-  {
-    "id": "d13",
-    "phase": "deep",
+    "asksTarget": true
+},
+{
+    "id": "dp-31",
+    "band": "deep",
+    "role": "observer_subject",
     "kind": "rating",
-    "text": "Rate {P6}'s honesty, 1\u201310. They'll see your guess at the finale.",
-    "measures": [
-      "trait:honesty",
-      "trait agreement",
-      "blind-spot fuel"
-    ],
-    "coding": "trust",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "d14",
-    "phase": "deep",
-    "kind": "pick",
-    "text": "Who here would you trust to tell you the truth when it hurts? Point.",
-    "measures": [
-      "trust network",
-      "honesty read"
-    ],
-    "coding": "trust",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "d15",
-    "phase": "deep",
-    "kind": "text",
-    "text": "What's the nicest thing anyone in this room has said about you behind your back?",
-    "measures": [
-      "affection tags",
-      "room perception"
-    ],
+    "trait": "warmth",
+    "text": "How warm is {P1}, 1 to 10?",
+    "measures": ["trait:warmth"],
     "coding": "friendship",
-    "asksTarget": true,
-    "style": "group"
-  },
-  {
-    "id": "dc1",
-    "phase": "deep",
-    "kind": "confess",
-    "text": "Have you ever pretended to be fine in this room when you weren't?",
+    "asksTarget": true
+},
+{
+    "id": "dp-33",
+    "band": "deep",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here would you rather have on your side in a fight?",
+    "measures": ["metric:trust"],
+    "coding": "friendship",
+    "asksTarget": true
+},
+{
+    "id": "dp-34",
+    "band": "deep",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who do you think {P1} has never forgiven?",
     "measures": [
-      "self-report",
-      "mask signal"
+        "metric:ex",
+        "guess"
     ],
-    "coding": "trust",
-    "asksTarget": false,
-    "style": "confess",
-    "twinId": "d1"
-  },
-  {
-    "id": "dc2",
-    "phase": "deep",
-    "kind": "confess",
-    "text": "Have you ever cried alone after leaving a night with this group?",
+    "coding": "friction",
+    "asksTarget": true
+},
+{
+    "id": "dp-35",
+    "band": "deep",
+    "role": "solo",
+    "kind": "text",
+    "text": "Who in this room are you most comfortable saying nothing to?",
+    "measures": ["flavour:confession"],
+    "coding": "status",
+    "asksTarget": false
+},
+{
+    "id": "dp-36",
+    "band": "deep",
+    "role": "observer_pair",
+    "kind": "text",
+    "text": "If {P1} and {P2} told the truth right now, what would actually happen?",
     "measures": [
-      "self-report",
-      "loneliness signal"
+        "metric:betrayal",
+        "guess"
     ],
-    "coding": "trust",
-    "asksTarget": false,
-    "style": "confess",
-    "twinId": "d6"
-  },
-  {
-    "id": "dc3",
-    "phase": "deep",
-    "kind": "confess",
-    "text": "Have you ever felt lonelier in this room than outside it?",
+    "coding": "rivalry",
+    "asksTarget": true
+},
+{
+    "id": "dp-37",
+    "band": "deep",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here is the most misunderstood?",
     "measures": [
-      "self-report",
-      "belonging signal"
+        "metric:is-fake",
+        "guess"
     ],
-    "coding": "trust",
-    "asksTarget": false,
-    "style": "confess"
-  },
-  {
-    "id": "dc4",
-    "phase": "deep",
-    "kind": "confess",
-    "text": "Have you ever kept a secret from everyone here because you were scared of the answer?",
-    "measures": [
-      "self-report",
-      "secret signal"
-    ],
-    "coding": "trust",
-    "asksTarget": false,
-    "style": "confess"
-  },
-  {
-    "id": "dc5",
-    "phase": "deep",
-    "kind": "confess",
-    "text": "Have you ever wanted to tell someone here the truth and didn't?",
-    "measures": [
-      "self-report",
-      "honesty signal"
-    ],
-    "coding": "trust",
-    "asksTarget": true,
-    "style": "confess"
-  },
-  {
-    "id": "dc6",
-    "phase": "deep",
-    "kind": "confess",
-    "text": "Have you ever felt like you care more about this group than it cares about you?",
-    "measures": [
-      "self-report",
-      "reciprocity signal"
-    ],
-    "coding": "trust",
-    "asksTarget": false,
-    "style": "confess"
-  }
+    "coding": "tease",
+    "asksTarget": true
+},
+{
+    "id": "dp-38",
+    "band": "deep",
+    "role": "observer_subject",
+    "kind": "text",
+    "text": "What is the best thing about {P1}, said in a way that sounds slightly mean?",
+    "measures": ["flavour:roast"],
+    "coding": "tease",
+    "asksTarget": true
+}
 ]

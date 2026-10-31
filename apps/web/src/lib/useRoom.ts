@@ -3,25 +3,23 @@
 //
 // Owns: the transport instance, the current RoomView (full snapshots only),
 // your PlayerId, the senders, connection/reconnect state, and the PRIVATE
-// `secrets` deck (this phone only, never broadcast — spec §7).
+// `secrets` deck (this phone only, never broadcast).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  BeatView,
   Consent,
-  ProfileAnswers,
   FinaleView,
-  InterludeView,
   JoinReply,
   PlayerId,
+  ProfileAnswers,
   ResponseValue,
-  RevealView,
   RoomCode,
   RoomView,
   RoundView,
   SecretDeckView,
   SubmitRequest,
 } from "@shared/contracts.ts";
-import { createTransport, roundTargetsMe, transportMode, type Transport, type TransportHandlers } from "./transport";
-import { demoAnswerValue } from "./demoAnswer";
+import { createTransport, makeClientUuid, transportMode, type Transport, type TransportHandlers } from "./transport";
 import { clearSession, loadSession, saveSession } from "./session";
 
 export interface UseRoom {
@@ -29,39 +27,33 @@ export interface UseRoom {
   view: RoomView | null;
   you: PlayerId | null;
   code: RoomCode | null;
+  /** The laptop is bound to tonight's room (never a player seat). */
   isHost: boolean;
   connected: boolean;
   resuming: boolean;
   error: string | null;
   round: RoundView | null;
-  interlude: InterludeView | null;
-  reveal: RevealView | null;
+  beat: BeatView | null;
   finale: FinaleView | null;
   secrets: SecretDeckView | null;
-  mustAnswer: boolean;
-  /** lobby actions */
-  createRoom: (alias: string, consent: Consent, profile: ProfileAnswers, options?: { demo?: boolean }) => Promise<JoinReply & { code?: RoomCode }>;
-  /** "I'm ready for the pending reveal" */
-  ready: () => void;
-  demo: boolean;
-  demoAddPlayer: (alias: string) => Promise<{ ok: boolean; playerId?: PlayerId }>;
-  demoRemovePlayer: (playerId: PlayerId) => void;
-  demoSetBotMode: (playerId: PlayerId, mode: "auto" | "manual") => void;
-  demoAnswerAs: (playerId: PlayerId) => void;
-  demoAllReady: () => void;
-  demoSpeed: (scale: number) => void;
-  awaitingReady: PlayerId[] | null;
-  youAreReady: boolean;
+  /** A phone joins with the code from the QR. */
   joinRoom: (code: RoomCode, alias: string, consent: Consent, profile: ProfileAnswers) => Promise<JoinReply>;
+  /** The laptop binds with its token — no code to type. */
+  bindHost: (token: string) => Promise<{ ok: boolean; error?: string }>;
+  /** The lobby tick: "I'm in". */
+  setLobbyReady: (ready: boolean) => void;
+  /** This phone has ticked "I'm in" in the lobby. */
+  youAreLobbyReady: boolean;
+  /** "Ready for the results" — the ONE ready gate. */
+  ready: () => void;
+  /** This phone has said "Ready for the results". */
+  youAreReady: boolean;
   start: () => void;
+  forceResults: () => void;
   addBot: () => void;
   skipRound: () => void;
-  setCustomPrompts: (lines: string[]) => void;
-  voteHeatDown: () => void;
   deleteRoom: () => void;
-  /** play actions */
   submit: (value: ResponseValue) => Promise<{ ok: boolean; error?: string }>;
-  darePass: (reason: string) => Promise<{ ok: boolean; error?: string }>;
   /** connection repair */
   retry: () => void;
   clearError: () => void;
@@ -70,12 +62,8 @@ export interface UseRoom {
   hasSession: boolean;
 }
 
-let uuidCounter = 0;
 export function clientUuid(): string {
-  const c = globalThis.crypto;
-  if (c && "randomUUID" in c) return c.randomUUID();
-  uuidCounter += 1;
-  return `u-${Date.now().toString(36)}-${uuidCounter}`;
+  return makeClientUuid();
 }
 
 /** Factory injection lets tests exercise slow chunk/network initialization. */
@@ -90,11 +78,11 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
   const [resuming, setResuming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [round, setRound] = useState<RoundView | null>(null);
-  const [interlude, setInterlude] = useState<InterludeView | null>(null);
-  const [reveal, setReveal] = useState<RevealView | null>(null);
+  const [beat, setBeat] = useState<BeatView | null>(null);
   const [finale, setFinale] = useState<FinaleView | null>(null);
   const [secrets, setSecrets] = useState<SecretDeckView | null>(null);
   const [hasSession, setHasSession] = useState(false);
+  const [isHost, setIsHost] = useState(false);
 
   useEffect(() => {
     const stored = loadSession();
@@ -114,22 +102,14 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
       },
       onRound: (next) => {
         setRound(next);
-        setInterlude(null);
-        setReveal(null);
+        setBeat(null);
       },
-      onReveal: (next) => {
-        setRound(null);
-        setReveal(next);
-      },
-      onInterlude: (next) => {
-        setRound(null);
-        setReveal(null);
-        setInterlude(next);
+      onBeat: (next) => {
+        setBeat(next);
       },
       onFinale: (next) => {
         setRound(null);
-        setInterlude(null);
-        setReveal(null);
+        setBeat(null);
         setFinale(next);
       },
       onSecrets: (deck) => {
@@ -188,31 +168,11 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
     setCode(null);
     setView(null);
     setRound(null);
-    setInterlude(null);
-    setReveal(null);
+    setBeat(null);
     setFinale(null);
     setSecrets(null);
     setHasSession(false);
-  }, []);
-
-  const createRoom = useCallback(async (alias: string, consent: Consent, profile: ProfileAnswers, options?: { demo?: boolean }) => {
-    const t = transportRef.current ?? await transportReady.current?.catch(() => null);
-    if (!t) return { ok: false, error: "Not connected yet. Please retry." } satisfies JoinReply;
-    setError(null);
-    const reply = await t.create(alias, consent, profile, options);
-    if (reply.ok && reply.you) {
-      setYou(reply.you);
-      if (reply.state) setView(reply.state);
-      const roomCode = reply.code ?? reply.state?.code ?? null;
-      if (roomCode) setCode(roomCode);
-      if (reply.secret && roomCode) {
-        saveSession({ code: roomCode, you: reply.you, secret: reply.secret, alias, consent, profile });
-      }
-      setHasSession(true);
-    } else if (reply.error) {
-      setError(reply.error);
-    }
-    return reply;
+    setIsHost(false);
   }, []);
 
   const joinRoom = useCallback(async (roomCode: RoomCode, alias: string, consent: Consent, profile: ProfileAnswers) => {
@@ -222,9 +182,10 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
     const reply = await t.join({ roomCode, alias, consent, profile });
     if (reply.ok && reply.you) {
       setYou(reply.you);
-      if (reply.state) setView(reply.state);
       setCode(roomCode);
-      if (reply.secret) saveSession({ code: roomCode, you: reply.you, secret: reply.secret, alias, consent, profile });
+      setIsHost(false);
+      if (reply.state) setView(reply.state);
+      if (reply.secret) saveSession({ code: roomCode, you: reply.you, secret: reply.secret, alias });
       setHasSession(true);
     } else if (reply.error) {
       setError(reply.error);
@@ -232,9 +193,19 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
     return reply;
   }, []);
 
+  const bindHost = useCallback(async (token: string) => {
+    const t = transportRef.current ?? await transportReady.current?.catch(() => null);
+    if (!t) return { ok: false, error: "Not connected yet. Please retry." };
+    setError(null);
+    const reply = await t.hostJoin(token);
+    if (reply.ok) setIsHost(true);
+    else setError(reply.error ?? "That host link is not valid.");
+    return reply;
+  }, []);
+
   const submit = useCallback(async (value: ResponseValue) => {
     const t = transportRef.current;
-    if (!t || !round) return { ok: false, error: "No open round." };
+    if (!t || !round) return { ok: false, error: "No question right now." };
     const req: SubmitRequest = { roundId: round.roundId, clientUuid: clientUuid(), value };
     const res = await t.submit(req);
     if (res.ok) setRound((r) => (r && r.roundId === round.roundId ? { ...r, youSubmitted: true } : r));
@@ -242,60 +213,23 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
     return res;
   }, [round]);
 
-  const darePass = useCallback(
-    async (reason: string) => {
-      const t = transportRef.current;
-      if (!t || !round) return { ok: false, error: "No open dare." };
-      const res = await t.darePass({ roundId: round.roundId, reason });
-      if (res && res.ok) {
-        setRound((r) => (r && r.roundId === round.roundId ? { ...r, youSubmitted: true } : r));
-      } else if (res?.error) {
-        setError(res.error);
-      }
-      return res ?? { ok: false, error: "Could not pass." };
-    },
-    [round]
-  );
-
+  const setLobbyReady = useCallback((isReady: boolean) => transportRef.current?.lobbyReady(isReady), []);
   const ready = useCallback(() => transportRef.current?.ready(), []);
-  const demoAddPlayer = useCallback(async (alias: string) => {
-    const t = transportRef.current;
-    if (!t) return { ok: false };
-    return t.demoAddPlayer(alias);
-  }, []);
-  const demoRemovePlayer = useCallback((playerId: PlayerId) => transportRef.current?.demoRemovePlayer(playerId), []);
-  const demoSetBotMode = useCallback((playerId: PlayerId, mode: "auto" | "manual") => transportRef.current?.demoSetBotMode(playerId, mode), []);
-  const demoAllReady = useCallback(() => transportRef.current?.demoAllReady(), []);
-  const demoSpeed = useCallback((scale: number) => transportRef.current?.demoSpeed(scale), []);
-  /** Send a plausible answer for a puppeted seat on the open round. */
-  const demoAnswerAs = useCallback((playerId: PlayerId) => {
-    const t = transportRef.current;
-    if (!t || !round || !view) return;
-    const value = demoAnswerValue(round, playerId, view.players);
-    if (!value) return;
-    t.demoAnswerAs({ playerId, roundId: round.roundId, clientUuid: clientUuid(), value });
-  }, [round, view]);
   const start = useCallback(() => transportRef.current?.start(), []);
+  const forceResults = useCallback(() => transportRef.current?.forceResults(), []);
   const addBot = useCallback(() => transportRef.current?.addBot(), []);
   const skipRound = useCallback(() => transportRef.current?.skipRound(), []);
-  const setCustomPrompts = useCallback(
-    (lines: string[]) => transportRef.current?.customPrompts(lines),
-    []
-  );
-  const voteHeatDown = useCallback(() => transportRef.current?.voteHeatDown(), []);
   const deleteRoom = useCallback(() => transportRef.current?.deleteRoom(), []);
   const retry = useCallback(() => transportRef.current?.resume(), []);
 
-  const isHost = Boolean(view && you && view.hostId === you);
-  const mustAnswer = useMemo(() => roundTargetsMe(round, you), [round, you]);
-  // A reveal is pending while the snapshot carries a `ready` list: whoever is
-  // not on it has not looked up yet, and the moment waits for them.
-  const awaitingReady = useMemo<PlayerId[] | null>(() => {
-    if (!view?.ready) return null;
-    const readyIds = new Set(view.ready);
-    return view.players.filter((p) => p.connected && !readyIds.has(p.id)).map((p) => p.id);
-  }, [view]);
-  const youAreReady = Boolean(view?.ready && you && view.ready.includes(you));
+  const youAreReady = useMemo(
+    () => Boolean(view?.ready && you && view.ready.includes(you)),
+    [view, you],
+  );
+  const youAreLobbyReady = useMemo(
+    () => Boolean(view?.lobbyReady && you && view.lobbyReady.includes(you)),
+    [view, you],
+  );
 
   return {
     mode,
@@ -307,31 +241,21 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
     resuming,
     error,
     round,
-    interlude,
-    reveal,
+    beat,
     finale,
     secrets,
-    mustAnswer,
-    createRoom,
     joinRoom,
+    bindHost,
+    setLobbyReady,
+    youAreLobbyReady,
     ready,
-    demo: Boolean(view?.demo),
-    demoAddPlayer,
-    demoRemovePlayer,
-    demoSetBotMode,
-    demoAnswerAs,
-    demoAllReady,
-    demoSpeed,
-    awaitingReady,
     youAreReady,
     start,
+    forceResults,
     addBot,
     skipRound,
-    setCustomPrompts,
-    voteHeatDown,
     deleteRoom,
     submit,
-    darePass,
     retry,
     clearError: () => setError(null),
     reset: resetLocal,

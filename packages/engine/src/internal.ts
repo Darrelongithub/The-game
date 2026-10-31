@@ -3,56 +3,123 @@
 // network, no Date.now(), no unseeded randomness anywhere in this package.
 import {
   CONFIDENCE_RULES,
-  CONSENSUS_MIN_PICKERS,
-  JOKER_GUARD,
   MIN_PLAYERS,
   pseudonym,
-  type Confidence,
   type LogRecord,
+  type MetricKey,
   type PlayerId,
   type PromptCoding,
+  type ResponseValue,
   type RoomMeta,
   type TraitId,
 } from "../../shared/src/contracts.ts";
 
-/** Brute-force matching is only sane up to 12 players (spec §5: ≤10,395 matchings). */
+/** Brute-force matching is only sane up to 12 players. */
 export const MAX_MATCH_PLAYERS = 12;
 
 /**
- * Engine-local tuning (spec §14: tuning = config, not logic). The frozen
- * contract constants (DEFAULT_WEIGHTS, TOXIC_WEIGHTS, CONFIDENCE_RULES,
- * JOKER_GUARD, MC_SIMULATIONS) are always honoured as-is; the values below
- * are the judgement calls the contract leaves open. They are set ABOVE
- * chance level for a 4–11 player room so a uniform-random room does not
- * manufacture high-confidence claims (see README for the arithmetic).
+ * Engine-local tuning. These are judgement calls the contract leaves open;
+ * the frozen contract constants are always honoured as-is. The thresholds sit
+ * ABOVE chance level for a 4–11 player room so a uniform-random room does not
+ * manufacture high-confidence verdicts.
  */
 export const ENGINE_TUNING = {
-  /** A pair component "supports" a claim when it clears these bars. */
+  /** A signal "supports" a verdict when it clears these bars. */
   support: {
     pickOverlap: 0.5,
     mutualPick: 0.5,
     evidence: 0.5,
-    debriefSim: 0.6, // a measured similarity must clear this evidence bar
-    iosMean: 0.65,
-    traitAgreement: 0.8, // uniform-random ratings average ~0.633; 0.8 means mean |self-peer| <= 1.8
-    /** A confess self-report counts as an independent type above this share. */
-    confession: 0.5,
+    traitAgreement: 0.8,
   },
-  /** Rivals need a mid-range pair_score: close enough to matter, not a ship. */
+  /** Rivals need a mid-range pair score: close enough to matter, not a ship. */
   rivalPairScoreMid: { min: 0.2, max: 0.65 },
-  /** A public "toxic" claim needs at least this Monte-Carlo percentile. */
-  toxicEmitPercentile: 0.95,
-  /** Fixed seed for the toxic Monte-Carlo percentile (deterministic replay). */
-  mcSeed: 0xc0ffee,
+  /** A public "hates" verdict needs at least this share of the room. */
+  hatesMinShare: 0.5,
+  /** …and at least this many distinct nominators. */
+  hatesMinNominators: 2,
+  /** A percent line needs at least this many voters behind it. */
+  percentMinVoters: 2,
+  /** A percent line needs at least this share of eligible players. */
+  percentMinShare: 0.25,
+  /** A couple verdict needs at least this many yes votes. */
+  coupleMinYes: 2,
+  /** …and this share of the voters. */
+  coupleMinYesShare: 0.5,
+  /** Blind spot: how far self-perception may sit from the room. */
   blindspotMinGap: 2,
+  /** …and how many raters the room needs for a peer mean to count. */
   blindspotMinRaters: 2,
-  blindspotSecretMinGap: 1,
-  onesided: { minRate: 0.5, maxReverseRate: 0.25, minGap: 0.5, minPositivePicks: 2 },
-  consensusMinVoters: CONSENSUS_MIN_PICKERS,
+  /** Templates are chosen by data strength. */
+  toneBands: { mild: 0.4, spicy: 0.65, filthy: 0.85 },
+  /** A free agent needs zero picks across every couple-ish metric. */
+  freeAgentMinNominators: 0,
 } as const;
 
 export const POSITIVE_CODINGS: ReadonlySet<PromptCoding> = new Set(["couple", "friendship"]);
 export const NEGATIVE_CODINGS: ReadonlySet<PromptCoding> = new Set(["friction", "rivalry"]);
+
+/** Metrics that name someone as attractive / desirable. */
+export const DESIRE_METRICS: ReadonlySet<MetricKey> = new Set<MetricKey>([
+  "sex-desire",
+  "crush",
+  "hookups",
+  "body-count",
+  "best-in-bed",
+]);
+
+/** Metrics that say someone is dangerous, fake, or untrustworthy. */
+export const NEGATIVE_METRICS: ReadonlySet<MetricKey> = new Set<MetricKey>([
+  "liar",
+  "would-snitch",
+  "would-cheat",
+  "is-fake",
+  "most-dangerous",
+  "ruin-friendship",
+  "betrayal",
+]);
+
+/** Metrics that name someone as a friend / core. */
+export const CLOSENESS_METRICS: ReadonlySet<MetricKey> = new Set<MetricKey>([
+  "closest",
+  "trust",
+  "couple-fit",
+]);
+
+/** Metrics that make someone a plausible romantic partner. */
+export const COUPLE_METRICS: ReadonlySet<MetricKey> = new Set<MetricKey>([
+  "couple-fit",
+  "crush",
+  "gay-hypothetical",
+]);
+
+/**
+ * Metrics where the room points AT somebody: who is the weirdest, who has
+ * the biggest secret, who has the money. They are not hatred — they are the
+ * room's eye. They feed the same "the room is watching you" verdict.
+ */
+export const SCORN_METRICS: ReadonlySet<MetricKey> = new Set<MetricKey>([
+  "weirdest",
+  "crier",
+  "secret",
+  "money",
+]);
+
+/** Every metric that puts a name on the same person. */
+export const POINT_METRICS: ReadonlySet<MetricKey> = new Set<MetricKey>([
+  ...NEGATIVE_METRICS,
+  ...SCORN_METRICS,
+]);
+
+/** Metrics that mean "these two have history". */
+export const HISTORY_METRICS: ReadonlySet<MetricKey> = new Set<MetricKey>([
+  "ex",
+]);
+
+/** Everything that counts as friction between two people. */
+export const RIVAL_METRICS: ReadonlySet<MetricKey> = new Set<MetricKey>([
+  ...NEGATIVE_METRICS,
+  ...HISTORY_METRICS,
+]);
 
 export const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 
@@ -84,11 +151,7 @@ export const pseudoOf = (meta: RoomMeta, id: PlayerId): string => {
 export const aliasOf = (meta: RoomMeta, id: PlayerId): string =>
   meta.players.find((p) => p.id === id)?.alias ?? id;
 
-/**
- * Stable id for a log record, used by the toxic tag seam `tagOf(recordId)`.
- * LogRecord carries no id field in the frozen contract, so the engine
- * derives this composite; a contract request for that gap is in NOTES/.
- */
+/** Stable id for a log record. */
 export const logRecordId = (rec: LogRecord): string =>
   `${rec.roomId}:${rec.roundId}:${rec.promptId}:${rec.playerId}:${rec.at}`;
 
@@ -109,7 +172,7 @@ export function assertScorableMeta(meta: RoomMeta): void {
 }
 
 /** spec §5 confidence: high = ≥3 independent signal types, med = 2, low = 1 (or 0). */
-export const confidenceFromCount = (independentSignals: number): Confidence =>
+export const confidenceFromCount = (independentSignals: number): "high" | "med" | "low" =>
   independentSignals >= CONFIDENCE_RULES.high.independentSignals
     ? "high"
     : independentSignals >= CONFIDENCE_RULES.med.independentSignals
@@ -124,213 +187,132 @@ export const formatNumber = (x: number): string => {
 };
 
 // ---------- picks ----------
-
 export interface PickRec {
-  roundId: string;
-  picker: PlayerId;
-  target: PlayerId;
-  coding: PromptCoding;
-  rec: LogRecord;
+    roundId: string;
+    picker: PlayerId;
+    target: PlayerId;
+    coding: PromptCoding;
+    metric?: MetricKey | undefined;
+    rec: LogRecord;
 }
 
 export const getPicks = (log: readonly LogRecord[]): PickRec[] => {
-  const out: PickRec[] = [];
-  for (const rec of log) {
-    if (rec.value.kind === "pick" && rec.value.target !== rec.playerId) {
-      out.push({ roundId: rec.roundId, picker: rec.playerId, target: rec.value.target, coding: rec.coding, rec });
+    const out: PickRec[] = [];
+    for (const rec of log) {
+        if (rec.value.kind === "pick") {
+            out.push({
+                roundId: rec.roundId,
+                picker: rec.playerId,
+                target: rec.value.target,
+                coding: rec.coding,
+                metric: rec.metric,
+                rec,
+            });
+        }
     }
-  }
-  return out;
+    return out;
 };
 
-/** Exact per-picker weights used by toxic scoring, also observable in tests. */
-export function jokerNominationWeights(log: readonly LogRecord[], ids: readonly PlayerId[]): Map<PlayerId, number> {
-  const pickerTargets = new Map<PlayerId, Map<PlayerId, number>>();
-  for (const p of getPicks(log)) {
-    let targets = pickerTargets.get(p.picker);
-    if (!targets) { targets = new Map(); pickerTargets.set(p.picker, targets); }
-    targets.set(p.target, (targets.get(p.target) ?? 0) + 1);
-  }
-  const weights = new Map<PlayerId, number>();
-  for (const id of ids) {
-    const targets = pickerTargets.get(id);
-    const counts = targets ? [...targets.values()] : [];
-    const total = counts.reduce((sum, count) => sum + count, 0);
-    const maxShare = total ? Math.max(...counts) / total : 0;
-    weights.set(id, maxShare > JOKER_GUARD.sameTargetShare ? JOKER_GUARD.downweight : 1);
-  }
-  return weights;
+// ---------- ratings ----------
+export interface RatingIndex {
+    /** self.get(player)?.get(trait) → averaged self rating. */
+    self: Map<PlayerId, Map<TraitId, number>>;
+    /** peerByRater.get(about)?.get(trait)?.get(rater) → that rater's rating of `about`. */
+    peerByRater: Map<PlayerId, Map<TraitId, Map<PlayerId, number>>>;
 }
 
+export function buildRatingIndex(log: readonly LogRecord[]): RatingIndex {
+    const selfAcc = new Map<string, number[]>();
+    const peerAcc = new Map<string, number[]>();
+    const push = (m: Map<string, number[]>, k: string, v: number) => {
+        const arr = m.get(k);
+        if (arr) arr.push(v);
+        else m.set(k, [v]);
+    };
+    for (const rec of log) {
+        if (rec.value.kind !== "rating") continue;
+        if (rec.value.about === "self") {
+            push(selfAcc, `${rec.playerId}\u0000${rec.value.trait}`, rec.value.value);
+        } else {
+            push(peerAcc, `${rec.value.about}\u0000${rec.value.trait}\u0000${rec.playerId}`, rec.value.value);
+        }
+    }
+    const self = new Map<PlayerId, Map<TraitId, number>>();
+    for (const [k, vs] of selfAcc) {
+        const [player, trait] = k.split("\u0000") as [PlayerId, TraitId];
+        let m = self.get(player);
+        if (!m) { m = new Map(); self.set(player, m); }
+        m.set(trait, meanOf(vs));
+    }
+    const peerByRater = new Map<PlayerId, Map<TraitId, Map<PlayerId, number>>>();
+    for (const [k, vs] of peerAcc) {
+        const [about, trait, rater] = k.split("\u0000") as [PlayerId, TraitId, PlayerId];
+        let byTrait = peerByRater.get(about);
+        if (!byTrait) { byTrait = new Map(); peerByRater.set(about, byTrait); }
+        let byRater = byTrait.get(trait);
+        if (!byRater) { byRater = new Map(); byTrait.set(trait, byRater); }
+        byRater.set(rater, meanOf(vs));
+    }
+    return { self, peerByRater };
+}
+
+// ---------- token overlap ----------
+export const tokenize = (text: string): Set<string> =>
+    new Set(text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length > 0));
+
+/** Jaccard over lowercase alphanumeric token sets. */
+export const tokenJaccard = (a: string, b: string): number => {
+    const sa = tokenize(a);
+    const sb = tokenize(b);
+    if (sa.size === 0 && sb.size === 0) return 0;
+    let inter = 0;
+    for (const t of sa) if (sb.has(t)) inter++;
+    const union = sa.size + sb.size - inter;
+    return union === 0 ? 0 : inter / union;
+};
+
+/** Does this response carry a self-directed answer? (used by the engine) */
+export const isSelfDirected = (value: ResponseValue): boolean =>
+    value.kind === "rating" && value.about === "self";
+
 /**
- * Pooled directed-pick rate between a pair for a coding filter:
+ * Pooled directed-pick rate between a pair for a metric filter:
  * (a→b hits + b→a hits) / (a's filtered picks + b's filtered picks).
  * 0 when neither player made a filtered pick. This is the single
  * normalisation behind mutualPick / coupleEvidence / friendEvidence /
  * negativeMutual, so every pair component is hand-computable the same way.
  */
 export function pooledPairRate(
-  picks: readonly PickRec[],
-  a: PlayerId,
-  b: PlayerId,
-  include: (coding: PromptCoding) => boolean,
+    picks: readonly PickRec[],
+    a: PlayerId,
+    b: PlayerId,
+    include: (metric: MetricKey | undefined) => boolean,
 ): number {
-  let hits = 0;
-  let total = 0;
-  for (const p of picks) {
-    if (!include(p.coding)) continue;
-    if (p.picker === a || p.picker === b) {
-      total++;
-      if ((p.picker === a && p.target === b) || (p.picker === b && p.target === a)) hits++;
+    let hits = 0;
+    let total = 0;
+    for (const p of picks) {
+        if (!include(p.metric)) continue;
+        if (p.picker === a || p.picker === b) {
+            total++;
+            if ((p.picker === a && p.target === b) || (p.picker === b && p.target === a)) hits++;
+        }
     }
-  }
-  return total === 0 ? 0 : hits / total;
+    return total === 0 ? 0 : hits / total;
 }
 
-/** Directed hits a→b and a's total picks under a coding filter. */
+/** Directed hits a→b and a's total picks under a metric filter. */
 export function directedPicks(
-  picks: readonly PickRec[],
-  from: PlayerId,
-  to: PlayerId,
-  include: (coding: PromptCoding) => boolean,
+    picks: readonly PickRec[],
+    from: PlayerId,
+    to: PlayerId,
+    include: (metric: MetricKey | undefined) => boolean,
 ): { hits: number; total: number; rate: number } {
-  let hits = 0;
-  let total = 0;
-  for (const p of picks) {
-    if (p.picker !== from || !include(p.coding)) continue;
-    total++;
-    if (p.target === to) hits++;
-  }
-  return { hits, total, rate: total === 0 ? 0 : hits / total };
-}
-
-// ---------- ratings & IOS ----------
-
-export interface RatingIndex {
-  /** self.get(player)?.get(trait) → averaged self rating. */
-  self: Map<PlayerId, Map<TraitId, number>>;
-  /** peerByRater.get(about)?.get(trait)?.get(rater) → that rater's averaged rating of `about`. */
-  peerByRater: Map<PlayerId, Map<TraitId, Map<PlayerId, number>>>;
-}
-
-export function buildRatingIndex(log: readonly LogRecord[]): RatingIndex {
-  const selfAcc = new Map<string, number[]>();
-  const peerAcc = new Map<string, number[]>();
-  const push = (m: Map<string, number[]>, k: string, v: number) => {
-    const arr = m.get(k);
-    if (arr) arr.push(v);
-    else m.set(k, [v]);
-  };
-  for (const rec of log) {
-    if (rec.value.kind !== "rating") continue;
-    if (rec.value.about === "self") {
-      push(selfAcc, `${rec.playerId}\u0000${rec.value.trait}`, rec.value.value);
-    } else {
-      push(peerAcc, `${rec.value.about}\u0000${rec.value.trait}\u0000${rec.playerId}`, rec.value.value);
+    let hits = 0;
+    let total = 0;
+    for (const p of picks) {
+        if (p.picker !== from || !include(p.metric)) continue;
+        total++;
+        if (p.target === to) hits++;
     }
-  }
-  const self = new Map<PlayerId, Map<TraitId, number>>();
-  for (const [k, vs] of selfAcc) {
-    const [player, trait] = k.split("\u0000") as [PlayerId, TraitId];
-    let m = self.get(player);
-    if (!m) { m = new Map(); self.set(player, m); }
-    m.set(trait, meanOf(vs));
-  }
-  const peerByRater = new Map<PlayerId, Map<TraitId, Map<PlayerId, number>>>();
-  for (const [k, vs] of peerAcc) {
-    const [about, trait, rater] = k.split("\u0000") as [PlayerId, TraitId, PlayerId];
-    let byTrait = peerByRater.get(about);
-    if (!byTrait) { byTrait = new Map(); peerByRater.set(about, byTrait); }
-    let byRater = byTrait.get(trait);
-    if (!byRater) { byRater = new Map(); byTrait.set(trait, byRater); }
-    byRater.set(rater, meanOf(vs));
-  }
-  return { self, peerByRater };
-}
-
-/** ios.get(from)?.get(to) → averaged IOS value 1..7. */
-export function buildIosIndex(log: readonly LogRecord[]): Map<PlayerId, Map<PlayerId, number>> {
-  const acc = new Map<string, number[]>();
-  for (const rec of log) {
-    if (rec.value.kind !== "ios") continue;
-    const k = `${rec.playerId}\u0000${rec.value.about}`;
-    const arr = acc.get(k);
-    if (arr) arr.push(rec.value.value);
-    else acc.set(k, [rec.value.value]);
-  }
-  const out = new Map<PlayerId, Map<PlayerId, number>>();
-  for (const [k, vs] of acc) {
-    const [from, to] = k.split("\u0000") as [PlayerId, PlayerId];
-    let m = out.get(from);
-    if (!m) { m = new Map(); out.set(from, m); }
-    m.set(to, meanOf(vs));
-  }
-  return out;
-}
-
-// ---------- debrief similarity (token-Jaccard is PRIMARY, spec §5) ----------
-
-export const tokenize = (text: string): Set<string> =>
-  new Set(text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length > 0));
-
-/** Jaccard over lowercase alphanumeric token sets. Both empty score 0; missing pairs are omitted upstream. */
-export function tokenJaccard(a: string, b: string): number {
-  const sa = tokenize(a);
-  const sb = tokenize(b);
-  if (sa.size === 0 && sb.size === 0) return 0;
-  let inter = 0;
-  for (const t of sa) if (sb.has(t)) inter++;
-  const union = sa.size + sb.size - inter;
-  return union === 0 ? 0 : inter / union;
-}
-
-/**
- * Which two players debriefed each other? LogRecord has no pair id, so the
- * engine groups deterministically, in this order:
- *  1. debrief records sharing a roundId with exactly 2 distinct players;
- *  2. else debrief records sharing a promptId with exactly 2 distinct players
- *     (pair not already found in step 1);
- *  3. else, if exactly 2 players in the whole log have debrief texts, them.
- * Pairs with no determination get debriefSim 0.5 ("unknown") upstream.
- */
-export function buildDebriefSims(log: readonly LogRecord[]): Map<string, number> {
-  const textsByPlayer = new Map<PlayerId, string[]>();
-  const byRound = new Map<string, Map<PlayerId, string[]>>();
-  const byPrompt = new Map<string, Map<PlayerId, string[]>>();
-  const addText = (m: Map<PlayerId, string[]>, p: PlayerId, t: string) => {
-    const arr = m.get(p);
-    if (arr) arr.push(t);
-    else m.set(p, [t]);
-  };
-  for (const rec of log) {
-    if (rec.roundKind !== "debrief" || rec.value.kind !== "text") continue;
-    addText(textsByPlayer, rec.playerId, rec.value.text);
-    let r = byRound.get(rec.roundId);
-    if (!r) { r = new Map(); byRound.set(rec.roundId, r); }
-    addText(r, rec.playerId, rec.value.text);
-    let pr = byPrompt.get(rec.promptId);
-    if (!pr) { pr = new Map(); byPrompt.set(rec.promptId, pr); }
-    addText(pr, rec.playerId, rec.value.text);
-  }
-  const acc = new Map<string, number[]>();
-  const addSim = (m: Map<PlayerId, string[]>) => {
-    if (m.size !== 2) return;
-    const [[p1, t1], [p2, t2]] = [...m.entries()] as [[PlayerId, string[]], [PlayerId, string[]]];
-    const sim = tokenJaccard(t1.join(" "), t2.join(" "));
-    const k = pairKey(p1, p2);
-    const arr = acc.get(k);
-    if (arr) arr.push(sim);
-    else acc.set(k, [sim]);
-  };
-  for (const m of byRound.values()) addSim(m);
-  const roundPairs = new Set(acc.keys());
-  for (const m of byPrompt.values()) {
-    if (m.size !== 2) continue;
-    const [p1, p2] = [...m.keys()] as [PlayerId, PlayerId];
-    if (!roundPairs.has(pairKey(p1, p2))) addSim(m);
-  }
-  if (textsByPlayer.size === 2) addSim(textsByPlayer);
-  const out = new Map<string, number>();
-  for (const [k, sims] of acc) out.set(k, clamp01(meanOf(sims)));
-  return out;
+    return total === 0 ? { hits, total, rate: 0 } : { hits, total, rate: hits / total };
 }
