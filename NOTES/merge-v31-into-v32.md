@@ -83,6 +83,23 @@ engine cannot produce; `apps/server/README.md` and the runbook's Ollama setup no
 name the endpoints and defaults this code actually uses (native `/api/chat`,
 `/v1/chat/completions` fallback, no `XAI_MODEL`).
 
+## After the merge commit: the silent deletions too
+
+The merge only ever *asks* about a file both sides touched. 29 more paths existed
+on main's tip and not on ours — v3.2 deleted them (the accounts lane, `DemoPanel`,
+`ReadyScreen`, `screens/`, `engine/src/live.ts` + `matching.ts`, the live bank
+directory, shared test helpers) and main had never edited them, so git resolved the
+deletion without a conflict anyone could have reconsidered. They are archived the
+same way, out of the same reason. `legacy/v3.1/` is now 84 files and 14,233 lines,
+and this is mechanically true:
+
+```sh
+# every path main's tip carries is live in the app or readable under legacy/v3.1/
+comm -23 <(git ls-tree -r --name-only origin/main | sort) \
+         <(git ls-tree -r --name-only HEAD | sort) | while read f; do
+  [ -f "legacy/v3.1/$f" ] || echo "MISSING $f"; done   # -> no output
+```
+
 ## Ledger
 
 ## archived verbatim under legacy/v3.1/ (23)

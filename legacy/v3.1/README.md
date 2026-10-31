@@ -31,4 +31,4 @@ about the shape at all.
 2. Re-point the npm script that used it (see the "unwired" section of the merge note).
 3. Expect the contract fields it reads to be gone — the port is the work, not the move.
 
-Contents: 54 files, 10756 lines.
+Contents: 29 more files were added after the merge itself: the paths v3.2 deleted that main never touched, which git therefore resolved without ever asking. Every path main's tip carries is now either live in the app or readable here at its own name — 84 files, 14233 lines.
