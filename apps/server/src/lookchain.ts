@@ -43,13 +43,13 @@ export const LOOK_CHAIN_VARIANTS: readonly LookChainVariant[] = [
     announce: "Everybody look at {A}.",
     act: "Look at someone you would take home.",
     guess: "Who is {A} thinking about?",
-    why: "Say why.",
+    why: "What is it about them?",
   },
   {
     announce: "Everybody look at {A}.",
     act: "Look at the person you trust most in this room.",
     guess: "Who is {A} looking at?",
-    why: "Why them?",
+    why: "Why do you trust them?",
   },
   {
     announce: "Everybody look at {A}.",
@@ -61,19 +61,19 @@ export const LOOK_CHAIN_VARIANTS: readonly LookChainVariant[] = [
     announce: "Everybody look at {A}.",
     act: "Look at someone you would kiss if the lights went out.",
     guess: "Who is {A} looking at?",
-    why: "Why them?",
+    why: "And why that one?",
   },
   {
     announce: "Everybody look at {A}.",
     act: "Look at the person you would call first if you were in trouble.",
     guess: "Who is {A} looking at?",
-    why: "Why them?",
+    why: "Why them, of all people?",
   },
   {
     announce: "Everybody look at {A}.",
     act: "Look at someone you cannot stop thinking about.",
     guess: "Who is {A} looking at?",
-    why: "Why them?",
+    why: "What is going on there?",
   },
 ];
 

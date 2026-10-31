@@ -243,6 +243,20 @@ async function main(): Promise<void> {
       }
     }
 
+    // No phone is ever asked the same question twice in one night.
+    for (const bot of bots) {
+      const segments = new Set<string>();
+      const texts = new Set<string>();
+      for (const round of bot.rounds) {
+        if (segments.has(round.segmentId)) continue;
+        segments.add(round.segmentId);
+        if (round.segmentId.includes("-chain-")) continue; // the chain has its own copy
+        const text = round.promptText.trim().toLowerCase();
+        check(!texts.has(text), `${bot.alias} was asked the same question twice: "${round.promptText}"`);
+        texts.add(text);
+      }
+    }
+
     // The case closes within a second of the last answer.
     for (const [roundId, closed] of closedAt) {
       const answered = lastAnswerAt.get(roundId);

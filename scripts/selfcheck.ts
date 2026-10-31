@@ -204,6 +204,7 @@ ok("the look chain has its own metrics", METRIC.lookchain === "lookchain" && MET
 ok("eight chain flavours", LOOK_CHAIN_VARIANTS.length === 8);
 ok("every chain flavour is a full act → guess → why", LOOK_CHAIN_VARIANTS.every((v) => v.announce && v.act && v.guess && v.why));
 ok("the chain copy never repeats", new Set(LOOK_CHAIN_VARIANTS.map((v) => v.act)).size === LOOK_CHAIN_VARIANTS.length);
+ok("every chain line is its own", new Set(LOOK_CHAIN_VARIANTS.flatMap((v) => [v.act, v.why])).size === LOOK_CHAIN_VARIANTS.length * 2);
 ok("6-8 chains in a room of 5-11", lookChainsFor(5) >= 6 && lookChainsFor(11) <= 8);
 
 // --------------------------------------------------------------- ollama lane
