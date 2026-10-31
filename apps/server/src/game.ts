@@ -14,6 +14,7 @@ import {
 } from "../../../packages/shared/src/contracts.ts";
 import { isAlias, isRoomCode, playerCountOk, validSubmit } from "../../../packages/shared/src/validate.ts";
 import { phaseSlots } from "./schedule.ts";
+import { safeCallbackQuotes } from "./safe-callback.ts";
 import { BankPromptProvider, fallbackServices, type GameServices, type HeatPhase, type PromptProvider } from "./services.ts";
 import { integratedServices } from "./integratedServices.ts";
 import { DECOYS, SPOTLIGHT_IDLE_LINE, liveKindInPhase, livePrompt, liveSeeds, type LiveSeed } from "../../../packages/prompts/src/bank/live/index.ts";
@@ -851,17 +852,19 @@ export class RoomManager {
    * answers are eligible; private pair debriefs never enter this path. */
   private withCallback(room: Room, definition: Definition, question: string): string {
     const phase = definition.phase;
-    if (this.finaleOnly) return question; // quotes can identify their author through context
     if (phase === "warmup" || phase === "debrief" || phase === "interlude" || phase === "lobby" || phase === "finale" || phase === "closed" ||
         definition.kind === "spotlight" || definition.kind === "verdict" || definition.kind === "dare" || definition.kind === "pair_dare" ||
         definition.prompt.source === "host") return question;
     const marker = "\n\nEarlier, someone said: “";
     const maxQuote = 160 - question.length - marker.length - 2; // closing quote + optional ellipsis
     if (maxQuote < 20) return question;
-    const quotes = room.log.flatMap((record) => record.roundKind === "text" && record.value.kind === "text" ? [record.value.text.trim()] : [])
-      .filter((quote) => quote.length >= 20 && !/[\u0000-\u001f\u007f“”]/u.test(quote) && !checkHardBlocked(quote));
+    const quotes = this.finaleOnly
+      ? safeCallbackQuotes(room.log, room.players.flatMap((p) => [p.alias, p.id]))
+      : room.log.flatMap((record) => record.roundKind === "text" && record.value.kind === "text" ? [record.value.text.trim()] : [])
+        .filter((quote) => quote.length >= 20 && !/[\u0000-\u001f\u007f“”]/u.test(quote) && !checkHardBlocked(quote));
     const quote = quotes.find((value) => !room.callbackQuotes.has(value)) ?? quotes[0];
     if (!quote) return question;
+    if (this.finaleOnly && quote.length > maxQuote) return question;
     let excerpt = quote.slice(0, maxQuote);
     if (/[\uD800-\uDBFF]$/.test(excerpt)) excerpt = excerpt.slice(0, -1);
     if (excerpt.length < quote.length) {

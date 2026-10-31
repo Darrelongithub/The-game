@@ -113,7 +113,7 @@ for (const revealMode of ["round", "finale"] as const) test(`five real sockets c
       switch (round.kind) {
         case "pick": value = { kind: "pick", target: i === 0 && round.index === 1 ? myId : target }; break;
         case "shout": value = { kind: "shout", word: i < 3 ? "chaos" : "vibes" }; break;
-        case "text": value = { kind: "text", text: "Alice.* always turns a difficult evening into a funny story." }; break;
+        case "text": value = { kind: "text", text: revealMode === "finale" && i > 0 ? "This group makes every night feel like a celebration." : "Alice.* always turns a difficult evening into a funny story." }; break;
         case "debrief": value = { kind: "text", text: `PRIVATE_DEBRIEF_${i} this must not appear in public.` }; break;
         case "rating": value = { kind: "rating", trait: round.trait!, about: round.about!, value: 7 }; break;
         case "ios": value = { kind: "ios", about: round.about!, value: 5 }; break;
@@ -146,12 +146,16 @@ for (const revealMode of ["round", "finale"] as const) test(`five real sockets c
   assert.ok(allFinales[0]!.slides.some((slide) => slide.body === "Alice.* picked THEMSELVES 💅"));
   if (revealMode === "round") assert.ok(JSON.stringify(reveals).includes("picked THEMSELVES 💅"));
   else {
+    assert.ok(frames.some((entry: any) => entry.name === "round" && entry.frame.promptText.includes("Earlier, someone said")), "safe shared answers produce anonymous callbacks");
     for (const entry of frames as Array<{name: string; frame: any}>) {
       if (entry.name === "reveal" && entry.frame.kind === "spotlight") continue; // live theatre is exempt
       const frame = JSON.stringify(entry.frame);
       assert.ok(!frame.includes("picked THEMSELVES") && !frame.includes("Alice.* always turns") && !frame.includes("Alice.* is watching."), `${entry.name} exposed a private answer`);
       const r = entry.name === "state" ? entry.frame.round : entry.name === "round" ? entry.frame : null;
-      if (r) { assert.ok(!r.submitted?.length); assert.ok(!r.promptText.includes("Earlier, someone said")); }
+      if (r) {
+        assert.ok(!r.submitted?.length);
+        if (r.promptText.includes("Earlier, someone said")) assert.ok(r.promptText.includes("This group makes every night feel like a celebration."));
+      }
       if (entry.name === "reveal") { assert.equal(entry.frame.items, undefined); assert.equal(entry.frame.slide, undefined); }
     }
   }
