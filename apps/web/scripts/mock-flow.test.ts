@@ -15,7 +15,6 @@ import type {
   RoundKind,
   RoundView,
   SecretDeckView,
-  TraitId,
 } from "@shared/contracts.ts";
 
 // ---- a minimal window/sessionStorage so the mock can persist snapshots ----
@@ -79,20 +78,20 @@ const OTHER = () => lastState?.players.find((p) => p.id !== lastState?.hostId)?.
 const ME = () => "p1";
 
 function answerFor(r: RoundView): ResponseValue {
-  const shim = r as RoundView & { trait?: TraitId; about?: string };
   const other = OTHER();
   switch (r.kind) {
     case "pick": return { kind: "pick", target: other };
     case "text": return { kind: "text", text: "I would rather the room told me first." };
     case "shout": return { kind: "shout", word: "chaos" };
-    case "rating": return { kind: "rating", trait: shim.trait ?? "chaos", about: shim.about ?? other, value: 8 };
-    case "ios": return { kind: "ios", about: shim.about ?? other, value: 5 };
+    case "rating": return { kind: "rating", trait: r.trait!, about: r.about!, value: 8 };
+    case "ios": return { kind: "ios", about: r.about!, value: 5 };
     case "minigame": return { kind: "minigame", score: 42 };
     case "dare": return { kind: "dare", status: "done" };
     case "pair_dare": return { kind: "dare", status: "done" };
     case "debrief": return { kind: "text", text: "They said they already knew. I said nothing back." };
     case "spotlight": return { kind: "text", text: "Watching the door, honestly." };
     case "verdict": return { kind: "pick", target: other };
+    case "confess": return { kind: "confess", yes: true };
   }
 }
 

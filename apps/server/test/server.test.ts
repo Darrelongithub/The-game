@@ -52,8 +52,8 @@ test("LAN banner includes every non-loopback IPv4 URL and a QR code", () => {
     docker0: [{ address: "172.17.0.1", family: "IPv4", internal: false, cidr: "172.17.0.1/16", netmask: "255.255.0.0", mac: "00:00:00:00:00:03" }],
     hotspot: [{ address: "10.0.0.2", family: "IPv4", internal: false, cidr: "10.0.0.2/24", netmask: "255.255.255.0", mac: "00:00:00:00:00:02" }],
   };
-  assert.deepEqual(lanAddresses(fake), ["10.0.0.2", "172.17.0.1", "192.168.1.20"]);
-  assert.equal(selectLanAddress(fake), "192.168.1.20", "prefer Wi-Fi over hotspot and virtual bridge addresses");
+  assert.deepEqual(lanAddresses(fake), ["192.168.1.20", "10.0.0.2", "172.17.0.1"]);
+  assert.equal(selectLanAddress(fake), "192.168.1.20", "QR selection follows the printed private-LAN preference order");
   const original = console.log, output: string[] = [];
   try { console.log = (...args: unknown[]) => output.push(args.join(" ")); bootBanner(3001, "0.0.0.0", fake); } finally { console.log = original; }
   const text = output.join("\n");
@@ -173,7 +173,7 @@ test("one host and three in-server bots can finish the entire game without API k
     }),
     writeFinale() { writerStarted = true; return new Promise(() => {}); },
   };
-  const server = createGameServer({ revealMode: "round", dataDir: dir, services, writerTimeoutMs: 20, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, verdictDiscussMs: 0, roundTimers: { spotlight: 300, verdict: 300 } });
+  const server = createGameServer({ revealMode: "round", dataDir: dir, services, writerTimeoutMs: 20, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, verdictDiscussMs: 0, roundTimers: { spotlight: 300, verdict: 300, confess: 300 } });
   const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
   t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" } }, resolve));
@@ -192,6 +192,7 @@ test("one host and three in-server bots can finish the entire game without API k
       case "minigame": value = { kind: "minigame", score: 23 }; break;
       case "dare": case "pair_dare": value = { kind: "dare", status: "done" }; break;
       case "spotlight": value = { kind: "text", text: "Watching the room right now." }; break;
+      case "confess": value = { kind: "confess", yes: true }; break;
       case "verdict": value = { kind: "pick", target: "p2" }; break;
     }
     host.emit("submit", { roundId: round.roundId, clientUuid: `host-${round.roundId}`, value }, () => {});

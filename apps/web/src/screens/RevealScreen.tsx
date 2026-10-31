@@ -13,6 +13,7 @@ import { useEffect, useRef } from 'react';
 import type { RevealView } from '../../../../packages/shared/src/contracts';
 import { AnimatedWords, GlassCard } from './primitives';
 import { CaptionWall } from '../components/CaptionWall';
+import { ConfessReveal } from '../components/ConfessReveal';
 import { GroupAnnouncement } from '../components/GroupAnnouncement';
 
 export function RevealScreen({ reveal, onComplete }: { reveal: RevealView; onComplete: () => void }) {
@@ -20,6 +21,9 @@ export function RevealScreen({ reveal, onComplete }: { reveal: RevealView; onCom
   useEffect(() => { const id = window.setTimeout(() => complete.current(), Math.max(0, reveal.holdMs)); return () => window.clearTimeout(id); }, [reveal.roundId, reveal.holdMs]);
   if (reveal.kind === 'spotlight' && reveal.subject) {
     return <CaptionWall subject={reveal.subject} captions={reveal.items ?? []} {...(reveal.punchline ? { punchline: reveal.punchline } : {})} />;
+  }
+  if (reveal.confess) {
+    return <ConfessReveal confess={reveal.confess} />;
   }
   if (reveal.kind === 'verdict' && reveal.slide) {
     return <main className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col justify-center px-4 py-8 text-white"><GroupAnnouncement slide={reveal.slide} celebrate={reveal.celebrate !== false} /><p className="mt-6 text-center text-[11px] uppercase tracking-[0.25em] text-white/35">anonymous votes · counts only</p></main>;

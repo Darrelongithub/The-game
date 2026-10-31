@@ -43,6 +43,14 @@ export function LobbyScreen({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [inviteUrl, setInviteUrl] = useState("");
   const [copyState, setCopyState] = useState<"idle" | "copied" | "fallback">("idle");
+  const [hostScreenUrl, setHostScreenUrl] = useState("");
+  const [hostCopyState, setHostCopyState] = useState<"idle" | "copied" | "fallback">("idle");
+  const displayHref = `/display?code=${code ?? view.code}`;
+
+  useEffect(() => {
+    setHostCopyState("idle");
+    setHostScreenUrl("");
+  }, [displayHref]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -60,6 +68,19 @@ export function LobbyScreen({
     } catch {
       // Clipboard access often requires HTTPS; expose selectable text on LAN.
       setCopyState("fallback");
+    }
+  };
+
+  const copyHostScreen = async () => {
+    const url = new URL(displayHref, window.location.href).toString();
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(url);
+      setHostCopyState("copied");
+    } catch {
+      // LAN HTTP and denied permissions need a selectable link instead.
+      setHostScreenUrl(url);
+      setHostCopyState("fallback");
     }
   };
 
@@ -97,11 +118,25 @@ export function LobbyScreen({
             className="mt-3 min-h-[44px] rounded-full border border-white/25 bg-white/5 px-5 text-xs font-medium text-white transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent">
             {copyState === "copied" ? "Invite link copied" : "Copy invite link"}
           </button>
-          <a href={`/display?code=${code ?? view.code}`} target="_blank" rel="noreferrer" className="mt-2 inline-flex min-h-[44px] items-center rounded-full border border-lime-accent/40 px-5 text-xs font-medium text-lime-accent">Open public display</a>
           {copyState === "fallback" && <label className="mt-2 block text-xs text-white/65">
             Copy this invite link
             <input aria-label="Invite link" className="field mt-2 text-xs" readOnly value={inviteUrl} onFocus={(event) => event.currentTarget.select()} />
           </label>}
+
+          <section aria-label="Host screen" className="mt-5 rounded-[24px] border border-lime-accent/40 bg-lime-accent/10 p-5 text-left shadow-[0_16px_45px_rgba(159,44,212,0.25)]">
+            <h2 className="font-display text-xl font-bold leading-snug text-white">Host screen — open this on the host laptop / TV. The reveal plays here.</h2>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <a href={displayHref} target="_blank" rel="noreferrer" className="inline-flex min-h-[48px] flex-1 items-center justify-center rounded-2xl bg-lime-accent px-5 py-3 text-sm font-bold text-[#100019] transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">Open public display</a>
+              <button type="button" onClick={() => void copyHostScreen()} aria-live="polite"
+                className="min-h-[48px] flex-1 rounded-2xl border border-lime-accent/60 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent">
+                {hostCopyState === "copied" ? "Host screen link copied" : "Copy host screen link"}
+              </button>
+            </div>
+            {hostCopyState === "fallback" && <label className="mt-3 block text-sm text-white/75">
+              Clipboard unavailable. Copy this host screen link:
+              <input aria-label="Host screen link" className="field mt-2 text-xs" readOnly value={hostScreenUrl} onFocus={(event) => event.currentTarget.select()} />
+            </label>}
+          </section>
         </motion.div>
 
         {/* players */}

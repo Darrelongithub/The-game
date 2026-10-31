@@ -50,7 +50,7 @@ for (const revealMode of ["round", "finale"] as const) test(`five real sockets c
       return { slides: slides.map((slide) => slide.flavor === "quote" || slide.flavor === "dodge" ? { ...slide, title: "Fabricated attribution", body: "A fabricated version." } : slide), decks };
     },
   };
-  const server = createGameServer({ dataDir: dir, services, revealMode, revealHoldMs: 5, interludeHoldMs: 5, roundTimers: { pick: 1500, shout: 1500, minigame: 1500, rating: 1500, ios: 1500, text: 1500, dare: 1500, pair_dare: 1500, debrief: 1500, spotlight: 1500, verdict: 1500 }, verdictDiscussMs: 0, graceMs: 50 });
+  const server = createGameServer({ dataDir: dir, services, revealMode, revealHoldMs: 5, interludeHoldMs: 5, roundTimers: { pick: 1500, shout: 1500, minigame: 1500, rating: 1500, ios: 1500, text: 1500, dare: 1500, pair_dare: 1500, debrief: 1500, spotlight: 1500, verdict: 1500, confess: 400 }, verdictDiscussMs: 0, graceMs: 50 });
   const port = await server.listen(0, "127.0.0.1", false), base = `http://127.0.0.1:${port}`;
   const clients: Client[] = [];
   t.after(async () => { for (const c of clients) c.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
@@ -63,7 +63,11 @@ for (const revealMode of ["round", "finale"] as const) test(`five real sockets c
   const ids = replies.map((r) => r.you!);
   const display = await connected(base); t.after(() => display.disconnect());
   const frames: unknown[] = [];
-  for (const c of [...clients, display]) for (const name of ["state", "round", "reveal", "interlude"] as const) (c as any).on(name, (frame: unknown) => frames.push({ name, frame }));
+  for (const c of [...clients, display]) {
+    let finaleStarted = false;
+    c.on("state", v => { if (v.phase === "finale") finaleStarted = true; });
+    for (const name of ["state", "round", "reveal", "interlude"] as const) (c as any).on(name, (frame: unknown) => { if (!finaleStarted) frames.push({ name, frame }); });
+  }
   const displayJoined = await new Promise<any>(resolve => display.emit("display_join", {roomCode: first.code!}, resolve));
   assert.ok(displayJoined.ok);
   const scheduled = new Map<string, Set<string>>();
@@ -121,6 +125,7 @@ for (const revealMode of ["round", "finale"] as const) test(`five real sockets c
         case "dare": value = i === 0 ? { kind: "dare", status: "passed", reason: "Alice.* is watching." } : { kind: "dare", status: "done" }; break;
         case "pair_dare": value = { kind: "dare", status: "done" }; break;
         case "spotlight": value = { kind: "text", text: `Live caption number ${i}.` }; break;
+        case "confess": value = { kind: "confess", yes: i % 2 === 0, ...(i % 2 === 0 ? { target: target } : {}) }; break;
         case "verdict": value = { kind: "pick", target }; break;
       }
       const directed = value.kind === "pick" ? value.target : value.kind === "ios" ? value.about : value.kind === "rating" && value.about !== "self" ? value.about : undefined;
@@ -138,7 +143,7 @@ for (const revealMode of ["round", "finale"] as const) test(`five real sockets c
   await wait(40);
   assert.deepEqual(errors, []);
   assert.ok(pairChecked && duplicateChecked && spectatorChecked && emptyTargetChecked);
-  assert.deepEqual([...kinds].sort(), ["dare", "debrief", "ios", "minigame", "pair_dare", "pick", "rating", "shout", "text", "spotlight", "verdict"].sort());
+  assert.deepEqual([...kinds].sort(), ["dare", "debrief", "ios", "minigame", "pair_dare", "pick", "rating", "shout", "text", "spotlight", "verdict", "confess"].sort());
   assert.ok(firstSpicy <= 8, `spicy started at round ${firstSpicy}`);
   for (const phase of ["spicy", "deep", "dare"]) assert.ok(scheduled.get(phase)?.has("dare"), `${phase} needs a dare`);
   assert.deepEqual([...phases].sort(), ["warmup", "spicy", "deep", "dare", "debrief"].sort());
@@ -176,7 +181,10 @@ for (const revealMode of ["round", "finale"] as const) test(`five real sockets c
   const rawLog = readFileSync(join(dir, files[0]!), "utf8");
   assert.ok(!rawLog.includes("PRIVATE_SECRET"));
   const records: LogRecord[] = rawLog.trim().split("\n").map((line) => JSON.parse(line));
-  assert.equal(records.length, 105); // two extra solo dares each add one answer
+  for (let i = 0; i < ids.length; i++) {
+    assert.deepEqual(new Set(records.filter(r => r.playerId === ids[i]).map(r => r.roundId)), answered[i], "each submitted round is persisted exactly once per player");
+    assert.equal(records.filter(r => r.playerId === ids[i]).length, answered[i]!.size);
+  }
   assert.ok(records.every((r) => r.coding && r.latencyMs >= 0));
   assert.ok(records.some((r) => r.selfSignal === "selfimage" && r.playerId === ids[0]));
   assert.equal(records.filter((r) => r.roundId === records[0]!.roundId && r.playerId === ids[0]).length, 1, "retry persisted exactly once");

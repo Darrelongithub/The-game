@@ -33,6 +33,7 @@ test("a scripted finale night is materially faster than waiting at each ready ga
         const value = r.kind === "pick" || r.kind === "verdict" ? { kind: "pick", target: "p2" }
           : r.kind === "text" || r.kind === "spotlight" || r.kind === "debrief" ? { kind: "text", text: "A synthetic answer for this room." }
           : r.kind === "shout" ? { kind: "shout", word: "vibes" }
+          : r.kind === "confess" ? { kind: "confess", yes: false }
           : r.kind === "rating" ? { kind: "rating", trait: r.trait, about: r.about, value: 5 }
           : r.kind === "ios" ? { kind: "ios", about: r.about, value: 5 }
           : r.kind === "minigame" ? { kind: "minigame", score: 10 } : { kind: "dare", status: "done" };

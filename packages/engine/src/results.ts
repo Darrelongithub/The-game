@@ -6,7 +6,6 @@
 import {
   CONFIDENCE_RULES,
   SPARK_MIN_MUTUAL,
-  DEFAULT_WEIGHTS,
   MC_SIMULATIONS,
   TOXIC_WEIGHTS,
   TRAITS,
@@ -41,7 +40,7 @@ import {
 } from "./internal.ts";
 import { maximumWeightMatching } from "./matching.ts";
 import { mulberry32 } from "./rng.ts";
-import { pairScoreOf, type PairWeights } from "./signals.ts";
+import { DEFAULT_PAIR_WEIGHTS, pairScoreOf, type PairWeights } from "./signals.ts";
 
 const T = ENGINE_TUNING;
 
@@ -56,6 +55,9 @@ function pairSupportCount(s: PairSignal, pickEvidence: number): number {
   if (s.componentsUsed.includes("debriefSim") && s.debriefSim > T.support.debriefSim) n++;
   if (s.componentsUsed.includes("iosMean") && s.iosMean >= T.support.iosMean) n++;
   if (s.componentsUsed.includes("traitAgreement") && s.traitAgreement >= T.support.traitAgreement) n++;
+  // THE SECOND VOICE: a confession naming this pair counts like any other
+  // independent type — and, on its own, it can never lift a claim past "low".
+  if (s.componentsUsed.includes("confession") && (s.confession ?? 0) >= T.support.confession) n++;
   return n;
 }
 
@@ -68,6 +70,7 @@ function pairEvidenceLines(meta: RoomMeta, s: PairSignal): string[] {
   if (s.iosMean >= T.support.iosMean) lines.push(`${pa} and ${pb} rated each other close.`);
   if (s.traitAgreement >= T.support.traitAgreement) lines.push(`${pa} and ${pb} see each other clearly.`);
   if (s.debriefSim > T.support.debriefSim) lines.push(`Their separate accounts of time together matched closely.`);
+  if (s.componentsUsed.includes("confession") && (s.confession ?? 0) >= T.support.confession) lines.push(`${pa} and ${pb} each confessed to something about the other.`);
   if (lines.length === 0) lines.push(`${pa} and ${pb} rose to the top of the room's overall pattern.`);
   return lines;
 }
@@ -76,14 +79,14 @@ export function computeResults(
   signals: PairSignal[],
   allRecords: LogRecord[],
   meta: RoomMeta,
-  config: PairWeights = DEFAULT_WEIGHTS,
+  config: PairWeights = DEFAULT_PAIR_WEIGHTS,
   tagOf: (recordId: string) => string[] = () => [],
   onJokerWeights?: (weights: ReadonlyMap<PlayerId, number>) => void,
 ): Results {
   assertScorableMeta(meta);
   // Decoy answers (spotlight cover rounds) are not evidence about anyone.
   const log = allRecords.filter((rec) => rec.decoy !== true);
-  const weights: PairWeights = { ...DEFAULT_WEIGHTS, ...config };
+  const weights: PairWeights = { ...DEFAULT_PAIR_WEIGHTS, ...config };
   const ids = playerIdsSorted(meta);
   const idsInOrder = playerIdsInOrder(meta);
   const picks = getPicks(log);
@@ -224,12 +227,18 @@ export function computeResults(
     const ba = directedPicks(picks, b, a, (c) => c === "couple");
     if (ab.hits < SPARK_MIN_MUTUAL || ba.hits < SPARK_MIN_MUTUAL) continue;
     const s = signalFor(a, b);
+    // R27: a spark is an announcement, not a reward for two mutual picks.
+    // Reuse the R18 confidence machinery: at least three INDEPENDENT measured
+    // signal types (componentsUsed clearing the existing support bars) must
+    // support the pair. No new score, weight or threshold is introduced.
+    const supports = pairSupportCount(s, s.coupleEvidence);
+    if (supports < CONFIDENCE_RULES.high.independentSignals) continue;
     sparkClaims.push({
       id: `spark-${a}-${b}`,
       type: "spark",
       subjects: [a, b],
       audience: "private", // ALWAYS private → Secret Cards
-      confidence: confidenceFromCount(pairSupportCount(s, s.coupleEvidence)),
+      confidence: confidenceFromCount(supports),
       evidence: [
         `${pseudoOf(meta, a)} and ${pseudoOf(meta, b)} picked each other on couple-coded rounds.`,
         ...pairEvidenceLines(meta, s).slice(0, 2),

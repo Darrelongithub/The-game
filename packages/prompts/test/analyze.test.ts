@@ -72,7 +72,7 @@ test("tagBatch: ONE gemini call, taxonomy-validated, invalid rows ignored", asyn
   const tags = await tagBatch(["something plain", "something mean", "something else"], { room: "r1", provider });
 
   assert.equal(mock.calls.length, 1);
-  assert.match(mock.calls[0]!.url, /gemini-3\.1-pro-preview/);
+  assert.match(mock.calls[0]!.url, /gemini-3\.5-flash-lite/);
   assert.deepEqual(tags[0], ["admiration"]);
   assert.deepEqual(tags[1], ["contempt"], "unknown taxonomy tag must be ignored");
   assert.deepEqual(tags[2], ["neutral"], "an empty tag list falls back to the code result");
@@ -92,8 +92,8 @@ test("tagBatch is capped at ONE tag call per room per night", async () => {
 test("tagBatch never sends aliases", async () => {
   const mock = mockFetch(() => geminiReply("[]"));
   const provider = makeProvider({ geminiApiKey: "k", fetchImpl: mock.fetchImpl });
-  await tagBatch(["Nadia said Mo was lying"], { room: "r", provider, aliases: ALIASES });
-  assert.doesNotMatch(mock.calls[0]!.raw, /Nadia|Mo was/);
+  await tagBatch(["Nadia said Tolu was lying"], { room: "r", provider, aliases: ALIASES });
+  assert.doesNotMatch(mock.calls[0]!.raw, /Nadia|Tolu was/);
   assert.match(mock.calls[0]!.raw, /someone in the room/);
 });
 
@@ -132,7 +132,7 @@ test("debriefBatch: ONE analysis-model call, clamps and validates every score", 
   const scores = await debriefBatch(pairs, { room: "r", provider });
 
   assert.equal(mock.calls.length, 1);
-  assert.match(mock.calls[0]!.url, /gemini-3\.1-pro-preview/);
+  assert.match(mock.calls[0]!.url, /gemini-3\.5-flash-lite/);
   assert.equal(scores[0], 1, "clamped down");
   assert.equal(scores[1], 0, "clamped up");
   assert.equal(scores[2], 0, "non-numeric score keeps the Jaccard result");

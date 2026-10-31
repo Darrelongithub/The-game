@@ -16,18 +16,21 @@ export interface ServerOptions extends Omit<GameOptions, "dataDir"> { dataDir?: 
 export function lanAddresses(interfaces = networkInterfaces()): string[] {
   const addresses = new Set<string>();
   for (const entries of Object.values(interfaces)) for (const entry of entries ?? []) {
-    if (entry.family === "IPv4" && !entry.internal && !entry.address.startsWith("127.")) addresses.add(entry.address);
+    if (entry.family === "IPv4" && !entry.internal && !entry.address.startsWith("127.") && !entry.address.startsWith("169.254.")) addresses.add(entry.address);
   }
-  return [...addresses].sort();
+  const priority = (address: string): number => {
+    const octets = address.split(".").map(Number);
+    if (octets[0] === 192 && octets[1] === 168) return 0;
+    if (octets[0] === 10) return 1;
+    if (octets[0] === 172 && octets[1]! >= 16 && octets[1]! <= 31) return 2;
+    return 3;
+  };
+  // Numeric tie-breaking is stable across OS interface enumeration and locales.
+  return [...addresses].sort((a, b) => priority(a) - priority(b) || a.localeCompare(b, "en", { numeric: true }));
 }
 export function selectLanAddress(interfaces = networkInterfaces()): string | undefined {
-  const candidates = Object.entries(interfaces).flatMap(([name, entries]) => (entries ?? [])
-    .filter((entry) => entry.family === "IPv4" && !entry.internal && !entry.address.startsWith("127."))
-    .map((entry) => ({ name, address: entry.address })));
-  if (!candidates.length) return undefined;
-  const penalty = (name: string): number => /docker|veth|bridge|virbr|tun|tap|wireguard|tailscale|zerotier|vmnet|vbox|virtual/i.test(name) ? 2 :
-    /^(wlan|wlp|wifi|wi-fi|en|eno|enp|eth|ethernet)/i.test(name) ? 0 : 1;
-  return candidates.sort((a, b) => penalty(a.name) - penalty(b.name) || a.address.localeCompare(b.address))[0]!.address;
+  // The QR must point at the first URL the host sees, not a separately ranked one.
+  return lanAddresses(interfaces)[0];
 }
 export function bootBanner(port: number, host: string, interfaces = networkInterfaces()): void {
   const local = `http://localhost:${port}`, ips = lanAddresses(interfaces), selected = selectLanAddress(interfaces);

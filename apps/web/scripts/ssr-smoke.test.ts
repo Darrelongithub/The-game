@@ -67,6 +67,9 @@ const lobbyHost = renderToString(
 ok("Lobby shows the room code big", lobbyHost.includes("AB2C"));
 ok("Lobby lists every player", view.players.every((p) => lobbyHost.includes(p.alias)));
 ok("Lobby marks the host", lobbyHost.includes("host"));
+ok("Lobby labels the public display as the Host screen", lobbyHost.includes("Host screen — open this on the host laptop / TV. The reveal plays here."));
+ok("Lobby keeps the public-display link and adds a copy button", lobbyHost.includes('href="/display?code=AB2C"') && lobbyHost.includes("Open public display") && lobbyHost.includes("Copy host screen link"));
+ok("Lobby keeps the invite and room controls", lobbyHost.includes("Copy invite link") && lobbyHost.includes("Vote to keep the heat") && lobbyHost.includes("Delete room"));
 ok("Lobby exposes add-bot + custom prompts", lobbyHost.includes("Add bot") && lobbyHost.includes("Custom prompts"));
 ok("Lobby start is enabled at 4 players", lobbyHost.includes("Start the night · 4 players"));
 
@@ -78,6 +81,7 @@ const lobbyGuest = renderToString(
   })
 );
 ok("Guest gets no host controls", !lobbyGuest.includes("Add bot") && lobbyGuest.includes("Waiting on the host"));
+ok("Guest retains the public-display link and Host screen copy action", lobbyGuest.includes("Host screen — open this on the host laptop / TV. The reveal plays here.") && lobbyGuest.includes('href="/display?code=AB2C"') && lobbyGuest.includes("Open public display") && lobbyGuest.includes("Copy host screen link"));
 
 // Lobby below the minimum: start must be disabled
 const lobbySmall = renderToString(

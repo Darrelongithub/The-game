@@ -167,7 +167,7 @@ test("config weights re-weight pairScore (tuning replay)", () => {
   const log = goldenLog1();
   const meta = meta5("room-g1");
   const signals = computeSignals(log, meta);
-  const iosOnly = computeResults(signals, log, meta, { pickOverlap: 0, mutualPick: 0, debriefSim: 0, iosMean: 1, traitAgreement: 0 });
+  const iosOnly = computeResults(signals, log, meta, { pickOverlap: 0, mutualPick: 0, debriefSim: 0, iosMean: 1, traitAgreement: 0, confession: 0 });
   approx(signal(iosOnly.pairScores, "p1", "p2").pairScore, 13 / 14, "ios-only pairScore");
 });
 

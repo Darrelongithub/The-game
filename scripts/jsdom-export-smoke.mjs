@@ -40,9 +40,15 @@ try {
   const alias = window.document.querySelector('#alias');
   Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(alias, 'Hydration Host');
   alias.dispatchEvent(new window.Event('input', { bubbles: true }));
-  [...window.document.querySelectorAll('button[aria-pressed="false"]')]
-    .filter(button => /older|house rules|private reveal cards/i.test(button.textContent))
-    .forEach(button => button.click());
+  const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  for (const [id, value] of [['profile-age', '30'], ['profile-partnersToDate', '2'], ['profile-longestMonths', '6']]) {
+    const input = window.document.querySelector(`#${id}`);
+    if (!input) throw new Error(`profile field ${id} not mounted`);
+    setValue.call(input, value);
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+  }
+  // The 18+ and house-rule consents are required to enter.
+  [...window.document.querySelectorAll('input[type="checkbox"]')].forEach(box => { if (!box.checked) box.click(); });
   const create = () => [...window.document.querySelectorAll('button')].find(b => b.textContent.includes('Create room') && !b.disabled);
   await waitFor(create, 'create button not enabled');
   create().click();

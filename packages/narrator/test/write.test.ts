@@ -89,9 +89,9 @@ describe("canonical alias privacy", () => {
     const ps = derivePseudonyms(data.results, data.digest, roster);
     assert.equal(scrubAliases("Zoe\u0308 told me co\u0308operate", ps, roster), "Player 1 told me co\u0308operate");
     assert.equal(scrubAliases("A totally unrelated co\u0308operative", ps, roster), "A totally unrelated co\u0308operative");
-    const otherRoster = [{ id: "p1", alias: "İris" }, { id: "p2", alias: "ΟΣ" }];
+    const otherRoster = [{ id: "p1", alias: "İris" }, { id: "p2", alias: "ΟΣΣ" }];
     const other = derivePseudonyms(data.results, data.digest, otherRoster);
-    assert.equal(scrubAliases("İris and ος", other, otherRoster), "Player 1 and Player 2");
+    assert.equal(scrubAliases("İris and οσσ", other, otherRoster), "Player 1 and Player 2");
   });
 });
 

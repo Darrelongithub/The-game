@@ -47,7 +47,8 @@ async function harness(t: { after: (fn: () => Promise<void> | void) => void }, o
     roundTimers: { pick: options.roundTimers ?? 4_000, shout: options.roundTimers ?? 4_000, text: options.roundTimers ?? 4_000,
       rating: options.roundTimers ?? 4_000, ios: options.roundTimers ?? 4_000, minigame: options.roundTimers ?? 4_000,
       dare: options.roundTimers ?? 4_000, pair_dare: options.roundTimers ?? 4_000, debrief: options.roundTimers ?? 4_000,
-      spotlight: options.roundTimers ?? 4_000, verdict: options.roundTimers ?? 4_000 },
+      spotlight: options.roundTimers ?? 4_000, verdict: options.roundTimers ?? 4_000,
+      confess: Math.min(options.roundTimers ?? 4_000, 1_000) },
     verdictDiscussMs: 0, graceMs: 50, revealHoldMs: 20, interludeHoldMs: 20, botDelayMs: [5, 20],
     // Deliberately short: the demo tests press demo_all_ready where it matters.
     readyGraceMs: options.readyGraceMs ?? 400,
@@ -74,6 +75,7 @@ const SEATS = ["Maya", "Kofi", "Zuri"];
 /** A legal answer for any round kind, so a scripted seat can be answered. */
 function valueFor(round: RoundView, other: string): any {
   switch (round.kind) {
+    case "confess": return { kind: "confess", yes: true };
     case "pick": case "verdict": return { kind: "pick", target: other };
     case "shout": return { kind: "shout", word: "static" };
     case "rating": return { kind: "rating", trait: round.trait!, about: round.about!, value: 6 };
@@ -116,7 +118,8 @@ test("a demo room plays a whole night to a finale from one laptop", { timeout: 6
   host.on("state", (view) => { if (view.ready) host.emit("demo_all_ready"); });
   host.on("round", (round) => {
     if (round.youSubmitted || round.expectsAnswer === false) return;
-    const value = round.kind === "shout" ? { kind: "shout" as const, word: "mood" }
+    const value = round.kind === "confess" ? { kind: "confess" as const, yes: true }
+      : round.kind === "shout" ? { kind: "shout" as const, word: "mood" }
       : round.kind === "text" || round.kind === "spotlight" || round.kind === "debrief" ? { kind: "text" as const, text: "Testing the whole game alone." }
       : round.kind === "rating" ? { kind: "rating" as const, trait: round.trait!, about: round.about!, value: 7 }
       : round.kind === "ios" ? { kind: "ios" as const, about: ids[0]!, value: 5 }

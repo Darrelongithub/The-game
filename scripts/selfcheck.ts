@@ -9,6 +9,7 @@ import {
     ROUND_TIMERS_MS, TRAITS, HEAT_ORDER, SECRET_DECK_MAX, SECRET_HOLD_MS,
     MAX_PROVIDER_CALLS_PER_NIGHT, VERDICT_DISCUSS_MS, VERDICT_VOTE_MS, type RoundKind,
     HYPOTHESIS_FORM_BAND, ROUND_MIX, ANTI_TELEGRAPH_MAX,
+    STYLE_MIX, CONFESS_NOTE_MAX, TWIN_WINDOW, type PromptStyle,
 } from "../packages/shared/src/contracts.ts";
 
 import { phaseSlots } from "../apps/server/src/schedule.ts";
@@ -63,8 +64,9 @@ ok("ios about yourself rejected", !targetsOther({ kind: "ios", about: "p1", valu
 ok("validSubmit combo", validSubmit({ kind: "pick", target: "p2" }, "p1") && validSubmit({ kind: "pick", target: "p1" }, "p1"));
 
 // contracts invariants
-const kinds: RoundKind[] = ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare", "debrief", "spotlight", "verdict"];
-ok("timers cover all 11 round kinds", kinds.length === 11 && kinds.every((k) => typeof ROUND_TIMERS_MS[k] === "number" && ROUND_TIMERS_MS[k] > 0));
+const kinds: RoundKind[] = ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare", "debrief", "spotlight", "verdict", "confess"];
+ok("timers cover all 12 round kinds", kinds.length === 12 && kinds.every((k) => typeof ROUND_TIMERS_MS[k] === "number" && ROUND_TIMERS_MS[k] > 0));
+ok("confess round is a 20s private yes/no", ROUND_TIMERS_MS.confess === 20_000);
 ok("live-moment timers match the spec", ROUND_TIMERS_MS.spotlight === 25_000 && ROUND_TIMERS_MS.verdict === 105_000 &&
   VERDICT_DISCUSS_MS + VERDICT_VOTE_MS === ROUND_TIMERS_MS.verdict);
 ok("6 traits defined", TRAITS.length === 6);
@@ -84,6 +86,16 @@ ok("hypothesis band has lo < hi (mid-band, both inside 0..1)",
 ok("round mix sums to 1", Math.abs(ROUND_MIX.test + ROUND_MIX.explore + ROUND_MIX.classic - 1) < 1e-9);
 ok("round mix stays test-heavy", ROUND_MIX.test > ROUND_MIX.explore && ROUND_MIX.explore > ROUND_MIX.classic);
 ok("anti-telegraph cap is at least 2", ANTI_TELEGRAPH_MAX >= 2);
+
+// CONFESS ROUNDS — the second voice. The 50/50 is a distribution, not vibes.
+const styles: PromptStyle[] = ["group", "confess"];
+ok("STYLE_MIX sums to 1", Math.abs(STYLE_MIX.group + STYLE_MIX.confess - 1) < 1e-9);
+ok("STYLE_MIX covers exactly the two voices", styles.length === Object.keys(STYLE_MIX).length && styles.every((s) => typeof (STYLE_MIX as Record<string, number>)[s] === "number"));
+ok("both voices really share the night", STYLE_MIX.group > 0 && STYLE_MIX.confess > 0);
+ok("a confession has a yes/no and no skip", isResponseValue({ kind: "confess", yes: true }) && isResponseValue({ kind: "confess", yes: false }) &&
+   !isResponseValue({ kind: "confess" }) && !isResponseValue({ kind: "confess", yes: true, note: "x".repeat(CONFESS_NOTE_MAX + 1) }));
+ok("a confession never names yourself", !validSubmit({ kind: "confess", yes: true, target: "p1" }, "p1") && validSubmit({ kind: "confess", yes: true, target: "p2" }, "p1"));
+ok("twin window is 1..3 rounds later", TWIN_WINDOW.min >= 1 && TWIN_WINDOW.max <= 3 && TWIN_WINDOW.min <= TWIN_WINDOW.max);
 
 console.log(fail === 0 ? `\nALL ${pass} CHECKS PASSED ✅ — safe to spawn agents` : `\n${fail} FAILED / ${pass} passed ❌ — fix before spawning`);
 process.exit(fail === 0 ? 0 : 1);

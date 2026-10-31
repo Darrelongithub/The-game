@@ -71,7 +71,7 @@ interface RoundSpec {
   coding: PromptCoding;
   text: string; // {P1}..{P4} placeholders, substituted like the server does
   onlyPlayers?: PlayerId[];
-  /** interim shim — see NOTES/contract-requests.md (RoundView payload) */
+  /** Authoritative rating/IOS assignment from the RoundView contract. */
   trait?: TraitId;
   about?: PlayerId;
   /** spotlight: who the room is watching (the local player may be the subject) */
@@ -599,12 +599,10 @@ export class MockTransport implements Transport {
       youSubmitted: false,
       ...(spec.kind === "verdict" ? { voteOpensAt: Date.now() + Math.min(spec.debateMs ?? 16_000, Math.max(0, ms - 2_000)) } : {}),
       ...(spec.onlyPlayers ? { onlyPlayers: spec.onlyPlayers } : {}),
-      // INTERIM SHIM (contract request filed): the round needs to tell the UI
-      // which trait/player a rating or IOS answer is about.
+      // Rating/IOS intent is carried by the round, never inferred from prose.
       ...(spec.trait ? { trait: spec.trait } : {}),
       ...(spec.about ? { about: spec.about } : {}),
-      ...(spec.coding ? { coding: spec.coding } : {}),
-    } as RoundView;
+    } satisfies RoundView;
     this.seq += 1;
     this.emitState();
     this.handlers.onRound?.(this.round);
@@ -946,7 +944,6 @@ function autoAnswer(
   players: PlayerView[]
 ): ResponseValue | null {
   const other = players.find((p) => p.id !== you)?.id ?? you;
-  const shim = round as RoundView & { trait?: TraitId; about?: PlayerId };
   switch (round.kind) {
     case "pick":
       return { kind: "pick", target: other };
@@ -954,14 +951,10 @@ function autoAnswer(
       return { kind: "text", text: "Skipped. Take that as an answer." };
     case "shout":
       return { kind: "shout", word: "chaos" };
-    case "rating": {
-      const about = shim.about && shim.about !== you ? shim.about : other;
-      return { kind: "rating", trait: shim.trait ?? "chaos", about, value: 6 };
-    }
-    case "ios": {
-      const about = shim.about && shim.about !== you ? shim.about : other;
-      return { kind: "ios", about, value: 4 };
-    }
+    case "rating":
+      return round.trait && round.about ? { kind: "rating", trait: round.trait, about: round.about, value: 6 } : null;
+    case "ios":
+      return round.about ? { kind: "ios", about: round.about, value: 4 } : null;
     case "minigame":
       return { kind: "minigame", score: 1 };
     case "dare":
@@ -974,6 +967,9 @@ function autoAnswer(
       return { kind: "text", text: "Watching the door, honestly." };
     case "verdict":
       return { kind: "pick", target: other };
+    case "confess":
+      // A mock phone confesses about itself — never about anyone else.
+      return { kind: "confess", yes: true, ...(spec ? { note: "Only in the demo." } : {}) };
     default:
       return spec ? null : null;
   }
@@ -1010,6 +1006,33 @@ function buildReveal(
       celebrate: spec?.coding === "couple",
       holdMs: 8000,
       ...(winner ? { slide: { beat: "land" as const, flavor: "group" as const, title: name(winner[0]), body: `${winner[1]} of ${total} said it out loud.`, numbers: { votes: winner[1], of: total, share: winner[1] / total } } } : {}),
+    };
+  }
+  if (round.kind === "confess") {
+    // Same secrecy rules as the server: warm is counts only, spicy attributes
+    // YES answers only, and a "no" is a number forever.
+    const warm = round.phase === "warmup";
+    const answers = [...(spec?.botAnswers ?? []), { who: you, value: mine }];
+    const yes = answers.filter((a) => a.value.kind === "confess" && a.value.yes);
+    const notes = answers.flatMap((a) => {
+      if (a.value.kind !== "confess" || !a.value.note) return [];
+      const attributable = !warm && a.value.yes;
+      return [{ ...(attributable ? { alias: name(a.who) } : {}), text: a.value.note }];
+    });
+    return {
+      roundId: round.roundId,
+      kind: "confess",
+      summary: warm ? `${yes.length} of ${answers.length} said yes.` : `${yes.length} of ${answers.length} said yes.`,
+      holdMs: 4200,
+      confess: {
+        tier: warm ? "warm" : "spicy",
+        yes: yes.length,
+        no: answers.length - yes.length,
+        of: answers.length,
+        missing: 0,
+        ...(warm ? {} : { attributed: yes.map((a) => ({ alias: name(a.who) })) }),
+        ...(notes.length > 0 ? { notes } : {}),
+      },
     };
   }
   const items = (spec?.botAnswers ?? []).map((b) => ({
@@ -1050,6 +1073,8 @@ function describe(value: ResponseValue, name: (id: PlayerId) => string): string 
       return `${value.score} taps`;
     case "dare":
       return value.status === "passed" ? `passed — “${value.reason}”` : "did it";
+    case "confess":
+      return value.yes ? "said yes" : "said no";
     default:
       return "";
   }

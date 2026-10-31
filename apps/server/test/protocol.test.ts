@@ -23,7 +23,7 @@ function event<T>(client: Client, name: string, predicate: (payload: T) => boole
 }
 async function setup(t: TestContext, options: ServerOptions = {}) {
   const dir = mkdtempSync(join(tmpdir(), "reveal-protocol-"));
-  const server = createGameServer({ revealMode: "round", dataDir: dir, ...options });
+  const server = createGameServer({ revealMode: "round", dataDir: dir, revealHoldMs: 5, interludeHoldMs: 5, ...options });
   const port = await server.listen(0, "127.0.0.1", false), clients: Client[] = [], base = `http://127.0.0.1:${port}`;
   t.after(async () => { clients.forEach((c) => c.disconnect()); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const connect = async (): Promise<Client> => {
@@ -40,7 +40,7 @@ const submit = (client: Client, roundId: string, value: ResponseValue, clientUui
 const expectError = async (client: Client, action: () => void, code: string): Promise<void> => { const promise = event<{code:string}>(client, "error"); action(); assert.equal((await limit(promise)).code, code); };
 
 test("validation, host controls, maximum seats, custom prompts and submit idempotency", async (t) => {
-  const { connect, dir } = await setup(t, { botDelayMs: [10000, 10000], roundTimers: { pick: 10000, shout: 10000, minigame: 10000, text: 10000, spotlight: 10000, verdict: 10000 }, verdictDiscussMs: 0, graceMs: 1000, revealHoldMs: 10000, interludeHoldMs: 10000 });
+  const { connect, dir } = await setup(t, { botDelayMs: [10000, 10000], roundTimers: { pick: 10000, shout: 10000, minigame: 10000, text: 10000, spotlight: 10000, verdict: 10000, confess: 400 }, verdictDiscussMs: 0, graceMs: 1000, revealHoldMs: 10000, interludeHoldMs: 10000 });
   const host = await connect(), guest = await connect(), extra = await connect();
   const underage: JoinReply = await new Promise((resolve) => host.emit("create", { alias: "Host", consent: { ...consent, age: false }, profile }, resolve));
   assert.equal(underage.ok, false);
@@ -175,7 +175,7 @@ test("solo dare has one rotating performer; pair dare is shared and records both
 });
 
 test("timer honors grace, skip advances, and reconnect restores the personalized submitted snapshot", async (t) => {
-  const { connect } = await setup(t, { roundTimers: { pick: 90, shout: 5000, spotlight: 90, verdict: 90 }, verdictDiscussMs: 0, graceMs: 90, revealHoldMs: 5000, interludeHoldMs: 5000 });
+  const { connect } = await setup(t, { roundTimers: { pick: 90, shout: 5000, spotlight: 90, verdict: 90, confess: 90 }, verdictDiscussMs: 0, graceMs: 90, revealHoldMs: 5000, interludeHoldMs: 5000 });
   const clients = await Promise.all([connect(), connect(), connect(), connect()]);
   const made = await create(clients[0]!); const replies = [made];
   for (let i = 1; i < clients.length; i++) replies.push(await joinRoom(clients[i]!, made.code!, `Guest${i}`));
@@ -215,7 +215,12 @@ test("timer honors grace, skip advances, and reconnect restores the personalized
   }
   const reclaimedAnswer: ResponseValue = second.kind === "pick" ? { kind: "pick", target: replies[3]!.you! } : { kind: "shout", word: "vibes" };
   assert.equal((await submit(reclaimed, second.roundId, reclaimedAnswer, "reclaimed")).ok, true);
-  assert.ok((await limit(secondReveal)).items?.length, "the second round emitted a reveal after every eligible player answered");
+  const closedSecond = await limit(secondReveal);
+  assert.equal(closedSecond.roundId, second.roundId, "the second round emitted a reveal after every eligible player answered");
+  // R21: pick rounds still close and reveal, but their targets are never
+  // rendered as generic reveal lines. Non-pick rounds keep their visible items.
+  if (second.kind === "pick") assert.deepEqual(closedSecond.items ?? [], [], "pick reveals carry no pick lines");
+  else assert.ok(closedSecond.items?.length, "non-pick reveals keep their visible items");
 });
 
 test("a lost rotation acknowledgement is recoverable only on its authenticated socket", async (t) => {
@@ -299,7 +304,7 @@ test("a nonce-bound lost rotation acknowledgement survives a new socket without 
 });
 
 test("majority heat-down lowers exactly one level; repeated votes do not count twice", async (t) => {
-  const { connect } = await setup(t, { roundTimers: { pick: 10000, shout: 10000, minigame: 10000, spotlight: 10000, verdict: 10000 }, verdictDiscussMs: 0, graceMs: 1000, revealHoldMs: 10000, interludeHoldMs: 10000 });
+  const { connect } = await setup(t, { roundTimers: { pick: 10000, shout: 10000, minigame: 10000, spotlight: 10000, verdict: 10000, confess: 400 }, verdictDiscussMs: 0, graceMs: 1000, revealHoldMs: 10000, interludeHoldMs: 10000 });
   const clients = await Promise.all(Array.from({length:5}, () => connect()));
   const made = await create(clients[0]!);
   for (let i = 1; i < clients.length; i++) assert.ok((await joinRoom(clients[i]!, made.code!, `Guest${i}`)).ok);
@@ -388,12 +393,14 @@ test("finale mode keeps ordinary round answers private and does not wait at read
   const snapshots: RoundView[] = [];
   players[0]!.on("round", r => snapshots.push(r));
   const first = event<RoundView>(players[0]!, "round");
-  const reveal = event<RevealView>(players[0]!, "reveal");
+  let leaked = false; players[0]!.on("reveal", () => { leaked = true; });
+  const next = event<RoundView>(players[0]!, "round", r => r.roundId !== firstId);
+  let firstId = "";
   players[0]!.emit("start");
-  const round = await limit(first);
+  const round = await limit(first); firstId = round.roundId;
   for (let i = 0; i < players.length; i++) assert.equal((await submit(players[i]!, round.roundId, { kind: "pick", target: ids[(i+1)%4]! }, `x${i}`)).ok, true);
-  const result = await limit(reveal, 2000);
-  assert.ok(!result.items?.length);
+  await limit(next, 2000);
+  assert.equal(leaked, false);
   assert.ok(snapshots.every(r => !r.submitted?.length), "submitted identities must be hidden");
 });
 
@@ -404,9 +411,10 @@ test("finale mode waits for the last answer and closes immediately after it", as
   for (let i = 1; i < 4; i++) ids.push((await joinRoom(clients[i]!, made.code!, `Slow${i}`)).you!);
   let revealed = false;
   const first = event<RoundView>(clients[0]!, "round");
-  const done = event<RevealView>(clients[0]!, "reveal");
+  let roundId = "";
+  const done = event<RoundView>(clients[0]!, "round", r => r.roundId !== roundId);
   clients[0]!.on("reveal", () => { revealed = true; });
-  clients[0]!.emit("start"); const round = await limit(first);
+  clients[0]!.emit("start"); const round = await limit(first); roundId = round.roundId;
   for (let i = 0; i < 3; i++) assert.ok((await submit(clients[i]!, round.roundId, { kind: "pick", target: ids[(i + 1) % 4]! }, `early-${i}`)).ok);
   await wait(200); assert.equal(revealed, false, "a still-answering connected player is never cut short");
   const started = Date.now();
@@ -421,9 +429,11 @@ test("default server mode keeps mid-game answers for the finale", async (t) => {
   const { connect } = await setup(t, { revealMode: undefined, botDelayMs: [1, 2], revealHoldMs: 10 });
   const host = await connect(); const made = await create(host);
   for (let i = 0; i < 3; i++) host.emit("add_bot");
-  const round = event<RoundView>(host, "round"); const reveal = event<RevealView>(host, "reveal");
-  host.emit("start"); const current = await limit(round);
+  const round = event<RoundView>(host, "round"); let roundId = "";
+  const next = event<RoundView>(host, "round", r => r.roundId !== roundId);
+  let leaked = false; host.on("reveal", () => { leaked = true; });
+  host.emit("start"); const current = await limit(round); roundId = current.roundId;
   assert.ok((await submit(host, current.roundId, { kind: "pick", target: made.you! })).ok);
-  const view = await limit(reveal);
-  assert.equal(view.items, undefined);
+  await limit(next);
+  assert.equal(leaked, false);
 });

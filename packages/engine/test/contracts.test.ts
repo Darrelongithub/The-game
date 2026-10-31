@@ -9,13 +9,21 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
   ANTI_TELEGRAPH_MAX,
+  CONFESS_NOTE_MAX,
+  DEFAULT_WEIGHTS,
   HYPOTHESIS_FORM_BAND,
   ROUND_MIX,
+  ROUND_TIMERS_MS,
+  STYLE_MIX,
   type AccountInfo,
   type Hypothesis,
   type HypothesisKind,
   type HypothesisStatus,
+  type PairSignal,
+  type PromptStyle,
+  type RoundKind,
 } from "../../shared/src/contracts.ts";
+import { isResponseValue, validSubmit } from "../../shared/src/validate.ts";
 
 const REPO = new URL("../../../", import.meta.url).pathname;
 
@@ -99,4 +107,46 @@ test("the client-facing socket contract never mentions hypotheses", () => {
   // mistake it for something a client may render.
   const internal = contracts.slice(contracts.indexOf("INTERNAL: Director hypotheses"), contracts.indexOf("INTERNAL: accounts"));
   assert.match(internal, /NEVER serialized to any client/u);
+});
+
+// ---------------------------------------------------------------------------
+// CONFESS ROUNDS — STEP 1 contract additions (approved by the repo owner).
+// ---------------------------------------------------------------------------
+
+test("STYLE_MIX is a 50/50 distribution over the two voices", () => {
+  const sum = STYLE_MIX.group + STYLE_MIX.confess;
+  approx(sum, 1, "STYLE_MIX sum");
+  assert.ok(STYLE_MIX.group > 0 && STYLE_MIX.group < 1, "group share must be a real share");
+  assert.ok(STYLE_MIX.confess > 0 && STYLE_MIX.confess < 1, "confess share must be a real share");
+  const styles: PromptStyle[] = ["group", "confess"];
+  assert.deepEqual([...styles].sort(), Object.keys(STYLE_MIX).sort(), "STYLE_MIX must cover exactly the two voices");
+});
+
+test("confess is a full round kind: it has a timer and a 20s window", () => {
+  assert.equal(ROUND_TIMERS_MS.confess, 20_000);
+  assert.ok(ROUND_TIMERS_MS.confess > 0 && ROUND_TIMERS_MS.confess < ROUND_TIMERS_MS.text, "a yes/no is not an essay");
+  const kinds: RoundKind[] = ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare", "debrief", "spotlight", "verdict", "confess"];
+  assert.equal(new Set(kinds).size, 12);
+  for (const kind of kinds) assert.equal(typeof ROUND_TIMERS_MS[kind], "number", `${kind} has no timer`);
+});
+
+test("a confession is a valid private self-report — and has no skip", () => {
+  assert.ok(isResponseValue({ kind: "confess", yes: true }));
+  assert.ok(isResponseValue({ kind: "confess", yes: false }));
+  assert.ok(isResponseValue({ kind: "confess", yes: true, target: "p2" }));
+  assert.ok(isResponseValue({ kind: "confess", yes: true, note: "it was years ago" }));
+  assert.ok(!isResponseValue({ kind: "confess" }), "yes/no is required");
+  assert.ok(!isResponseValue({ kind: "confess", yes: "yes" }), "yes must be a boolean");
+  assert.ok(!isResponseValue({ kind: "confess", yes: true, note: "x".repeat(CONFESS_NOTE_MAX + 1) }), "note is one line, not an essay");
+  assert.ok(!validSubmit({ kind: "confess", yes: true, target: "p1" }, "p1"), "a confession cannot name yourself");
+  assert.ok(validSubmit({ kind: "confess", yes: true, target: "p2" }, "p1"));
+  // No skip variant exists anywhere in the union.
+  assert.ok(!isResponseValue({ kind: "confess", skipped: true }));
+});
+
+test("the pair machinery has a confession component that is evidence-only", () => {
+  const components: PairSignal["componentsUsed"] = ["pickOverlap", "confession"];
+  assert.deepEqual(components, ["pickOverlap", "confession"]);
+  // Weight 0 in the pair formula: the frozen spec §5 weights still sum to 1.
+  approx(Object.values(DEFAULT_WEIGHTS).reduce((a, b) => a + b, 0), 1, "DEFAULT_WEIGHTS sum");
 });

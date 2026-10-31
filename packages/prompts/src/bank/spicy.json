@@ -8,7 +8,8 @@
       "social awareness"
     ],
     "coding": "status",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "s2",
@@ -19,7 +20,9 @@
       "flirt-pattern signal"
     ],
     "coding": "tease",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group",
+    "twinId": "sc5"
   },
   {
     "id": "s3",
@@ -30,7 +33,9 @@
       "past-meets-present tags"
     ],
     "coding": "friction",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group",
+    "twinId": "sc10"
   },
   {
     "id": "s4",
@@ -43,7 +48,8 @@
       "blind-spot fuel"
     ],
     "coding": "neutral",
-    "asksTarget": false
+    "asksTarget": false,
+    "style": "group"
   },
   {
     "id": "s5",
@@ -54,7 +60,9 @@
       "couple-coding seed"
     ],
     "coding": "couple",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group",
+    "twinId": "sc3"
   },
   {
     "id": "s6",
@@ -65,7 +73,8 @@
       "first-impression tags"
     ],
     "coding": "friction",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "s7",
@@ -76,7 +85,8 @@
       "rivalry seed"
     ],
     "coding": "rivalry",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "s8",
@@ -87,7 +97,8 @@
       "closeness map"
     ],
     "coding": "friendship",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "s9",
@@ -98,7 +109,8 @@
       "rizz ranking"
     ],
     "coding": "status",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "s10",
@@ -109,7 +121,8 @@
       "harmless-confession tags"
     ],
     "coding": "friction",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "s11",
@@ -121,7 +134,8 @@
       "friction tags"
     ],
     "coding": "status",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "s12",
@@ -134,7 +148,8 @@
       "trait agreement"
     ],
     "coding": "status",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "s13",
@@ -146,7 +161,8 @@
       "status reads"
     ],
     "coding": "friction",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "s14",
@@ -158,7 +174,8 @@
       "criticism tags"
     ],
     "coding": "friction",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "s15",
@@ -170,6 +187,141 @@
       "peer warmth read"
     ],
     "coding": "friendship",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
+  },
+  {
+    "id": "sc1",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever sent a nude to someone in this room?",
+    "measures": [
+      "self-report",
+      "sexual history signal"
+    ],
+    "coding": "couple",
+    "asksTarget": true,
+    "style": "confess"
+  },
+  {
+    "id": "sc2",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever fantasized about someone else in this room?",
+    "measures": [
+      "self-report",
+      "desire signal"
+    ],
+    "coding": "couple",
+    "asksTarget": true,
+    "style": "confess",
+    "twinId": "u1"
+  },
+  {
+    "id": "sc3",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever hooked up with someone from this friend group?",
+    "measures": [
+      "self-report",
+      "hookup signal"
+    ],
+    "coding": "couple",
+    "asksTarget": true,
+    "style": "confess",
+    "twinId": "s5"
+  },
+  {
+    "id": "sc4",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever kissed someone in this room and told nobody?",
+    "measures": [
+      "self-report",
+      "secret-kiss signal"
+    ],
+    "coding": "couple",
+    "asksTarget": true,
+    "style": "confess"
+  },
+  {
+    "id": "sc5",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever flirted with someone here to get something you wanted?",
+    "measures": [
+      "self-report",
+      "flirt-pattern signal"
+    ],
+    "coding": "tease",
+    "asksTarget": true,
+    "style": "confess",
+    "twinId": "s2"
+  },
+  {
+    "id": "sc6",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever been turned on by someone in this room mid-argument?",
+    "measures": [
+      "self-report",
+      "tension signal"
+    ],
+    "coding": "couple",
+    "asksTarget": true,
+    "style": "confess"
+  },
+  {
+    "id": "sc7",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever checked someone here's location without telling them?",
+    "measures": [
+      "self-report",
+      "trust signal"
+    ],
+    "coding": "trust",
+    "asksTarget": true,
+    "style": "confess"
+  },
+  {
+    "id": "sc8",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever had a dream about someone here you can't unsee?",
+    "measures": [
+      "self-report",
+      "desire signal"
+    ],
+    "coding": "couple",
+    "asksTarget": true,
+    "style": "confess"
+  },
+  {
+    "id": "sc9",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever typed a message to someone here and deleted it before sending?",
+    "measures": [
+      "self-report",
+      "hesitation signal"
+    ],
+    "coding": "tease",
+    "asksTarget": true,
+    "style": "confess"
+  },
+  {
+    "id": "sc10",
+    "phase": "spicy",
+    "kind": "confess",
+    "text": "Have you ever judged someone here before you actually met them?",
+    "measures": [
+      "self-report",
+      "first-impression signal"
+    ],
+    "coding": "status",
+    "asksTarget": true,
+    "style": "confess",
+    "twinId": "s3"
   }
 ]

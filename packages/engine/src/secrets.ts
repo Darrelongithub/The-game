@@ -48,8 +48,11 @@ export function buildSecrets(
   };
 
   // ---------- spark: one card for EACH of the two (both must be revealOptIn) ----------
+  // R27: only a high-confidence spark claim may become an announcement. The
+  // engine already requires >=3 independent measured supports (R18); this is
+  // the card-side guard so a downgraded/legacy claim can never leak a spark.
   for (const claim of results.claims) {
-    if (claim.confidence === "low" || claim.type !== "spark" || claim.subjects.length !== 2) continue;
+    if (claim.type !== "spark" || claim.confidence !== "high" || claim.subjects.length !== 2) continue;
     const [x, y] = claim.subjects as [PlayerId, PlayerId];
     if (!optIn.has(x) || !optIn.has(y)) continue;
     for (const [holder, other] of [[x, y], [y, x]] as [PlayerId, PlayerId][]) {

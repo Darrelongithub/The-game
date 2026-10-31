@@ -8,7 +8,9 @@
       "directed desire signal"
     ],
     "coding": "couple",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group",
+    "twinId": "sc2"
   },
   {
     "id": "u2",
@@ -21,7 +23,8 @@
       "blind spot"
     ],
     "coding": "friction",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u3",
@@ -32,7 +35,8 @@
       "couple-coding seed"
     ],
     "coding": "couple",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u4",
@@ -45,7 +49,8 @@
       "one-sided fuel"
     ],
     "coding": "couple",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u5",
@@ -57,7 +62,8 @@
       "named target"
     ],
     "coding": "friction",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u6",
@@ -69,7 +75,8 @@
       "threat consensus"
     ],
     "coding": "rivalry",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u7",
@@ -80,7 +87,8 @@
       "closeness map under spicy pressure"
     ],
     "coding": "couple",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u8",
@@ -92,7 +100,8 @@
       "consensus"
     ],
     "coding": "tease",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u9",
@@ -104,7 +113,8 @@
       "directed perception"
     ],
     "coding": "friction",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u10",
@@ -116,7 +126,8 @@
       "high signal"
     ],
     "coding": "couple",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u11",
@@ -128,7 +139,8 @@
       "dyadic friction"
     ],
     "coding": "friction",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u12",
@@ -140,7 +152,8 @@
       "closeness"
     ],
     "coding": "trust",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u13",
@@ -151,7 +164,8 @@
       "confidant map"
     ],
     "coding": "trust",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u14",
@@ -163,7 +177,8 @@
       "room-referenced"
     ],
     "coding": "trust",
-    "asksTarget": false
+    "asksTarget": false,
+    "style": "group"
   },
   {
     "id": "u15",
@@ -176,7 +191,8 @@
       "finale-visible"
     ],
     "coding": "friction",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u16",
@@ -188,7 +204,8 @@
       "flirt-pattern"
     ],
     "coding": "tease",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u17",
@@ -199,7 +216,8 @@
       "closeness under pressure"
     ],
     "coding": "couple",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u18",
@@ -211,7 +229,8 @@
       "quote material"
     ],
     "coding": "couple",
-    "asksTarget": true
+    "asksTarget": true,
+    "style": "group"
   },
   {
     "id": "u19",
