@@ -12,6 +12,9 @@ import {
     STYLE_MIX, CONFESS_NOTE_MAX, TWIN_WINDOW, type PromptStyle,
 } from "../packages/shared/src/contracts.ts";
 
+import { phaseSlots } from "../apps/server/src/schedule.ts";
+import { liveKindInPhase } from "../packages/prompts/src/bank/live/index.ts";
+
 let pass = 0, fail = 0;
 const ok = (name: string, cond: boolean) => { if (cond) pass++; else { fail++; console.error("  ✗ " + name); } };
 
@@ -53,12 +56,12 @@ ok("unknown kind rejected", !isResponseValue({ kind: "smooch", target: "p2" }));
 ok("null/garbage rejected", !isResponseValue(null) && !isResponseValue("yes") && !isResponseValue({}));
 
 // targeting rules (the self-pick bug class)
-ok("self-pick rejected", !targetsOther({ kind: "pick", target: "p1" }, "p1"));
+ok("self-pick accepted", targetsOther({ kind: "pick", target: "p1" }, "p1"));
 ok("other-pick ok", targetsOther({ kind: "pick", target: "p2" }, "p1"));
 ok("peer-rating yourself rejected", !targetsOther({ kind: "rating", trait: "loyalty", about: "p1", value: 5 }, "p1"));
 ok("self-rating via about:'self' ok", targetsOther({ kind: "rating", trait: "loyalty", about: "self", value: 5 }, "p1"));
 ok("ios about yourself rejected", !targetsOther({ kind: "ios", about: "p1", value: 3 }, "p1"));
-ok("validSubmit combo", validSubmit({ kind: "pick", target: "p2" }, "p1") && !validSubmit({ kind: "pick", target: "p1" }, "p1"));
+ok("validSubmit combo", validSubmit({ kind: "pick", target: "p2" }, "p1") && validSubmit({ kind: "pick", target: "p1" }, "p1"));
 
 // contracts invariants
 const kinds: RoundKind[] = ["pick", "text", "shout", "rating", "ios", "minigame", "dare", "pair_dare", "debrief", "spotlight", "verdict", "confess"];
@@ -70,6 +73,11 @@ ok("6 traits defined", TRAITS.length === 6);
 ok("4 heat phases in order", HEAT_ORDER.length === 4 && HEAT_ORDER[0] === "warmup" && HEAT_ORDER[3] === "dare");
 ok("secret deck config sane", SECRET_DECK_MAX >= 3 && SECRET_DECK_MAX <= 8 && SECRET_HOLD_MS >= 200 && SECRET_HOLD_MS <= 1000);
 ok("provider call cap sane", MAX_PROVIDER_CALLS_PER_NIGHT >= 5 && MAX_PROVIDER_CALLS_PER_NIGHT <= 12);
+
+ok("dare floor in each post-warmup phase", (["spicy", "deep", "dare"] as const).every(p => phaseSlots(p).some(k => k === "dare" || k === "pair_dare")));
+const warmupLive = (["spotlight", "verdict"] as const).filter(k => liveKindInPhase(k, "warmup")).length;
+ok("spicy starts by round 8", phaseSlots("warmup").length + warmupLive + 1 <= 8);
+ok("short timer ceilings", ROUND_TIMERS_MS.pick === 25_000 && ROUND_TIMERS_MS.shout === 25_000 && ROUND_TIMERS_MS.rating === 25_000 && ROUND_TIMERS_MS.text === 60_000);
 
 // ROUND 4 — the Director's tunables must stay tunable, never broken.
 ok("hypothesis band has lo < hi (mid-band, both inside 0..1)",

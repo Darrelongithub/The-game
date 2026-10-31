@@ -24,7 +24,7 @@ async function setup(t: TestContext, fakeFetch: typeof fetch, services?: GameSer
   process.env.XAI_API_KEY = "synthetic-xai-key"; process.env.GEMINI_API_KEY = "synthetic-gemini-key";
   globalThis.fetch = fakeFetch;
   const dir = mkdtempSync(join(tmpdir(), "reveal-provider-test-"));
-  const server = createGameServer({ dataDir: dir, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, graceMs: 0,
+  const server = createGameServer({ revealMode: "round", dataDir: dir, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, graceMs: 0,
     roundTimers: { spotlight: 300, verdict: 300, confess: 300 }, verdictDiscussMs: 0, services });
   const port = await server.listen(0, "127.0.0.1", false);
   const clients: Client[] = [];

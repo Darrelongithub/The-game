@@ -140,7 +140,7 @@ async function playNight(t: TestContext, options: NightOptions): Promise<NightRe
     verdictDiscussMs: 0, graceMs: 150, revealHoldMs: 5, interludeHoldMs: 5, botDelayMs: [5, 10],
     audit: { persisted: () => {}, decks: () => {}, directed: (_code, round) => directed.push(round) },
   };
-  const server = createGameServer(serverOptions);
+  const server = createGameServer({ revealMode: "round", ...serverOptions });
   const port = await server.listen(0, "127.0.0.1", false);
   const base = `http://127.0.0.1:${port}`;
   const sockets: Client[] = [];

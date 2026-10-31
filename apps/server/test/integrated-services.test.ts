@@ -91,7 +91,7 @@ test("mock Grok lobby work is nonblocking, per-room budgeted, and falls back on 
 test("integrated no-key server completes a game on the injectable adapter", { timeout: 12000 }, async t => {
   const dataDir = mkdtempSync(join(tmpdir(), "reveal-integrated-"));
   const services = offline();
-  const server = createGameServer({ dataDir, services, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, graceMs: 0, verdictDiscussMs: 0, roundTimers: { spotlight: 300, verdict: 300, confess: 300 } });
+  const server = createGameServer({ revealMode: "round", dataDir, services, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, graceMs: 0, verdictDiscussMs: 0, roundTimers: { spotlight: 300, verdict: 300, confess: 300 } });
   const port = await server.listen(0, "127.0.0.1", false);
   const socket = io(`http://127.0.0.1:${port}`, { reconnection: false });
   socket.on("state", (view) => { if (view.ready) socket.emit("ready"); });
@@ -129,7 +129,7 @@ test("integrated no-key server completes a game on the injectable adapter", { ti
   assert.ok(result.slides.length > 5);
   // 21 group rounds + 6 CONFESS rounds (two per heat phase) + one twin
   // inserted by the director + live moments.
-  assert.equal(allRounds.size, 31, "the host observes every question, live moment and spectator-only pair/debrief");
+  assert.equal(allRounds.size, 32, "the host observes every question, live moment and spectator-only pair/debrief");
   const expected = [...allRounds.values()].filter((round) => round.expectsAnswer !== false && (!round.onlyPlayers || round.onlyPlayers.includes(created.you))).length;
   assert.ok(expected >= 17, "the host participates in every unrestricted round except an idle cover");
   assert.equal(seen.size, expected, "the host answered every round they could participate in");

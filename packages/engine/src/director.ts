@@ -177,7 +177,8 @@ export interface PlanInput {
   meta?: RoomMeta;
 }
 
-const placeholders = (text: string): number => (text.match(/\{P(?:1[01]|[1-9])\}/gu) ?? []).length;
+const namesSubjects = (text: string, count: number): boolean =>
+  Array.from({ length: Math.min(2, count) }, (_, i) => `{P${i + 1}}`).every((slot) => text.includes(slot));
 /** Only OPEN (mid-band) suspicions are worth probing: "supported" is already
  *  strong enough that asking again would telegraph the interest. */
 const probeable = (h: Hypothesis): boolean => h.status === "open";
@@ -216,7 +217,7 @@ function testChoice(input: PlanInput, pool: Prompt[]) {
     // A targeted prompt must read as organic: an ordinary prompt that happens
     // to be about these people. Never a prompt that only makes sense because
     // the game suspects something.
-    const matching = pool.filter((p) => p.coding === dimension && placeholders(p.text) > 0);
+    const matching = pool.filter((p) => p.coding === dimension && namesSubjects(p.text, hypothesis.subjects.length));
     if (matching.length === 0) continue;
     return { prompt: matching[0]!, subjects: hypothesis.subjects.slice(0, 2), dimension, hypothesisId: hypothesis.id };
   }

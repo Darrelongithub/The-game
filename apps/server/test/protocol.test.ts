@@ -23,7 +23,7 @@ function event<T>(client: Client, name: string, predicate: (payload: T) => boole
 }
 async function setup(t: TestContext, options: ServerOptions = {}) {
   const dir = mkdtempSync(join(tmpdir(), "reveal-protocol-"));
-  const server = createGameServer({ dataDir: dir, ...options });
+  const server = createGameServer({ revealMode: "round", dataDir: dir, revealHoldMs: 5, interludeHoldMs: 5, ...options });
   const port = await server.listen(0, "127.0.0.1", false), clients: Client[] = [], base = `http://127.0.0.1:${port}`;
   t.after(async () => { clients.forEach((c) => c.disconnect()); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const connect = async (): Promise<Client> => {
@@ -70,7 +70,6 @@ test("validation, host controls, maximum seats, custom prompts and submit idempo
   assert.equal((await joinRoom(extra, made.code!, "Extra")).ok, false, "12th player is rejected");
   const firstRound = event<RoundView>(host, "round", (r) => !r.youSubmitted);
   host.emit("start"); const round = await limit(firstRound); assert.equal(round.kind, "pick");
-  assert.equal((await submit(host, round.roundId, { kind: "pick", target: made.you! }, "self")).ok, false);
   assert.equal((await submit(host, round.roundId, { kind: "pick", target: "nonexistent" }, "unknown")).ok, false);
   assert.equal((await submit(host, round.roundId, { kind: "text", text: "wrong kind" }, "wrong")).ok, false);
   const v: ResponseValue = { kind: "pick", target: joined.you! };
@@ -382,4 +381,59 @@ test("an active room cannot be revived on access after the 48-hour hard limit", 
   assert.equal(reply.ok, false, "activity cannot extend the 48-hour retention deadline");
   await limit(deleted);
   assert.deepEqual(readdirSync(dir), []);
+});
+
+test("finale mode keeps ordinary round answers private and does not wait at ready gate", async (t) => {
+  const { connect } = await setup(t, { revealMode: "finale", roundTimers: { pick: 10000 }, readyGraceMs: 10000, revealHoldMs: 10 });
+  const players = await Promise.all(Array.from({ length: 4 }, () => connect()));
+  const made = await create(players[0]!, "Alpha");
+  const ids = [made.you!];
+  for (let i = 1; i < players.length; i++) ids.push((await joinRoom(players[i]!, made.code!, `Guest${i}`)).you!);
+  for (const player of players) player.removeAllListeners("state");
+  const snapshots: RoundView[] = [];
+  players[0]!.on("round", r => snapshots.push(r));
+  const first = event<RoundView>(players[0]!, "round");
+  let leaked = false; players[0]!.on("reveal", () => { leaked = true; });
+  const next = event<RoundView>(players[0]!, "round", r => r.roundId !== firstId);
+  let firstId = "";
+  players[0]!.emit("start");
+  const round = await limit(first); firstId = round.roundId;
+  for (let i = 0; i < players.length; i++) assert.equal((await submit(players[i]!, round.roundId, { kind: "pick", target: ids[(i+1)%4]! }, `x${i}`)).ok, true);
+  await limit(next, 2000);
+  assert.equal(leaked, false);
+  assert.ok(snapshots.every(r => !r.submitted?.length), "submitted identities must be hidden");
+});
+
+test("finale mode waits for the last answer and closes immediately after it", async (t) => {
+  const { connect } = await setup(t, { revealMode: "finale", roundTimers: { pick: 3000 }, revealHoldMs: 10 });
+  const clients = await Promise.all(Array.from({ length: 4 }, () => connect()));
+  const made = await create(clients[0]!); const ids = [made.you!];
+  for (let i = 1; i < 4; i++) ids.push((await joinRoom(clients[i]!, made.code!, `Slow${i}`)).you!);
+  let revealed = false;
+  const first = event<RoundView>(clients[0]!, "round");
+  let roundId = "";
+  const done = event<RoundView>(clients[0]!, "round", r => r.roundId !== roundId);
+  clients[0]!.on("reveal", () => { revealed = true; });
+  clients[0]!.emit("start"); const round = await limit(first); roundId = round.roundId;
+  for (let i = 0; i < 3; i++) assert.ok((await submit(clients[i]!, round.roundId, { kind: "pick", target: ids[(i + 1) % 4]! }, `early-${i}`)).ok);
+  await wait(200); assert.equal(revealed, false, "a still-answering connected player is never cut short");
+  const started = Date.now();
+  assert.ok((await submit(clients[3]!, round.roundId, { kind: "pick", target: ids[0]! }, "last")).ok);
+  await limit(done, 2000);
+  assert.ok(Date.now() - started < 2000, "last answer closes round within two seconds");
+});
+
+test("default server mode keeps mid-game answers for the finale", async (t) => {
+  const prior = process.env.REVEAL_MODE; delete process.env.REVEAL_MODE;
+  t.after(() => { if (prior !== undefined) process.env.REVEAL_MODE = prior; });
+  const { connect } = await setup(t, { revealMode: undefined, botDelayMs: [1, 2], revealHoldMs: 10 });
+  const host = await connect(); const made = await create(host);
+  for (let i = 0; i < 3; i++) host.emit("add_bot");
+  const round = event<RoundView>(host, "round"); let roundId = "";
+  const next = event<RoundView>(host, "round", r => r.roundId !== roundId);
+  let leaked = false; host.on("reveal", () => { leaked = true; });
+  host.emit("start"); const current = await limit(round); roundId = current.roundId;
+  assert.ok((await submit(host, current.roundId, { kind: "pick", target: made.you! })).ok);
+  await limit(next);
+  assert.equal(leaked, false);
 });

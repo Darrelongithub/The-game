@@ -136,7 +136,7 @@ export interface PickRec {
 export const getPicks = (log: readonly LogRecord[]): PickRec[] => {
   const out: PickRec[] = [];
   for (const rec of log) {
-    if (rec.value.kind === "pick") {
+    if (rec.value.kind === "pick" && rec.value.target !== rec.playerId) {
       out.push({ roundId: rec.roundId, picker: rec.playerId, target: rec.value.target, coding: rec.coding, rec });
     }
   }

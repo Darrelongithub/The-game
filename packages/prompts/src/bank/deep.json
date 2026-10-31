@@ -29,7 +29,7 @@
     "id": "d3",
     "phase": "deep",
     "kind": "rating",
-    "text": "How honest have you been tonight? 1\u201310.",
+    "text": "How honest has {P2} been with this group tonight, from 1 to 10?",
     "measures": [
       "trait:honesty",
       "honesty self-check",
@@ -55,7 +55,7 @@
     "id": "d5",
     "phase": "deep",
     "kind": "pick",
-    "text": "Who here has changed the most since you met them? Point.",
+    "text": "Between {P1} and {P2}, who has changed more since you met them?",
     "measures": [
       "growth witness"
     ],
@@ -67,7 +67,7 @@
     "id": "d6",
     "phase": "deep",
     "kind": "text",
-    "text": "A fear you've never said out loud in this group.",
+    "text": "What fear have you never said out loud to this group?",
     "measures": [
       "fear reveal",
       "vulnerability"

@@ -31,7 +31,7 @@ test("generated prompts take non-pick slots before bank while host prompts stay 
 
 test("same-origin HTTP static export and preview-proxy Socket.IO origins", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "reveal-http-")), web = join(dir, "web"), data = join(dir, "data");
-  const server = createGameServer({ dataDir: data, webDir: web });
+  const server = createGameServer({ revealMode: "round", dataDir: data, webDir: web });
   const port = await server.listen(0, "127.0.0.1", false), base = `http://127.0.0.1:${port}`;
   t.after(async () => { await server.close(); rmSync(dir, { recursive: true, force: true }); });
   let response = await fetch(`${base}/`); assert.equal(response.status, 200); assert.match(await response.text(), /web app has not been built/i);
@@ -63,7 +63,7 @@ test("LAN banner includes every non-loopback IPv4 URL and a QR code", () => {
 
 test("display-role sockets get only public stage and finale events", { timeout: 12000 }, async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "reveal-display-"));
-  const server = createGameServer({ dataDir: dir, botDelayMs: [1, 2], revealHoldMs: 1, interludeHoldMs: 1, roundTimers: { pick: 1000, text: 1000, shout: 1000, rating: 1000, ios: 1000, minigame: 1000, dare: 1000, pair_dare: 1000, debrief: 1000 }, graceMs: 10 });
+  const server = createGameServer({ revealMode: "round", dataDir: dir, botDelayMs: [1, 2], revealHoldMs: 1, interludeHoldMs: 1, roundTimers: { pick: 1000, text: 1000, shout: 1000, rating: 1000, ios: 1000, minigame: 1000, dare: 1000, pair_dare: 1000, debrief: 1000 }, graceMs: 10 });
   const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port), display = await socketFor(port);
   t.after(async () => { host.disconnect(); display.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const profile = { age: 30, relationship: "single" as const, partnersToDate: 1, longestMonths: 6, crushingHere: false, tonight: "vibes" as const };
@@ -100,7 +100,7 @@ test("persisted JSONL replays to the same results after two server restarts", { 
     },
   };
   const profile = { age: 29, relationship: "single" as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" as const };
-  let server = createGameServer({ dataDir: dir, services, roundTimers: { pick: 10000 }, graceMs: 1000 });
+  let server = createGameServer({ revealMode: "round", dataDir: dir, services, roundTimers: { pick: 10000 }, graceMs: 1000 });
   let port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
   const guests: Client[] = [];
   t.after(async () => { host.disconnect(); guests.forEach(c => c.disconnect()); await server.close(); rmSync(dir, { recursive: true, force: true }); });
@@ -124,7 +124,7 @@ test("persisted JSONL replays to the same results after two server restarts", { 
     const timer = setTimeout(() => { throw new Error("room replay timed out"); }, 6000);
     try { while (outcomes.length < count) await ready; } finally { clearTimeout(timer); }
   };
-  server = createGameServer({ dataDir: dir, services });
+  server = createGameServer({ revealMode: "round", dataDir: dir, services });
   await waitForReplay(1);
   port = await server.listen(0, "127.0.0.1", false);
   const resumed = await socketFor(port), finale = event(resumed, "finale");
@@ -135,14 +135,14 @@ test("persisted JSONL replays to the same results after two server restarts", { 
   await server.close(); resumed.disconnect();
 
   ready = new Promise<void>(resolve => { notify = resolve; });
-  server = createGameServer({ dataDir: dir, services });
+  server = createGameServer({ revealMode: "round", dataDir: dir, services });
   await waitForReplay(2);
   assert.deepEqual(outcomes[1], outcomes[0], "same persisted JSONL yields deeply equal Results after restart");
   await server.close();
 });
 
 test("three built-in bots answer on the production 600–3500ms delay", { timeout: 7000 }, async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "reveal-bots-delay-")), server = createGameServer({ dataDir: dir });
+  const dir = mkdtempSync(join(tmpdir(), "reveal-bots-delay-")), server = createGameServer({ revealMode: "round", dataDir: dir });
   const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
   t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" } }, resolve));
@@ -173,7 +173,7 @@ test("one host and three in-server bots can finish the entire game without API k
     }),
     writeFinale() { writerStarted = true; return new Promise(() => {}); },
   };
-  const server = createGameServer({ dataDir: dir, services, writerTimeoutMs: 20, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, verdictDiscussMs: 0, roundTimers: { spotlight: 300, verdict: 300, confess: 300 } });
+  const server = createGameServer({ revealMode: "round", dataDir: dir, services, writerTimeoutMs: 20, botDelayMs: [2, 5], revealHoldMs: 2, interludeHoldMs: 2, verdictDiscussMs: 0, roundTimers: { spotlight: 300, verdict: 300, confess: 300 } });
   const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
   t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" } }, resolve));
@@ -218,7 +218,7 @@ test("delete during pending narration purges data and suppresses late finale/sec
       return new Promise((resolve) => { releaseWriter = () => resolve({ slides, decks }); });
     },
   };
-  const server = createGameServer({ dataDir: dir, services, writerTimeoutMs: 5000, botDelayMs: [10000, 10000], revealHoldMs: 10000, interludeHoldMs: 10000 });
+  const server = createGameServer({ revealMode: "round", dataDir: dir, services, writerTimeoutMs: 5000, botDelayMs: [10000, 10000], revealHoldMs: 10000, interludeHoldMs: 10000 });
   const port = await server.listen(0, "127.0.0.1", false), host = await socketFor(port);
   t.after(async () => { host.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   const made = await new Promise<any>((resolve) => host.emit("create", { alias: "Host", consent: { age: true, terms: true, revealOptIn: true }, profile: { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" } }, resolve));

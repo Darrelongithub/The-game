@@ -100,7 +100,7 @@ the impersonation metadata) ever reaches a client.
 
 ## Reveals wait for everyone
 
-Every round's reveal is **pending** until each connected player taps **I'm
+In explicit `REVEAL_MODE=round`, every round's reveal is **pending** until each connected player taps **I'm
 ready** — a phone in a pocket or a reconnecting tab never misses the moment.
 The room shows who is still looking up; after `REVEAL_READY_GRACE_MS` (20s) the
 reveal fires anyway so one AFK phone cannot stall the night. The host's **Skip
@@ -108,14 +108,12 @@ round** releases a pending reveal immediately.
 
 ## Reveal mode: every round, or the whole night at the end
 
-`REVEAL_MODE` (optional, default **off**) chooses how the night's reveals land.
+`REVEAL_MODE` (optional, default **finale**) chooses how the night's reveals land.
 
-- `round` (default, and what an unset or misspelt value means): today's game —
+- `round` (explicit opt-in):
   every round closes into its own reveal behind the ready gate. Nothing changes.
 - `finale`: per-round reveals are **suppressed and queued**. Nothing is shown on
-  the phones or the display between rounds; the night advances on the ready
-  gate's grace timer exactly as if the reveal had played (the gate is bypassed
-  mid-game only). At the finale the server hands the whole night's reel, in
+  the phones or the display between rounds; the night advances without the mid-game ready gate after a short transition. At the finale the server hands the whole night's reel, in
   round order, to the **public display** as one `reveal` event per round,
   immediately before the `finale` event. Phones never receive the queue, and the
   phone finale is identical to a `round` night.
@@ -316,3 +314,10 @@ broadcast recipients. The joker weight, negative nomination count and victim tox
 must be actual engine results, not assumptions. At least one negative nomination
 is required to exercise the guard. Without this oracle the test deliberately fails rather than
 claiming to have proved privacy or idempotence.
+
+## Tuning the night
+
+- `ROUND_TIMERS_MS`, `GRACE_MS` and `INTERLUDE_HOLD_MS` in `packages/shared/src/contracts.ts` control the ceilings and interlude. All required connected players answering closes a round immediately; ordinary finale-mode transitions hold for 2s. Dares and the verdict debate keep their longer timers. There is no separate confess kind.
+- `apps/server/src/schedule.ts` defines phase slots and the spicy/deep dare floor; `DARE_ROUNDS` in shared contracts sets the separate dare-phase solo count. Live moments are scheduled in `apps/server/src/game.ts`.
+- `packages/prompts/src/bank/spicy.json` and `unhinged.json` contain heat; `SPICY_TIER=false` removes the unhinged tier. The server's phase order starts spicy after warmup. Generated prompt drops are logged by phase, candidate index and reason, never prompt text.
+- By default, production holds ordinary attributed answers for the finale. Setting `REVEAL_MODE=round` explicitly enables immediate attributed reveals and disables that privacy guarantee. Spotlight captions remain live theatre. Finale-mode callbacks are limited by `apps/server/src/safe-callback.ts` to verbatim low-information group sentiments submitted identically by at least three distinct players; unique answers, names, IDs and private/debrief or spotlight text remain withheld. This conservative gate can mean no callbacks in a particular night.

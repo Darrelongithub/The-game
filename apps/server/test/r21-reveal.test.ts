@@ -23,7 +23,7 @@ function next<T>(socket: Client, name: "round" | "reveal", predicate: (value: T)
 
 test("R21: scripted picks stay in scoring and digest, but never become reveal lines", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "reveal-r21-"));
-  const server = createGameServer({ dataDir: dir, services: fallbackServices, revealHoldMs: 60_000, interludeHoldMs: 60_000 });
+  const server = createGameServer({ revealMode: "round", dataDir: dir, services: fallbackServices, revealHoldMs: 60_000, interludeHoldMs: 60_000 });
   const port = await server.listen(0, "127.0.0.1", false);
   const clients: Client[] = [];
   t.after(async () => { clients.forEach((client) => client.disconnect()); await server.close(); rmSync(dir, { recursive: true, force: true }); });

@@ -25,7 +25,7 @@ test("production defaults use the full bank and deterministic engine in a comple
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (() => { throw new Error("network access in no-key game"); }) as typeof fetch;
   const dir = mkdtempSync(join(tmpdir(), "reveal-integrated-"));
-  const server = createGameServer({ dataDir: dir, botDelayMs: [2, 5], revealHoldMs: 3, interludeHoldMs: 3, graceMs: 0,
+  const server = createGameServer({ revealMode: "round", dataDir: dir, botDelayMs: [2, 5], revealHoldMs: 3, interludeHoldMs: 3, graceMs: 0,
     roundTimers: { spotlight: 300, verdict: 300, confess: 300 }, verdictDiscussMs: 0 });
   const port = await server.listen(0, "127.0.0.1", false);
   const host: Client = io(`http://127.0.0.1:${port}`, { reconnection: false, autoConnect: false });
@@ -64,11 +64,16 @@ test("production defaults use the full bank and deterministic engine in a comple
   });
   host.emit("start");
   const firstRound = await limit(first);
-  assert.ok(bankForPhase("warmup").some((prompt) => prompt.text === firstRound.promptText), "default server must use the packaged bank, not the standalone f-w1 fallback");
+  assert.ok(bankForPhase("warmup").some((prompt) => {
+    const pattern = prompt.text.split(/\{P\d+\}/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".+?");
+    return new RegExp(`^${pattern}$`, "u").test(firstRound.promptText);
+  }), "default server must use the packaged bank, not the standalone f-w1 fallback");
   const finale = await limit(done);
   const rows: LogRecord[] = readFileSync(join(dir, readdirSync(dir)[0]!), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  const firstSpicy = shown.find(r => r.phase === "spicy");
+  assert.ok(firstSpicy && firstSpicy.index <= 8 && /flirt|kiss|crush|attract|chemistry|desire|tempt|rizz|date|charm/i.test(firstSpicy.promptText), "a genuinely spicy prompt arrives by round eight");
   assert.ok(shown.some((round) => round.phase === "warmup" && round.kind === "text"), "warmup produces a public answer for later callbacks");
-  for (const phase of ["spicy", "deep", "dare"] as const) {
+  for (const phase of ["spicy", "deep"] as const) {
     const callback = shown.find((round) => round.phase === phase && round.promptText.includes("\n\nEarlier, someone said: “"));
     assert.ok(callback, `${phase} recalls an earlier public answer`);
     assert.ok(callback.promptText.length <= 160);
@@ -77,6 +82,7 @@ test("production defaults use the full bank and deterministic engine in a comple
     const publicTexts = rows.flatMap((record) => earlierIds.has(record.roundId) && record.roundKind === "text" && record.value.kind === "text" ? [record.value.text] : []);
     assert.ok(excerpt && publicTexts.some((text) => text.includes(excerpt)), "callback quotes an earlier public answer verbatim");
   }
+  assert.ok(shown.filter((round) => round.phase === "spicy" && round.promptText.includes("\n\nEarlier, someone said: “")).length >= 2, "callbacks recur during spicy rather than once per phase");
   const pickCodings = new Set(rows.filter((r) => r.roundKind === "pick").map((r) => r.coding));
   assert.ok(pickCodings.has("friendship") && pickCodings.has("couple") && (pickCodings.has("friction") || pickCodings.has("rivalry")),
     "a no-key night must be capable of positive, romantic and negative nomination signals");
@@ -100,7 +106,7 @@ test("production defaults use the full bank and deterministic engine in a comple
 
 test("host custom prompts use the complete hard-block guard", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "reveal-custom-"));
-  const server = createGameServer({ dataDir: dir });
+  const server = createGameServer({ revealMode: "round", dataDir: dir });
   const port = await server.listen(0, "127.0.0.1", false);
   const host: Client = io(`http://127.0.0.1:${port}`, { reconnection: false, autoConnect: false });
   host.on("error", () => {});
@@ -116,7 +122,7 @@ test("host custom prompts use the complete hard-block guard", async (t) => {
 
 test("custom prompts cannot silently wrap an out-of-roster placeholder onto another player", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "reveal-placeholder-"));
-  const server = createGameServer({ dataDir: dir, botDelayMs: [10000, 10000] });
+  const server = createGameServer({ revealMode: "round", dataDir: dir, botDelayMs: [10000, 10000] });
   const port = await server.listen(0, "127.0.0.1", false);
   const host: Client = io(`http://127.0.0.1:${port}`, { reconnection: false, autoConnect: false });
   host.on("error", () => {});

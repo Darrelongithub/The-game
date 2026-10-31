@@ -29,11 +29,12 @@ const joinRoom = (s: Client, code: string, alias: string, optIn = true, resume?:
   new Promise((resolve) => s.emit("join", { roomCode: code, alias, consent: { ...consent, revealOptIn: optIn }, profile, ...(resume ? { resume } : {}) }, resolve));
 const ackSubmit = (s: Client, payload: { roundId: string; clientUuid: string; value: ResponseValue }): Promise<{ok: boolean; error?: string}> => new Promise((resolve) => s.emit("submit", payload, resolve));
 
-test("five real sockets complete all rounds; public finale is identical; private decks and reconnect are isolated", { timeout: 15000 }, async (t) => {
+for (const revealMode of ["round", "finale"] as const) test(`five real sockets complete a ${revealMode} night; public finale is identical and private decks isolated`, { timeout: 15000 }, async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "reveal-full-"));
   const captured: string[] = [];
   const services: GameServices = {
     ...fallbackServices,
+    buildNightDigest(log, meta) { const digest = fallbackServices.buildNightDigest(log, meta); return { ...digest, pickTeasers: ["Player 1 picked Player 2"] }; },
     computeSignals(log, meta) { captured.push(JSON.stringify({ log, meta })); return fallbackServices.computeSignals(log, meta); },
     buildSecrets(_results, _digest, _meta) {
       return new Map([
@@ -49,17 +50,28 @@ test("five real sockets complete all rounds; public finale is identical; private
       return { slides: slides.map((slide) => slide.flavor === "quote" || slide.flavor === "dodge" ? { ...slide, title: "Fabricated attribution", body: "A fabricated version." } : slide), decks };
     },
   };
-  const server = createGameServer({ dataDir: dir, services, revealHoldMs: 5, interludeHoldMs: 5, roundTimers: { pick: 1500, shout: 1500, minigame: 1500, rating: 1500, ios: 1500, text: 1500, dare: 1500, pair_dare: 1500, debrief: 1500, spotlight: 1500, verdict: 1500, confess: 400 }, verdictDiscussMs: 0, graceMs: 50 });
+  const server = createGameServer({ dataDir: dir, services, revealMode, revealHoldMs: 5, interludeHoldMs: 5, roundTimers: { pick: 1500, shout: 1500, minigame: 1500, rating: 1500, ios: 1500, text: 1500, dare: 1500, pair_dare: 1500, debrief: 1500, spotlight: 1500, verdict: 1500, confess: 400 }, verdictDiscussMs: 0, graceMs: 50 });
   const port = await server.listen(0, "127.0.0.1", false), base = `http://127.0.0.1:${port}`;
   const clients: Client[] = [];
   t.after(async () => { for (const c of clients) c.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true }); });
   for (let i = 0; i < 5; i++) clients.push(await connected(base));
-  const aliases = ["Alice.*", "Brian", "Chao", "Diana", "Emanuel"];
+  const aliases = revealMode === "finale" ? ["Alice.*", "p2", "Player 4", "A+B", "Emanuel"] : ["Alice.*", "Brian", "Chao", "Diana", "Emanuel"];
   const first = await create(clients[0]!, aliases[0]!); assert.equal(first.ok, true); assert.ok(first.code && first.secret && first.you);
   const replies: JoinReply[] = [first];
   for (let i = 1; i < clients.length; i++) replies.push(await joinRoom(clients[i]!, first.code!, aliases[i]!, i !== 4));
   assert.ok(replies.every((r) => r.ok));
   const ids = replies.map((r) => r.you!);
+  const display = await connected(base); t.after(() => display.disconnect());
+  const frames: unknown[] = [];
+  for (const c of [...clients, display]) {
+    let finaleStarted = false;
+    c.on("state", v => { if (v.phase === "finale") finaleStarted = true; });
+    for (const name of ["state", "round", "reveal", "interlude"] as const) (c as any).on(name, (frame: unknown) => { if (!finaleStarted) frames.push({ name, frame }); });
+  }
+  const displayJoined = await new Promise<any>(resolve => display.emit("display_join", {roomCode: first.code!}, resolve));
+  assert.ok(displayJoined.ok);
+  const scheduled = new Map<string, Set<string>>();
+  let firstSpicy = Infinity;
   const phases = new Set<string>(), kinds = new Set<string>(), reveals: unknown[] = [], interludes: unknown[] = [], errors: string[] = [];
   const decks: SecretDeckView[][] = clients.map(() => []);
   const finals: Promise<FinaleView>[] = [];
@@ -77,6 +89,9 @@ test("five real sockets complete all rounds; public finale is identical; private
     }
     socket.on("round", (round: RoundView) => {
       phases.add(round.phase); kinds.add(round.kind);
+      if (!scheduled.has(round.phase)) scheduled.set(round.phase, new Set());
+      scheduled.get(round.phase)!.add(round.kind);
+      if (round.phase === "spicy") firstSpicy = Math.min(firstSpicy, round.index);
       if (i === 0 && round.kind === "pair_dare") {
         const actual = interactions.get(key(...round.onlyPlayers as [string, string])) ?? 0;
         let min = Infinity;
@@ -100,9 +115,9 @@ test("five real sockets complete all rounds; public finale is identical; private
       const target = ids[i % 2 === 0 && i < 4 ? i + 1 : i % 2 === 1 ? i - 1 : 0]!;
       let value: ResponseValue;
       switch (round.kind) {
-        case "pick": value = { kind: "pick", target }; break;
+        case "pick": value = { kind: "pick", target: i === 0 && round.index === 1 ? myId : target }; break;
         case "shout": value = { kind: "shout", word: i < 3 ? "chaos" : "vibes" }; break;
-        case "text": value = { kind: "text", text: "Alice.* always turns a difficult evening into a funny story." }; break;
+        case "text": value = { kind: "text", text: revealMode === "finale" && i > 0 ? "This group makes every night feel like a celebration." : "Alice.* always turns a difficult evening into a funny story." }; break;
         case "debrief": value = { kind: "text", text: `PRIVATE_DEBRIEF_${i} this must not appear in public.` }; break;
         case "rating": value = { kind: "rating", trait: round.trait!, about: round.about!, value: 7 }; break;
         case "ios": value = { kind: "ios", about: round.about!, value: 5 }; break;
@@ -129,14 +144,34 @@ test("five real sockets complete all rounds; public finale is identical; private
   assert.deepEqual(errors, []);
   assert.ok(pairChecked && duplicateChecked && spectatorChecked && emptyTargetChecked);
   assert.deepEqual([...kinds].sort(), ["dare", "debrief", "ios", "minigame", "pair_dare", "pick", "rating", "shout", "text", "spotlight", "verdict", "confess"].sort());
+  assert.ok(firstSpicy <= 8, `spicy started at round ${firstSpicy}`);
+  for (const phase of ["spicy", "deep", "dare"]) assert.ok(scheduled.get(phase)?.has("dare"), `${phase} needs a dare`);
   assert.deepEqual([...phases].sort(), ["warmup", "spicy", "deep", "dare", "debrief"].sort());
   for (const finale of allFinales) assert.deepEqual(finale, allFinales[0]);
+  assert.ok(allFinales[0]!.slides.some((slide) => slide.body === "Alice.* picked THEMSELVES 💅"));
+  if (revealMode === "round") assert.ok(JSON.stringify(reveals).includes("picked THEMSELVES 💅"));
+  else {
+    assert.ok(frames.some((entry: any) => entry.name === "round" && entry.frame.promptText.includes("Earlier, someone said")), "safe shared answers produce anonymous callbacks");
+    for (const entry of frames as Array<{name: string; frame: any}>) {
+      if (entry.name === "reveal" && entry.frame.kind === "spotlight") continue; // live theatre is exempt
+      const frame = JSON.stringify(entry.frame);
+      assert.ok(!frame.includes("picked THEMSELVES") && !frame.includes("Alice.* always turns") && !frame.includes("Alice.* is watching."), `${entry.name} exposed a private answer`);
+      const r = entry.name === "state" ? entry.frame.round : entry.name === "round" ? entry.frame : null;
+      if (r) {
+        assert.ok(!r.submitted?.length);
+        if (r.promptText.includes("Earlier, someone said")) assert.ok(r.promptText.includes("This group makes every night feel like a celebration."));
+      }
+      if (entry.name === "reveal") { assert.equal(entry.frame.items, undefined); assert.equal(entry.frame.slide, undefined); }
+    }
+  }
   assert.ok(allFinales[0]!.slides.some((slide) => slide.flavor === "quote" && slide.body === "Alice.* always turns a difficult evening into a funny story."));
   assert.ok(allFinales[0]!.slides.some((slide) => slide.flavor === "dodge" && slide.body === "Alice.* is watching."));
   assert.ok(!JSON.stringify(allFinales).includes("fabricated"));
   assert.deepEqual(decks.map((d) => d.length), [1, 0, 1, 0, 0]);
   assert.equal(decks[0]![0]!.cards[0]!.facts[0], "PRIVATE_SECRET_ONE");
   assert.equal(decks[2]![0]!.cards[0]!.facts[0], "PRIVATE_SECRET_THREE");
+  assert.ok(interludes.length > 0);
+  assert.ok(!JSON.stringify(interludes).includes("picked"), "interludes must not publish attributed digest answers");
   assert.ok(!JSON.stringify({ allFinales, reveals, interludes }).includes("PRIVATE_SECRET"));
   assert.ok(!JSON.stringify({ allFinales, reveals, interludes }).includes("PRIVATE_DEBRIEF"));
   assert.ok(captured.length >= 2);
@@ -146,10 +181,12 @@ test("five real sockets complete all rounds; public finale is identical; private
   const rawLog = readFileSync(join(dir, files[0]!), "utf8");
   assert.ok(!rawLog.includes("PRIVATE_SECRET"));
   const records: LogRecord[] = rawLog.trim().split("\n").map((line) => JSON.parse(line));
-  // 68 group question answers + 6 CONFESS rounds × 5 (two per heat phase)
-  // + 4 spotlights × 5 + 3 verdicts × 5
-  assert.equal(records.length, 133);
+  for (let i = 0; i < ids.length; i++) {
+    assert.deepEqual(new Set(records.filter(r => r.playerId === ids[i]).map(r => r.roundId)), answered[i], "each submitted round is persisted exactly once per player");
+    assert.equal(records.filter(r => r.playerId === ids[i]).length, answered[i]!.size);
+  }
   assert.ok(records.every((r) => r.coding && r.latencyMs >= 0));
+  assert.ok(records.some((r) => r.selfSignal === "selfimage" && r.playerId === ids[0]));
   assert.equal(records.filter((r) => r.roundId === records[0]!.roundId && r.playerId === ids[0]).length, 1, "retry persisted exactly once");
   assert.equal(records.filter((r) => r.roundKind === "debrief").length, 4);
   assert.ok(records.some((r) => r.value.kind === "dare" && r.value.status === "passed" && !!r.value.reason));

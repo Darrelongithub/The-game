@@ -109,6 +109,8 @@ export interface LogRecord {
     decoy?: boolean;
     /** Solo dare performer or pair-dare respondent; persisted for accountability. */
     performerId?: PlayerId;
+    /** Self-pick is a self-image signal, never pair evidence. */
+    selfSignal?: "selfimage";
 }
 
 export interface ProfileAnswers { age: number; relationship: "single" | "dating" | "committed" | "married" | "complicated"; partnersToDate: number; longestMonths: number; crushingHere: boolean; tonight: "chaos" | "vibes" | "feelings" | "mission"; }
@@ -482,7 +484,7 @@ export const ROUND_MIX = { test: 0.5, explore: 0.3, classic: 0.2 } as const;
 export const ANTI_TELEGRAPH_MAX = 2;
 
 export const ROUND_TIMERS_MS: Record<RoundKind, number> = {
-    pick: 45_000, text: 90_000, shout: 15_000, rating: 40_000, ios: 40_000,
+    pick: 25_000, text: 60_000, shout: 25_000, rating: 25_000, ios: 40_000,
     minigame: 12_000, dare: 300_000, pair_dare: 330_000, debrief: 60_000,
     // Live moments. Spotlight = 25s of captioning. Verdict = 90s of arguing
     // with phones face-down, then 15s of secret simultaneous picking.
@@ -498,7 +500,7 @@ export const REVEAL_HOLD_MS = 4200;
  *  anyway, so a single AFK phone can never stall the night. */
 export const REVEAL_READY_GRACE_MS = 20_000;
 export const INTERLUDE_HOLD_MS = 3200;
-export const GRACE_MS = 8000;         // extra wait after timer for stragglers
+export const GRACE_MS = 0;            // the displayed timer is the default ceiling
 export const PICK_ROUNDS_PER_PHASE = 2;
 export const SPARK_MIN_MUTUAL = 2;
 export const CONSENSUS_MIN_PICKERS = 4;

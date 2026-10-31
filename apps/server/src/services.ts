@@ -101,7 +101,7 @@ export function computeSignals(allRecords: LogRecord[], meta: RoomMeta): PairSig
   const players = meta.players.map((p) => p.id).sort();
   for (let i = 0; i < players.length; i++) for (let j = i + 1; j < players.length; j++) {
     const a = players[i]!, b = players[j]!;
-    const picks = log.filter((r) => r.value.kind === "pick");
+    const picks = log.filter((r) => r.value.kind === "pick" && r.value.target !== r.playerId);
     const byRound = new Map<string, Map<string, string>>();
     for (const r of picks) if (r.value.kind === "pick") {
       const m = byRound.get(r.roundId) ?? new Map<string, string>(); m.set(r.playerId, r.value.target); byRound.set(r.roundId, m);
@@ -144,7 +144,7 @@ export function computeSignals(allRecords: LogRecord[], meta: RoomMeta): PairSig
     const traitAgreement = average(agreement);
     const componentsUsed: PairSignal["componentsUsed"] = [];
     if (comparable > 0) componentsUsed.push("pickOverlap");
-    if (log.some(r => r.value.kind === "pick" && (r.playerId === a || r.playerId === b))) componentsUsed.push("mutualPick");
+    if (picks.some(r => r.playerId === a || r.playerId === b)) componentsUsed.push("mutualPick");
     if (deb.length > 0) componentsUsed.push("debriefSim");
     if (log.some(r => r.value.kind === "ios" && ((r.playerId === a && r.value.about === b) || (r.playerId === b && r.value.about === a)))) componentsUsed.push("iosMean");
     if (agreement.length > 0) componentsUsed.push("traitAgreement");
@@ -201,7 +201,7 @@ export function computeResults(signals: PairSignal[], log: LogRecord[], meta: Ro
     }
   }
   const rounds = new Map<string, LogRecord[]>();
-  for (const r of log) if (r.value.kind === "pick" && ["couple", "friendship", "trust", "status"].includes(r.coding)) rounds.set(r.roundId, [...(rounds.get(r.roundId) ?? []), r]);
+  for (const r of log) if (r.value.kind === "pick" && r.value.target !== r.playerId && ["couple", "friendship", "trust", "status"].includes(r.coding)) rounds.set(r.roundId, [...(rounds.get(r.roundId) ?? []), r]);
   for (const [roundId, rs] of rounds) {
     const counts = new Map<string, number>();
     for (const r of rs) if (r.value.kind === "pick") counts.set(r.value.target, (counts.get(r.value.target) ?? 0) + 1);

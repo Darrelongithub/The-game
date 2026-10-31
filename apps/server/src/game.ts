@@ -3,9 +3,9 @@ import { appendFileSync, mkdirSync, readFileSync, readdirSync, renameSync, statS
 import { join } from "node:path";
 import type { Server, Socket } from "socket.io";
 import {
-  DARE_ROUNDS, GRACE_MS, HEAT_ORDER, IDLE_TTL_HOURS, INTERLUDE_HOLD_MS,
+  GRACE_MS, HEAT_ORDER, IDLE_TTL_HOURS, INTERLUDE_HOLD_MS,
   MAX_PLAYERS, MIN_PLAYERS, RETENTION_HOURS, REVEAL_HOLD_MS, REVEAL_READY_GRACE_MS, ROOM_CODE_ALPHABET,
-  ROOM_CODE_LENGTH, ROUNDS_PER_PHASE, ROUND_TIMERS_MS, SECRET_DECK_MAX, SPOTLIGHT_ANSWER_MAX,
+  ROOM_CODE_LENGTH, ROUND_TIMERS_MS, SECRET_DECK_MAX, SPOTLIGHT_ANSWER_MAX,
   SPOTLIGHT_REVEAL_MS, TRAITS, VERDICT_DISCUSS_MS, VERDICT_REVEAL_MS, pseudonym,
   type ClientToServerEvents, type Consent, type FinaleSlide, type FinaleView, type InterludeView,
   type Claim, type Hypothesis, type JoinReply, type LogRecord, type NightDigest, type Phase, type PlayerId, type Prompt, type PromptCoding, type ProfileAnswers,
@@ -13,6 +13,8 @@ import {
   type RoundView, type SecretCard, type SecretDeckView, type ServerToClientEvents,
 } from "../../../packages/shared/src/contracts.ts";
 import { isAlias, isRoomCode, playerCountOk, validSubmit } from "../../../packages/shared/src/validate.ts";
+import { phaseSlots } from "./schedule.ts";
+import { safeCallbackQuotes } from "./safe-callback.ts";
 import { BankPromptProvider, fallbackServices, type GameServices, type HeatPhase, type PromptProvider } from "./services.ts";
 import { integratedServices } from "./integratedServices.ts";
 import { DECOYS, SPOTLIGHT_IDLE_LINE, liveKindInPhase, livePrompt, liveSeeds, type LiveSeed } from "../../../packages/prompts/src/bank/live/index.ts";
@@ -42,7 +44,7 @@ type GameIO = Server<ClientToServerEvents, ServerToClientEvents, Record<string, 
 type Stage = "lobby" | "round" | "ready" | "queued" | "reveal" | "interlude" | "finale-building" | "finale" | "deleted";
 
 // ---------------------------------------------------------------------------
-// REVEAL_MODE (env, DEFAULT-OFF)
+// REVEAL_MODE (env, finale by default)
 //   "round"  — today's night, byte-for-byte: every round closes into the ready
 //              gate and its reveal plays on every phone and the display.
 //   "finale" — per-round reveals are SUPPRESSED and QUEUED; the night's whole
@@ -63,17 +65,18 @@ export interface QueuedReveal {
 let warnedRevealMode = false;
 /**
  * Parse the REVEAL_MODE env value. Anything unusable — unset, empty, a typo —
- * falls back to "round", so a bad env line can never change a game night.
+ * falls back to "finale" to preserve privacy.
  */
 export function resolveRevealMode(value: unknown): RevealMode {
-  if (typeof value !== "string" || value.trim() === "") return "round";
+  if (typeof value !== "string" || value.trim() === "") return "finale";
   const mode = value.trim().toLowerCase();
   if (mode === "finale") return "finale";
+  if (mode === "round") return "round";
   if (mode !== "round" && !warnedRevealMode) {
     warnedRevealMode = true;
-    console.warn(`REVEAL_MODE="${value}" is not "round" or "finale"; using "round".`);
+    console.warn(`REVEAL_MODE="${value}" is not "round" or "finale"; using "finale".`);
   }
-  return "round";
+  return "finale";
 }
 
 /** The night queue lives beside the room log, 0600, append-only JSON lines.
@@ -208,8 +211,8 @@ export interface GameOptions {
   dataDir: string;
   services?: GameServices;
   /**
-   * REVEAL_MODE. "round" (default, also what an unset/invalid `REVEAL_MODE`
-   * env value means) is today's night; "finale" suppresses and queues every
+   * REVEAL_MODE. "round" enables immediate reveals; "finale" (the default
+   * for unset or invalid values) suppresses and queues every
    * per-round reveal and plays the reel on the display at the finale.
    */
   revealMode?: RevealMode;
@@ -332,6 +335,7 @@ function asSafePrompt(x: unknown, phase: HeatPhase): x is Prompt {
 export class RoomManager {
   private readonly rooms = new Map<string, Room>();
   private readonly services: GameServices;
+  private get finaleOnly(): boolean { return this.revealMode === "finale"; }
   private readonly now: () => number;
   private readonly sweepTimer: ReturnType<typeof setInterval>;
   /**
@@ -510,7 +514,7 @@ export class RoomManager {
       ...(round.onlyPlayers ? { onlyPlayers: [...round.onlyPlayers] } : {}),
       ...(round.targets?.has(playerId) ? { about: round.targets.get(playerId) } : {}),
       ...(round.kind === "rating" && round.trait ? { trait: round.trait } : {}),
-      ...(round.performer ? { performer: round.performer } : {}), submitted: [...round.responses.keys()],
+      ...(round.performer ? { performer: round.performer } : {}), ...(this.finaleOnly ? {} : { submitted: [...round.responses.keys()] }),
       ...(round.voteOpensAt !== undefined ? { voteOpensAt: round.voteOpensAt } : {}),
       ...(cover && round.idle ? { expectsAnswer: false } : {}) };
   }
@@ -833,16 +837,6 @@ export class RoomManager {
       else this.afterReveal(room); // "queued" (finale mode) included
     }
   }
-  /** Round kinds a heat phase deals, in order (spec §3). */
-  private phaseSlots(phase: HeatPhase): RoundKind[] {
-    // One public text answer in warmup gives later chapters real material for
-    // callbacks. Every input kind and three coded picks still appear nightly.
-    const desired: RoundKind[] = phase === "warmup" ? ["pick", "pick", "shout", "text"]
-      : phase === "spicy" ? ["pick", "pick", "rating", "ios"]
-      : phase === "deep" ? ["text", "minigame", "pick", "pick"]
-      : [...Array<RoundKind>(DARE_ROUNDS).fill("dare"), "pair_dare"];
-    return phase === "dare" ? desired : desired.slice(0, ROUNDS_PER_PHASE);
-  }
   /** Everything recruitable in a phase: host lines, provider output, the bank. */
   private candidatePool(room: Room, phase: HeatPhase): Prompt[] {
     let provided: Prompt[] = [];
@@ -851,11 +845,14 @@ export class RoomManager {
     // The packaged tap-war is authored as a warmup question. Reuse that same
     // neutral bank prompt later so warmup can gather a public text callback.
     const tapWar = phase === "deep" ? bankForPhase("warmup").filter((p) => p.kind === "minigame" && !room.usedIds.has(p.id)).map((p) => ({ ...p, phase })) : [];
-    return [...room.custom.filter((p) => p.phase === phase && !room.usedIds.has(p.id)), ...provided, ...tapWar, ...fallback]
+    const extraDares = phase === "spicy" || phase === "deep"
+      ? [...bankForPhase("dare"), ...new BankPromptProvider().forPhase("dare", 100, room.usedIds)]
+        .filter((p) => p.kind === "dare" && !room.usedIds.has(p.id)).map((p) => ({ ...p, phase })) : [];
+    return [...room.custom.filter((p) => p.phase === phase && !room.usedIds.has(p.id)), ...provided, ...tapWar, ...fallback, ...extraDares]
       .filter((p) => asSafePrompt(p, phase) && maxPlaceholderIndex(p.text) <= room.players.length);
   }
   private permittedIn(phase: HeatPhase, kind: RoundKind): (p: Prompt) => boolean {
-    return phase === "dare" ? (p: Prompt): boolean => p.kind === kind : (p: Prompt): boolean => !["dare", "pair_dare", "debrief"].includes(p.kind);
+    return phase === "dare" || kind === "dare" ? (p: Prompt): boolean => p.kind === kind : (p: Prompt): boolean => !["dare", "pair_dare", "debrief"].includes(p.kind);
   }
   /**
    * ROUND 4 — THE DIRECTOR DEALS ONE ROUND AT A TIME.
@@ -877,6 +874,7 @@ export class RoomManager {
     let pool = this.candidatePool(room, phase).filter(this.permittedIn(phase, kind))
       // Group slots never serve a confession wearing a pick/text costume.
       .filter((p) => (p.style ?? (p.kind === "confess" ? "confess" : "group")) !== "confess");
+    if ((kind === "pair_dare" || phase === "spicy") && pool.some((p) => p.kind === kind && !p.id.startsWith("f-"))) pool = pool.filter((p) => !p.id.startsWith("f-"));
     // Generated Grok material fills flexible slots ahead of bank copy; the
     // explicit pick slots below retain their evidence-density coding floor.
     if (kind !== "pick") pool = [...pool].sort((a, b) => (a.source === "grok" ? -1 : 0) - (b.source === "grok" ? -1 : 0));
@@ -1100,7 +1098,7 @@ export class RoomManager {
       // THE SECOND VOICE has guaranteed seats: every heat phase ends on two
       // private questions, so the room always hears confessions even when the
       // evidence floors leave no spare group slot to convert.
-      slots: [...this.phaseSlots(phase), ...(phase === "dare" ? [] : (["confess", "confess"] as RoundKind[]))],
+      slots: [...phaseSlots(phase), ...(phase === "dare" ? [] : phase === "warmup" ? (["confess"] as RoundKind[]) : (["confess", "confess"] as RoundKind[]))],
       live: [
         ...(liveKindInPhase("spotlight", phase) ? (["spotlight"] as RoundKind[]) : []),
         ...(liveKindInPhase("verdict", phase) ? (["verdict"] as RoundKind[]) : []),
@@ -1125,20 +1123,23 @@ export class RoomManager {
     const ids = [...(pair ?? []), ...rest];
     return text.replace(/\{P(1[01]|[1-9])\}/g, (_whole, n: string) => room.players.find((p) => p.id === ids[Number(n) - 1])?.alias ?? "someone");
   }
-  /** Add at most one callback per later phase. Only already-public text
+  /** Add callbacks in later phases. Only already-public text
    * answers are eligible; private pair debriefs never enter this path. */
   private withCallback(room: Room, definition: Definition, question: string): string {
     const phase = definition.phase;
     if (phase === "warmup" || phase === "debrief" || phase === "interlude" || phase === "lobby" || phase === "finale" || phase === "closed" ||
-        definition.kind === "spotlight" || definition.kind === "verdict" ||
-        room.callbackPhases.has(phase) || definition.prompt.source === "host") return question;
+        definition.kind === "spotlight" || definition.kind === "verdict" || definition.kind === "dare" || definition.kind === "pair_dare" ||
+        definition.prompt.source === "host") return question;
     const marker = "\n\nEarlier, someone said: “";
     const maxQuote = 160 - question.length - marker.length - 2; // closing quote + optional ellipsis
     if (maxQuote < 20) return question;
-    const quotes = room.log.flatMap((record) => record.roundKind === "text" && record.value.kind === "text" ? [record.value.text.trim()] : [])
-      .filter((quote) => quote.length >= 20 && !/[\u0000-\u001f\u007f“”]/u.test(quote) && !checkHardBlocked(quote));
+    const quotes = this.finaleOnly
+      ? safeCallbackQuotes(room.log, room.players.flatMap((p) => [p.alias, p.id]))
+      : room.log.flatMap((record) => record.roundKind === "text" && record.value.kind === "text" ? [record.value.text.trim()] : [])
+        .filter((quote) => quote.length >= 20 && !/[\u0000-\u001f\u007f“”]/u.test(quote) && !checkHardBlocked(quote));
     const quote = quotes.find((value) => !room.callbackQuotes.has(value)) ?? quotes[0];
     if (!quote) return question;
+    if (this.finaleOnly && quote.length > maxQuote) return question;
     let excerpt = quote.slice(0, maxQuote);
     if (/[\uD800-\uDBFF]$/.test(excerpt)) excerpt = excerpt.slice(0, -1);
     if (excerpt.length < quote.length) {
@@ -1181,7 +1182,7 @@ export class RoomManager {
       ? definition.text.replace(/\{S\}/g, () => room.players.find((p) => p.id === definition.subjectId)?.alias ?? "someone")
       : definition.kind === "pair_dare"
         ? `You two: ${this.replacePlaceholders(room, definition.text, definition.onlyPlayers)}`
-        : this.replacePlaceholders(room, definition.text, definition.kind === "dare" && definition.performer ? [definition.performer] : definition.subjects ?? definition.onlyPlayers);
+        : this.replacePlaceholders(room, definition.text, definition.kind === "dare" && definition.performer ? Array.from({ length: MAX_PLAYERS }, (_, i) => { const others = room.players.filter(p => p.id !== definition.performer); return others[i % others.length]!.id; }) : definition.subjects ?? definition.onlyPlayers);
     const round: LiveRound = { ...definition, text: this.withCallback(room, definition, question), id: `${room.id}-${++room.roundIndex}`, index: room.roundIndex, startedAt,
       closesAt: startedAt + lengthMs, responses: new Map(),
       ...(definition.kind === "verdict" ? { voteOpensAt: startedAt + Math.min(this.scale(room, this.options.verdictDiscussMs ?? VERDICT_DISCUSS_MS), lengthMs) } : {}) };
@@ -1264,6 +1265,7 @@ export class RoomManager {
       : round.kind === "debrief" || round.kind === "spotlight" ? "text"
       : round.kind === "verdict" ? "pick" : round.kind;
     if (value.kind !== expected) return { ok: false, error: "Answer does not match the round." };
+    if (round.kind === "verdict" && value.kind === "pick" && value.target === player.id) return { ok: false, error: "Choose another player for the verdict." };
     if (round.kind === "spotlight" && value.kind === "text" && value.text.length > SPOTLIGHT_ANSWER_MAX) {
       return { ok: false, error: `Keep it to ${SPOTLIGHT_ANSWER_MAX} characters.` };
     }
@@ -1280,12 +1282,12 @@ export class RoomManager {
     // Flagging it here means no downstream consumer can score it by accident.
     const decoy = round.kind === "spotlight" && round.subjectId === player.id;
     const record: LogRecord = { roomId: room.id, roundId: round.id, playerId: player.id, roundKind: round.kind, promptId: round.prompt.id, coding: round.prompt.coding,
-      value, at, latencyMs: Math.max(0, at - round.startedAt), ...(decoy ? { decoy: true } : {}), ...(round.kind === "dare" && round.performer ? { performerId: round.performer } : round.kind === "pair_dare" ? { performerId: player.id } : {}), ...(impersonatedBy ? { impersonatedBy } : {}) };
+      value, ...(round.kind === "pick" && value.kind === "pick" && value.target === player.id ? { selfSignal: "selfimage" as const } : {}), at, latencyMs: Math.max(0, at - round.startedAt), ...(decoy ? { decoy: true } : {}), ...(round.kind === "dare" && round.performer ? { performerId: round.performer } : round.kind === "pair_dare" ? { performerId: player.id } : {}), ...(impersonatedBy ? { impersonatedBy } : {}) };
     try { appendFileSync(room.file, `${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 }); }
     catch { return { ok: false, error: "Unable to save the answer." }; }
     room.log.push(record); room.seen.set(key, { roundId: r.roundId, fingerprint }); round.responses.set(player.id, value); if (round.kind === "pair_dare" && value.kind === "dare" && value.status === "passed") round.pairPassed = true; room.lastActivity = at; this.persistRoom(room);
     this.options.audit?.persisted(room.code, room.file, { roundId: r.roundId, playerId: player.id, clientUuid: r.clientUuid });
-    if (target) { const k = PAIR_KEY(player.id, target); room.interactions.set(k, (room.interactions.get(k) ?? 0) + 1); }
+    if (target && target !== player.id) { const k = PAIR_KEY(player.id, target); room.interactions.set(k, (room.interactions.get(k) ?? 0) + 1); }
     this.changed(room);
     if (!player.isBot && player.socketId) this.io.sockets.sockets.get(player.socketId)?.emit("round", this.guard(this.roundView(round, player.id)));
     this.maybeComplete(room);
@@ -1330,7 +1332,7 @@ export class RoomManager {
     // The gate's grace is reused as the mid-game beat so the night keeps the
     // same rhythm it would have had if the reveal had fired. The reveal's own
     // hold is skipped: there is nothing on screen to hold for.
-    const beat = this.scale(room, this.options.readyGraceMs ?? REVEAL_READY_GRACE_MS);
+    const beat = this.scale(room, this.options.revealHoldMs ?? 2000);
     this.schedule(room, beat, () => this.afterReveal(room));
   }
   private loadRevealQueue(file: string): QueuedReveal[] {
@@ -1369,8 +1371,7 @@ export class RoomManager {
         const alias = room.players.find((p) => p.id === id)?.alias ?? "Player";
         if (value.kind === "text") items.push({ alias, text: value.text });
         if (value.kind === "dare") items.push({ alias, text: value.status === "done" ? "Done" : `Passed: ${value.reason}` });
-        // R21: picks remain scoring/digest evidence, never generic reveal lines.
-        // Verdicts have their own anonymous aggregate reveal above.
+        if (value.kind === "pick" && value.target === id) items.push({ alias, text: "picked THEMSELVES 💅" });
       }
     }
     const alias = (id: string | undefined): string => room.players.find((p) => p.id === id)?.alias ?? "Player";
@@ -1474,16 +1475,13 @@ export class RoomManager {
   }
   private beginInterlude(room: Room, next: HeatPhase | "debrief" | "finale", cooled = false): void {
     this.clearTimers(room); room.stage = "interlude"; room.phase = "interlude"; room.round = null; room.reveal = undefined;
-    let digest: NightDigest;
-    try { digest = this.services.buildNightDigest(this.redactedLog(room).filter((r) => r.roundKind !== "debrief"), this.meta(room)); } catch { digest = emptyDigest(); }
     if (next === "debrief" && room.provider.prepareAnalysis) {
       // Start the optional public-text batch while players do their private
       // debriefs. Never hold the next round or finale for an external service.
       try { void room.provider.prepareAnalysis(this.redactedLog(room)).catch(() => {}); } catch { /* local tags remain available */ }
     }
-    const teaser = digest.pickTeasers[0] ? displayText(digest.pickTeasers[0], room.players) : undefined;
     const holdMs = this.scale(room, this.options.interludeHoldMs ?? INTERLUDE_HOLD_MS);
-    const view: InterludeView = { headline: cooled ? "Cooling things down" : next === "finale" ? "The room has spoken" : `Next: ${next}`, sub: cooled ? "The room chose a gentler level." : "Take a breath before the next chapter.", ...(teaser ? { teaser } : {}), holdMs };
+    const view: InterludeView = { headline: cooled ? "Cooling things down" : next === "finale" ? "The room has spoken" : `Next: ${next}`, sub: cooled ? "The room chose a gentler level." : "Take a breath before the next chapter.", holdMs };
     room.interlude = { value: view, endsAt: this.now() + holdMs };
     // Store the transition independently of the label exposed to clients.
     this.transitions.set(room.id, next); this.changed(room); this.io.to(room.code).emit("interlude", this.guard(view)); this.io.to(displayChannel(room.code)).emit("interlude", this.guard(view));
@@ -1718,6 +1716,12 @@ export class RoomManager {
       const body = verbatim ? base.body : safeText(draft?.body, base.body, false);
       slides.push({ beat: base.beat, ...(base.flavor ? { flavor: base.flavor } : {}), ...(base.claimId ? { claimId: base.claimId } : {}), title: displayText(title, room.players),
         ...(body ? { body: displayText(body, room.players) } : {}), ...(base.numbers ? { numbers: { ...base.numbers } } : {}) });
+    }
+    for (const record of room.log) {
+      if (record.roundKind === "pick" && record.value.kind === "pick" && record.value.target === record.playerId) {
+        const alias = room.players.find((p) => p.id === record.playerId)?.alias;
+        if (alias) slides.push({ beat: "land", flavor: "stat", title: alias, body: `${alias} picked THEMSELVES 💅` });
+      }
     }
     const summary: FinaleView["summary"] = {};
     const summaryType = { ship: "ship", besties: "besties", toxic: "toxic", rival: "rivals" } as const;

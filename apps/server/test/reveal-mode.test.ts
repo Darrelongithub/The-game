@@ -153,18 +153,18 @@ async function playNight(
 // ---------------------------------------------------------------------------
 // 1. The switch itself. Anything unusable is today's night.
 // ---------------------------------------------------------------------------
-test("REVEAL_MODE resolves to today's night unless it says finale", () => {
-  assert.equal(resolveRevealMode(undefined), "round", "unset ⇒ round");
-  assert.equal(resolveRevealMode(""), "round", "empty ⇒ round");
+test("REVEAL_MODE defaults safely to finale", () => {
+  assert.equal(resolveRevealMode(undefined), "finale", "unset ⇒ finale");
+  assert.equal(resolveRevealMode(""), "finale", "empty ⇒ finale");
   assert.equal(resolveRevealMode("  round "), "round");
   assert.equal(resolveRevealMode("FINALe"), "finale", "case/space tolerant");
-  assert.equal(resolveRevealMode("final"), "round", "a typo can never change a game night");
-  assert.equal(resolveRevealMode(42), "round", "non-strings are ignored");
+  assert.equal(resolveRevealMode("final"), "finale", "invalid mode stays private");
+  assert.equal(resolveRevealMode(42), "finale", "non-strings stay private");
   // The queue lives beside the room log and never pretends to be one.
   assert.equal(revealQueueFile("1700000000000-abc.jsonl"), "1700000000000-abc.reveals.log");
 });
 
-test("the env var reaches the room manager; no option means no change", async (t) => {
+test("the env var reaches the room manager; explicit options win", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "reveal-mode-env-"));
   const server = createGameServer({ dataDir: dir });
   t.after(async () => { await server.close(); rmSync(dir, { recursive: true, force: true }); });

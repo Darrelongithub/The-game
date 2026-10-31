@@ -54,14 +54,12 @@ export function isResponseValue(v: unknown): v is ResponseValue {
 }
 
 /**
- * Directed answers about others must target someone else — never yourself.
+ * Picks may target the picker; directed IOS and peer ratings may not.
  * (PlayerId must never be the literal "self"; see contracts.ts.)
  */
 export function targetsOther(v: ResponseValue, self: PlayerId): boolean {
   switch (v.kind) {
-    case "pick":   return v.target !== self;
-    // A confession may name someone in the room or stay unaimed — but never
-    // yourself: the question is about your own life, not your own name.
+    case "pick":   return true;
     case "confess": return v.target === undefined || v.target !== self;
     case "ios":    return v.about !== self;
     case "rating": return v.about === "self" ? true : v.about !== self;

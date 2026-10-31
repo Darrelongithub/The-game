@@ -69,7 +69,7 @@ async function playConfessNight(
   const dir = mkdtempSync(join(tmpdir(), "reveal-confess-"));
   const styled: StyledEntry[] = [];
   const server = createGameServer({
-    dataDir: dir,
+    revealMode: "round", dataDir: dir,
     roundTimers: { pick: 500, shout: 400, minigame: 400, rating: 400, ios: 400, text: 500,
       dare: 400, pair_dare: 400, debrief: 400, spotlight: 400, verdict: 500, confess: 400 },
     verdictDiscussMs: 0, graceMs: 60, revealHoldMs: 5, interludeHoldMs: 5, botDelayMs: [5, 10],
