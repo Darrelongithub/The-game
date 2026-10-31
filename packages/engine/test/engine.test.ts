@@ -8,6 +8,7 @@
 //     people who picked each other.
 //   • No verdict or card ever prints an orientation claim.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   buildSecrets,
@@ -15,6 +16,12 @@ import {
   lookChains,
   mutualCrushes,
   assertNoOrientationLeak,
+  CLOSENESS_METRICS,
+  COUPLE_METRICS,
+  DESIRE_METRICS,
+  HISTORY_METRICS,
+  NEGATIVE_METRICS,
+  SCORN_METRICS,
 } from "../src/index.ts";
 import type { VerdictKind } from "../../shared/src/contracts.ts";
 import { ids, meta, peerRate, pick, selfRate, text, vote, pairPick, look, lookGuess, lookWhy } from "./fixtures.ts";
@@ -311,6 +318,64 @@ describe("the digest", () => {
     // Nobody else is told who X was looking at.
     assert.equal(decks.get("p2"), undefined, "a guesser gets nothing");
     assert.equal(decks.get("p3"), undefined, "the target gets nothing");
+  });
+
+  it("puts the room's eye on whoever everybody points at", () => {
+    const log = [
+      pick("p2", "p1", "secret"),
+      pick("p3", "p1", "secret"),
+      pick("p4", "p1", "secret"),
+    ];
+    const verdicts = computeResults(log, meta).verdicts;
+    const hates = verdicts.find((v) => v.kind === "hates");
+    assert.ok(hates, "the room's eye is a verdict");
+    assert.deepEqual(hates!.subjects, ["p1"]);
+    // The verdict is pseudonymised — never the raw alias.
+    assert.match(hates!.text, /Player 1/);
+    assert.doesNotMatch(hates!.text, /Wanjiru/);
+    // It is the room staring, not hatred.
+    assert.doesNotMatch(hates!.text, /hates on/i);
+  });
+
+  it("makes two people with history rivals", () => {
+    const log = [
+      pick("p2", "p3", "ex"),
+      pick("p3", "p2", "ex"),
+    ];
+    const verdicts = computeResults(log, meta).verdicts;
+    const rivals = verdicts.find((v) => v.kind === "rivals");
+    assert.ok(rivals, "history is a verdict");
+    assert.deepEqual([...rivals!.subjects].sort(), ["p2", "p3"]);
+  });
+
+  it("reads every metric the bank asks for", () => {
+    const consumed = new Set<string>([
+      ...DESIRE_METRICS,
+      ...NEGATIVE_METRICS,
+      ...CLOSENESS_METRICS,
+      ...COUPLE_METRICS,
+      ...SCORN_METRICS,
+      ...HISTORY_METRICS,
+    ]);
+    const dir = new URL("../../prompts/src/bank/", import.meta.url);
+    for (const file of ["warmup.json", "spicy.json", "deep.json", "dare.json", "unhinged.json"]) {
+      const rows = JSON.parse(readFileSync(new URL(file, dir), "utf8")) as {
+        id: string;
+        kind: string;
+        measures: string[];
+      }[];
+      for (const row of rows) {
+        if (row.kind !== "pick" && row.kind !== "pair_pick" && row.kind !== "pair_vote") continue;
+        const metrics = row.measures
+          .filter((m) => m.startsWith("metric:"))
+          .map((m) => m.slice("metric:".length));
+        assert.ok(metrics.length > 0, `${row.id} measures nothing at all`);
+        assert.ok(
+          metrics.some((m) => consumed.has(m)),
+          `${row.id} measures ${metrics.join(", ")} — the engine never reads that, so the answer would feed nothing`,
+        );
+      }
+    }
   });
 
   it("quotes verbatim and never invents", async () => {

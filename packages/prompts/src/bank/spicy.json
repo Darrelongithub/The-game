@@ -620,5 +620,15 @@
     ],
     "coding": "tease",
     "asksTarget": true
+  },
+  {
+    "id": "sp-51",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who in this room is the biggest liar?",
+    "measures": ["metric:liar"],
+    "coding": "tease",
+    "asksTarget": true
   }
 ]

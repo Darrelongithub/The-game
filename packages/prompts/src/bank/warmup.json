@@ -191,9 +191,7 @@
     "role": "group",
     "kind": "pick",
     "text": "Who in this room has the wildest stories?",
-    "measures": [
-      "flavour:storyteller"
-    ],
+    "measures": ["metric:hookups", "flavour:storyteller"],
     "coding": "status",
     "asksTarget": true
   },
@@ -340,10 +338,7 @@
     "role": "observer_subject",
     "kind": "text",
     "text": "What would {P1} do with one million dollars overnight?",
-    "measures": [
-      "metric:money",
-      "guess"
-    ],
+    "measures": ["flavour:status"],
     "coding": "status",
     "asksTarget": true
   },
@@ -440,9 +435,7 @@
     "role": "group",
     "kind": "pick",
     "text": "Who here is the most likely to send a blurry 2am photo to the wrong person?",
-    "measures": [
-      "flavour:chaos"
-    ],
+    "measures": ["metric:hookups", "flavour:chaos"],
     "coding": "tease",
     "asksTarget": true
   },

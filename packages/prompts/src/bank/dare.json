@@ -145,7 +145,7 @@
     "role": "dare",
     "kind": "dare",
     "text": "{P1}, send a text to your most recent ex right now. Just one word. Let them stew.",
-    "measures": ["metric:ex", "dare"],
+    "measures": ["flavour:dare"],
     "coding": "friction",
     "asksTarget": true
   },
@@ -155,7 +155,7 @@
     "role": "dare",
     "kind": "dare",
     "text": "{P1}, tell the room the worst date you have ever been on. Leave nothing out.",
-    "measures": ["metric:ex", "dare"],
+    "measures": ["flavour:dare"],
     "coding": "tease",
     "asksTarget": true
   },
@@ -185,7 +185,7 @@
     "role": "dare",
     "kind": "dare",
     "text": "{P1}, let the room vote on what you did after your last break-up.",
-    "measures": ["metric:ex", "dare"],
+    "measures": ["flavour:dare"],
     "coding": "friction",
     "asksTarget": true
   },

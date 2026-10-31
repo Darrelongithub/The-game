@@ -69,6 +69,7 @@ export const DESIRE_METRICS: ReadonlySet<MetricKey> = new Set<MetricKey>([
 
 /** Metrics that say someone is dangerous, fake, or untrustworthy. */
 export const NEGATIVE_METRICS: ReadonlySet<MetricKey> = new Set<MetricKey>([
+  "liar",
   "would-snitch",
   "would-cheat",
   "is-fake",
@@ -89,6 +90,35 @@ export const COUPLE_METRICS: ReadonlySet<MetricKey> = new Set<MetricKey>([
   "couple-fit",
   "crush",
   "gay-hypothetical",
+]);
+
+/**
+ * Metrics where the room points AT somebody: who is the weirdest, who has
+ * the biggest secret, who has the money. They are not hatred — they are the
+ * room's eye. They feed the same "the room is watching you" verdict.
+ */
+export const SCORN_METRICS: ReadonlySet<MetricKey> = new Set<MetricKey>([
+  "weirdest",
+  "crier",
+  "secret",
+  "money",
+]);
+
+/** Every metric that puts a name on the same person. */
+export const POINT_METRICS: ReadonlySet<MetricKey> = new Set<MetricKey>([
+  ...NEGATIVE_METRICS,
+  ...SCORN_METRICS,
+]);
+
+/** Metrics that mean "these two have history". */
+export const HISTORY_METRICS: ReadonlySet<MetricKey> = new Set<MetricKey>([
+  "ex",
+]);
+
+/** Everything that counts as friction between two people. */
+export const RIVAL_METRICS: ReadonlySet<MetricKey> = new Set<MetricKey>([
+  ...NEGATIVE_METRICS,
+  ...HISTORY_METRICS,
 ]);
 
 export const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);

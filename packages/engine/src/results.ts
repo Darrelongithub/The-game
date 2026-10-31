@@ -28,6 +28,9 @@ import {
     DESIRE_METRICS,
     ENGINE_TUNING,
     NEGATIVE_METRICS,
+    POINT_METRICS,
+    RIVAL_METRICS,
+    SCORN_METRICS,
     buildRatingIndex,
     clamp01,
     formatNumber,
@@ -111,6 +114,30 @@ function nominatorsFor(
     return out;
 }
 
+/** The metric the room used most to point at one person. */
+function dominantMetricFor(
+    log: readonly LogRecord[],
+    target: PlayerId,
+    metrics: ReadonlySet<MetricKey>,
+): MetricKey | undefined {
+    const counts = new Map<MetricKey, number>();
+    for (const rec of log) {
+        if (rec.value.kind !== "pick") continue;
+        if (!rec.metric || !metrics.has(rec.metric)) continue;
+        if (rec.value.target !== target) continue;
+        counts.set(rec.metric, (counts.get(rec.metric) ?? 0) + 1);
+    }
+    let best: MetricKey | undefined;
+    let bestN = 0;
+    for (const [metric, n] of counts) {
+        if (n > bestN) {
+            best = metric;
+            bestN = n;
+        }
+    }
+    return best;
+}
+
 /** How many distinct players answered a given metric at all. */
 function votersFor(log: readonly LogRecord[], metrics: ReadonlySet<MetricKey>): Set<PlayerId> {
     const out = new Set<PlayerId>();
@@ -175,32 +202,43 @@ export function computeResults(
 
     // ---------------- HATES: the group turns on one person ----------------
     {
-        const voters = votersFor(log, NEGATIVE_METRICS);
+        const voters = votersFor(log, POINT_METRICS);
         const denom = Math.max(1, voters.size);
-        let worst: { id: PlayerId; nominators: Set<PlayerId>; share: number } | undefined;
+        let worst:
+            | { id: PlayerId; nominators: Set<PlayerId>; share: number; metric: MetricKey | undefined }
+            | undefined;
         for (const id of ids) {
-            const nominators = nominatorsFor(log, id, NEGATIVE_METRICS);
+            const nominators = nominatorsFor(log, id, POINT_METRICS);
             if (nominators.size < ENGINE_TUNING.hatesMinNominators) continue;
             const share = nominators.size / denom;
             if (share < ENGINE_TUNING.hatesMinShare) continue;
             if (!worst || nominators.size > worst.nominators.size) {
-                worst = { id, nominators, share };
+                worst = { id, nominators, share, metric: dominantMetricFor(log, id, POINT_METRICS) };
             }
         }
         if (worst) {
             const name = pseudoOf(meta, worst.id);
             const strength = clamp01(worst.share * (worst.nominators.size / Math.max(1, playerCount)));
-            const text =
-                toneFor(strength) === "filthy"
-                    ? `Everyone in this room has a problem with ${name} and they all know it.`
-                    : toneFor(strength) === "spicy"
-                      ? `The group lowkey hates on ${name}.`
-                      : `${name} is the one everybody is quietly keeping an eye on.`;
+            const tone = toneFor(strength);
+            // The room's eye lands differently when the names are about
+            // danger than when they are about a secret or a quirk.
+            const pointed = worst.metric !== undefined && SCORN_METRICS.has(worst.metric);
+            const text = pointed
+                ? tone === "filthy"
+                    ? `Everyone in this room has something on ${name}.`
+                    : tone === "spicy"
+                      ? `The room cannot stop talking about ${name}.`
+                      : `${name} is the one everybody is quietly keeping an eye on.`
+                : tone === "filthy"
+                  ? `Everyone in this room has a problem with ${name} and they all know it.`
+                  : tone === "spicy"
+                    ? `The group lowkey hates on ${name}.`
+                    : `${name} is the one everybody is quietly keeping an eye on.`;
             push({
                 id: vid("hates", worst.id),
                 kind: "hates",
                 subjects: [worst.id],
-                tone: toneFor(strength),
+                tone,
                 text,
                 numbers: { nominators: worst.nominators.size, voters: voters.size, share: Number(worst.share.toFixed(3)) },
                 strength,
@@ -483,7 +521,7 @@ export function computeResults(
 
     // ---------------- RIVALS: mutual friction ----------------
     {
-        const neg = tallyAcross(log, NEGATIVE_METRICS);
+        const neg = tallyAcross(log, RIVAL_METRICS);
         const found: { a: PlayerId; b: PlayerId; n: number }[] = [];
         for (const [a, setA] of neg) {
             for (const b of setA) {

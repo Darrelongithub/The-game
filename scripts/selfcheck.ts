@@ -44,6 +44,14 @@ import { BANK, bankTotal, loadBank, promptTypeKey, seededShuffle, selectFromBank
 import { ollamaConfig } from "../packages/prompts/src/ollama.ts";
 import { LOOK_CHAIN_VARIANTS, lookChainsFor } from "../apps/server/src/lookchain.ts";
 import { assertNoOrientationLeak } from "../packages/engine/src/results.ts";
+import {
+  CLOSENESS_METRICS,
+  COUPLE_METRICS,
+  DESIRE_METRICS,
+  HISTORY_METRICS,
+  NEGATIVE_METRICS,
+  SCORN_METRICS,
+} from "../packages/engine/src/internal.ts";
 
 let pass = 0;
 let fail = 0;
@@ -159,6 +167,21 @@ ok("shuffle varies with the seed",
 const drawn = selectFromBank(20, { playerCount: 6, seed: 7 });
 ok("drawn set has no repeats", new Set(drawn.map((p) => p.id)).size === drawn.length);
 ok("drawn set has no same-type back-to-back", drawn.every((p, i) => i === 0 || promptTypeKey(drawn[i - 1]!) !== promptTypeKey(p)));
+
+// ------------------------------------- every question feeds a verdict
+const consumed = new Set<string>([
+  ...DESIRE_METRICS,
+  ...NEGATIVE_METRICS,
+  ...CLOSENESS_METRICS,
+  ...COUPLE_METRICS,
+  ...SCORN_METRICS,
+  ...HISTORY_METRICS,
+]);
+const pickingPrompts = BANK.filter((p) => p.kind === "pick" || p.kind === "pair_pick" || p.kind === "pair_vote");
+ok("every pick question names a metric the engine reads",
+  pickingPrompts.every((p) =>
+    p.measures.some((m) => m.startsWith("metric:") && consumed.has(m.slice("metric:".length))),
+  ));
 
 // ------------------------------------------------------------ verdict kinds
 const allowed: VerdictKind[] = [

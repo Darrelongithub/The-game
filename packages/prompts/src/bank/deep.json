@@ -5,7 +5,7 @@
     "role": "observer_subject",
     "kind": "text",
     "text": "What is the thing {P1} is most afraid of people finding out?",
-    "measures": ["metric:secret", "guess"],
+    "measures": ["flavour:friction"],
     "coding": "friction",
     "asksTarget": true
   },
@@ -55,7 +55,7 @@
     "role": "observer_subject",
     "kind": "text",
     "text": "What would {P1} do if they found out you liked them?",
-    "measures": ["metric:crush", "guess"],
+    "measures": ["flavour:couple"],
     "coding": "couple",
     "asksTarget": true
   },
@@ -125,7 +125,7 @@
     "role": "observer_subject",
     "kind": "text",
     "text": "What did {P1} do that they have never admitted to anyone here?",
-    "measures": ["metric:secret", "guess"],
+    "measures": ["flavour:friction"],
     "coding": "friction",
     "asksTarget": true
   },
@@ -277,7 +277,7 @@
     "role": "group",
     "kind": "pick",
     "text": "Who here do you think is going to cry tonight?",
-    "measures": ["flavour:chaos"],
+    "measures": ["metric:crier", "flavour:chaos"],
     "coding": "tease",
     "asksTarget": true
   },
@@ -297,7 +297,7 @@
     "role": "group",
     "kind": "pick",
     "text": "Who here would you trust to keep a secret overnight?",
-    "measures": ["metric:secret"],
+    "measures": ["metric:trust", "flavour:closeness"],
     "coding": "trust",
     "asksTarget": true
   },

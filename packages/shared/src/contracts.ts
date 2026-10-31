@@ -104,6 +104,8 @@ export const METRIC = {
   isFake: "is-fake",
   /** "who is the weirdest" */
   weirdest: "weirdest",
+  /** "who is going to fall apart tonight" */
+  crier: "crier",
   /** "who is the most dangerous" */
   mostDangerous: "most-dangerous",
   /** "who would you ruin a friendship for" */
