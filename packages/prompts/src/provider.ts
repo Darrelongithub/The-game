@@ -17,6 +17,7 @@ import {
   SAFETY_OFF,
   resolveGeminiModel,
 } from "../../shared/src/contracts.ts";
+import { aliasPattern } from "../../../lib/aliases.ts";
 import { CallGuard, callGuard, type CallPurpose } from "./guard.ts";
 import { ollamaConfig, type OllamaConfig } from "./ollama.ts";
 
@@ -91,17 +92,6 @@ function keyOf(value: string | null | undefined): string | null {
   return trimmed.length === 0 ? null : trimmed;
 }
 
-/**
- * Alias matcher: whole-token, case-insensitive, unicode-aware. Word boundaries
- * matter — a two-letter alias like "Mo" must not rewrite `"model"` in a JSON
- * body.
- */
-function aliasPattern(alias: string): RegExp | null {
-  const clean = alias.trim().normalize("NFC");
-  if (clean.length < 2) return null;
-  const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "giu");
-}
 
 /** Rewrite any known alias to a neutral in-room reference (pseudonyms only). */
 export function redactAliases(text: string, aliases: readonly string[] | undefined): string {

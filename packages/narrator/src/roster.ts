@@ -17,6 +17,7 @@ import {
   type PlayerId,
   type Results,
 } from "../../shared/src/contracts.ts";
+import { aliasBodyPattern } from "../../../lib/aliases.ts";
 
 export interface RosterEntry {
   id: PlayerId;
@@ -131,8 +132,7 @@ export const pseudonymForAlias = (
     ? ps.byAlias.get(normAlias(alias))
     : undefined;
 
-const escapeRegExp = (value: string): string =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 
 /**
  * Replace canonical-equivalent spellings too (e.g. composed and decomposed
@@ -144,14 +144,14 @@ export function replaceCanonicalAliases(
   replacements: readonly { alias: string; pseudo: string }[],
 ): string {
   const names = replacements
-    .map(({ alias, pseudo }) => ({ alias: normAlias(alias).normalize("NFC"), pseudo }))
-    .filter(({ alias }) => alias.length > 0)
-    .sort((a, b) => b.alias.length - a.alias.length);
+    .map(({ alias, pseudo }) => ({ alias: normAlias(alias).normalize("NFC"), pseudo, body: aliasBodyPattern(alias) }))
+    .filter((entry): entry is { alias: string; pseudo: string; body: string } => entry.body !== null)
+    .sort((a, b) => b.alias.length - a.alias.length || a.alias.localeCompare(b.alias));
   if (!names.length || !text) return text;
   // Capture which alternative matched instead of looking it up by lowercased
   // text: Unicode case-insensitive matches (e.g. Greek final sigma) do not
   // always have identical lowercase strings.
-  const pattern = new RegExp(names.map(({ alias }) => `(${escapeRegExp(alias)})`).join("|"), "giu");
+  const pattern = new RegExp(names.map(({ body }) => `(${body})`).join("|"), "giu");
   let normalized = "";
   const starts: number[] = [], ends: number[] = [];
   const segments = new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text);
@@ -187,8 +187,8 @@ export function scrubAliases(
 ): string {
   if (!roster || roster.length === 0) return text;
   const pairs = [...ps.byAlias.entries()]
-    .filter(([alias]) => alias.length >= 2)
-    .sort((a, b) => b[0].length - a[0].length);
+    .filter(([alias]) => aliasBodyPattern(alias) !== null)
+    .sort((a, b) => b[0].length - a[0].length || a[0].localeCompare(b[0]));
   if (pairs.length === 0) return text;
   // One longest-first pass prevents a newly substituted pseudonym from being
   // mistaken for another alias. Include substrings and Unicode equivalents.
@@ -205,13 +205,11 @@ export function swapPseudonyms(
   roster: readonly RosterEntry[] | undefined,
 ): string {
   if (!roster || roster.length === 0 || text.length === 0) return text;
-  const pairs = roster
-    .map((entry, index) => ({ alias: entry.alias, token: pseudonym(index) }))
-    .filter((pair) => typeof pair.alias === "string" && pair.alias.trim().length > 0)
-    .sort((a, b) => b.token.length - a.token.length);
-  let out = text;
-  for (const { alias, token } of pairs) {
-    out = out.replace(new RegExp(`\\b${escapeRegExp(token)}\\b`, "g"), alias);
-  }
-  return out;
+  const aliases = roster.map((entry) => entry.alias);
+  // A single pass cannot recode a Player N sequence contained in an alias that
+  // was just restored. The callback also keeps replacement metacharacters literal.
+  return text.replace(/\bPlayer (1[01]|[1-9])\b/gi, (match, n: string) => {
+    const alias = aliases[Number(n) - 1];
+    return typeof alias === "string" && alias.trim() ? alias : match;
+  });
 }

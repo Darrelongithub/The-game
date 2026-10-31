@@ -14,23 +14,53 @@ import type { SocketLike, SocketServerLike } from "./room.ts";
 type SocketData = { roomCode?: string; playerId?: string; isHost?: boolean };
 export interface ServerOptions extends GameOptions { webDir?: string; }
 
-/** The LAN addresses this machine can be reached on. */
+/** Usable for a phone on your WiFi: IPv4, not loopback, not link-local, not internal. */
+function usable(address: string, internal: boolean): boolean {
+  return !internal && !address.startsWith("127.") && !address.startsWith("169.254.");
+}
+
+/**
+ * Preference rank. `192.168.*` is the home / hotspot network a party is on,
+ * `10.*` is the next most likely, `172.16–172.31` is the Docker-bridge block
+ * that shows up on laptops, and everything else is last.
+ */
+const rank = (address: string): number => {
+  const [a, b] = address.split(".").map((n) => Number(n));
+  if (a === 192 && b === 168) return 0;
+  if (a === 10) return 1;
+  if (a === 172 && b >= 16 && b <= 31) return 2;
+  return 3;
+};
+
+/** Numeric, so 10.0.0.7 does not sort after 10.0.0.10 the way a string would. */
+const byNumeric = (x: string, y: string): number => {
+  const a = x.split(".").map((part) => Number(part) || 0);
+  const b = y.split(".").map((part) => Number(part) || 0);
+  for (let i = 0; i < 4; i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) - (b[i] ?? 0);
+  return 0;
+};
+
+/** The LAN addresses this machine can be reached on, in the order to print them. */
 export function lanAddresses(interfaces = networkInterfaces()): string[] {
   const addresses = new Set<string>();
   for (const entries of Object.values(interfaces)) for (const entry of entries ?? [])
-    if (entry.family === "IPv4" && !entry.internal && !entry.address.startsWith("127.")) addresses.add(entry.address);
-  return [...addresses].sort();
+    if (entry.family === "IPv4" && usable(entry.address, entry.internal)) addresses.add(entry.address);
+  return [...addresses].sort((x, y) => rank(x) - rank(y) || byNumeric(x, y));
 }
 
 /** The best LAN address to put in a QR code. */
 export function selectLanAddress(interfaces = networkInterfaces()): string | undefined {
   const candidates = Object.entries(interfaces).flatMap(([name, entries]) => (entries ?? [])
-    .filter((entry) => entry.family === "IPv4" && !entry.internal && !entry.address.startsWith("127."))
+    .filter((entry) => entry.family === "IPv4" && usable(entry.address, entry.internal))
     .map((entry) => ({ name, address: entry.address })));
   if (!candidates.length) return undefined;
   const penalty = (name: string): number => /docker|veth|bridge|virbr|tun|tap|wireguard|tailscale|zerotier|vmnet|vbox|virtual/i.test(name) ? 2 :
     /^(wlan|wlp|wifi|wi-fi|en|eno|enp|eth|ethernet)/i.test(name) ? 0 : 1;
-  return candidates.sort((a, b) => penalty(a.name) - penalty(b.name) || a.address.localeCompare(b.address))[0]!.address;
+  // The same preference order the banner prints, with the interface-name
+  // penalty ahead of it: a virtual NIC's address is not a join URL whatever
+  // block it sits in.
+  return candidates.sort((a, b) => penalty(a.name) - penalty(b.name)
+    || rank(a.address) - rank(b.address) || byNumeric(a.address, b.address))[0]!.address;
 }
 
 /**
