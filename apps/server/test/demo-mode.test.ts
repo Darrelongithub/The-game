@@ -42,7 +42,7 @@ const ack = <T>(client: Client, name: string, payload: unknown): Promise<T> =>
 
 async function harness(t: { after: (fn: () => Promise<void> | void) => void }, options: { readyGraceMs?: number; roundTimers?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "reveal-demo-"));
-  const server: GameServer = createGameServer({
+  const server: GameServer = createGameServer({ revealMode: "round",
     dataDir: dir,
     roundTimers: { pick: options.roundTimers ?? 4_000, shout: options.roundTimers ?? 4_000, text: options.roundTimers ?? 4_000,
       rating: options.roundTimers ?? 4_000, ios: options.roundTimers ?? 4_000, minigame: options.roundTimers ?? 4_000,

@@ -42,7 +42,7 @@ const once = <T>(client: Client, event: string): Promise<T> => new Promise((reso
 
 async function setup(t: TestContext, options: ServerOptions = {}) {
   const dir = mkdtempSync(join(tmpdir(), "reveal-live-"));
-  const server = createGameServer({
+  const server = createGameServer({ revealMode: "round",
     dataDir: dir, revealHoldMs: 20, interludeHoldMs: 20, graceMs: 30, botDelayMs: [5, 20],
     roundTimers: { pick: 60, text: 60, shout: 60, rating: 60, ios: 60, minigame: 60, dare: 60, pair_dare: 60, debrief: 60, spotlight: 120, verdict: 400 },
     verdictDiscussMs: 0, ...options,

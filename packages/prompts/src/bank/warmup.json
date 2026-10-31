@@ -3,7 +3,7 @@
     "id": "w1",
     "phase": "warmup",
     "kind": "pick",
-    "text": "Who here would survive the longest in a horror movie? Point at them.",
+    "text": "Who here can make you laugh even when you are furious with them?",
     "measures": [
       "early-favorite signals"
     ],
@@ -14,7 +14,7 @@
     "id": "w2",
     "phase": "warmup",
     "kind": "pick",
-    "text": "Who's getting us lost on the road trip? Point.",
+    "text": "Who here would get this group lost on a road trip?",
     "measures": [
       "status reads"
     ],
@@ -25,7 +25,7 @@
     "id": "w3",
     "phase": "warmup",
     "kind": "text",
-    "text": "Most chaotic thing you did this year \u2014 and who here was the accomplice? One line.",
+    "text": "Most chaotic thing you did this year — and who here was the accomplice? One line.",
     "measures": [
       "chaos baseline"
     ],
@@ -36,7 +36,7 @@
     "id": "w4",
     "phase": "warmup",
     "kind": "pick",
-    "text": "Who would forget their own birthday? Point.",
+    "text": "Who here would forget their own birthday until this group reminded them?",
     "measures": [
       "teasing baseline"
     ],
@@ -47,7 +47,7 @@
     "id": "w5",
     "phase": "warmup",
     "kind": "rating",
-    "text": "How warm are you, honestly? 1\u201310.",
+    "text": "How warm is {P2} with this group, from 1 to 10?",
     "measures": [
       "trait:warmth",
       "self-image baseline",
@@ -72,7 +72,7 @@
     "id": "w7",
     "phase": "warmup",
     "kind": "pick",
-    "text": "First person you'd call with good news? Point.",
+    "text": "Between {P1} and {P2}, who would you call first with good news?",
     "measures": [
       "trust network"
     ],
@@ -94,7 +94,7 @@
     "id": "w9",
     "phase": "warmup",
     "kind": "rating",
-    "text": "Rate {P2}'s chaos level 1\u201310. They can take it.",
+    "text": "Rate {P2}'s chaos level 1–10. They can take it.",
     "measures": [
       "trait:chaos",
       "peer chaos read",
@@ -107,7 +107,7 @@
     "id": "w10",
     "phase": "warmup",
     "kind": "minigame",
-    "text": "Tap war: fastest fingers wins. Ready\u2026",
+    "text": "This group is in a tap war: who has the fastest fingers?",
     "measures": [
       "tap-war champion"
     ],
@@ -142,7 +142,7 @@
     "id": "w13",
     "phase": "warmup",
     "kind": "rating",
-    "text": "Rate how good {P3} is at keeping a secret, 1\u201310.",
+    "text": "Rate how good {P3} is at keeping a secret, 1–10.",
     "measures": [
       "trait:loyalty",
       "peer loyalty read",
@@ -155,7 +155,7 @@
     "id": "w14",
     "phase": "warmup",
     "kind": "shout",
-    "text": "Shout one word for how this night ends.",
+    "text": "Shout one word for how this group ends the night.",
     "measures": [
       "group vibe snapshot",
       "running gag seed"

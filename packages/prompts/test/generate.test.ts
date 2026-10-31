@@ -103,7 +103,7 @@ test("placeholders above the roster are dropped for small rooms", async () => {
 
 test("dedupe vs the bank, vs usedIds and within the batch", async () => {
   const batch = [
-    candidate({ text: "Who here would survive the longest in a horror movie? Point at them." }), // bank w1
+    candidate({ text: "Who here can make you laugh even when you are furious with them?" }), // bank w1
     candidate({ text: "Who here would you trust to delete your search history, no questions?" }),
     candidate({ text: "Who here would you trust to delete your search history with no questions?" }),
   ];
@@ -175,8 +175,8 @@ test("digest callbacks: verbatim quotes survive, invented quotes never do", asyn
   assert.ok(report.prompts.some((p) => p.text.includes(quote)));
 });
 
-test("~1 in 3 callbacks from spicy on: the top-up quotes the digest, never invents", async () => {
-  // 6 candidates, no callbacks claimed: target = floor(6/3) = 2.
+test("at least half the prompts can be callbacks from spicy on", async () => {
+  // 6 candidates, no callbacks claimed: target is 3.
   const batch = [
     candidate({ text: "Who here would you lend your car to for a whole week?", callback: false }),
     candidate({ text: "What's the pettiest reason you ghosted someone here?", kind: "text", asksTarget: false, callback: false }),
@@ -189,7 +189,7 @@ test("~1 in 3 callbacks from spicy on: the top-up quotes the digest, never inven
   const provider = makeProvider({ xaiApiKey: "k", fetchImpl: mock.fetchImpl });
   const report = await generateBatchReport({ ...base, provider, digest: makeDigest(), count: 6 });
 
-  assert.ok(report.callbacks >= 2, `expected at least 2 callbacks, got ${report.callbacks}`);
+  assert.ok(report.callbacks >= 3, `expected at least 3 callbacks, got ${report.callbacks}`);
   const digestQuotes = makeDigest().quotes.map((q) => q.text);
   for (const prompt of report.prompts) {
     if (prompt.text.includes("Callback:")) {
@@ -253,4 +253,32 @@ test("generation respects the per-phase batch budget (4 calls a night)", async (
   const fifth = await generateBatchReport({ ...base, phase: "spicy", provider });
   assert.equal(fifth.reason, "budget");
   assert.equal(mock.calls.length, 4);
+});
+
+test("generation voice includes room register and four actual bank examples", async () => {
+  const { BANK } = await import("../src/bank/index.ts");
+  const mock = mockFetch(() => grokReply("[]"));
+  await generateBatchReport({ ...base, provider: makeProvider({ xaiApiKey: "k", fetchImpl: mock.fetchImpl }) });
+  const system = (mock.calls[0]!.body.messages as Array<{role: string; content: string}>).find(m => m.role === "system")!.content;
+  assert.match(system, /close friends/i);
+  assert.match(system, /phones/i);
+  assert.match(system, /one sentence/i);
+  assert.match(system, /no disclaimers/i);
+  assert.ok(BANK.filter(p => p.phase === "spicy" && system.includes(p.text)).length >= 4);
+});
+
+test("generation logs every dropped candidate with a reason, never its text", async () => {
+  const mock = mockFetch(() => grokReply(JSON.stringify([
+    candidate({ text: "Who here would survive a zombie outbreak the longest? Point." }),
+    candidate({ text: "Who here would you trust with a secret that could end you?", measures: [] }),
+  ])));
+  const logs: string[] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => logs.push(args.join(" "));
+  try {
+    const report = await generateBatchReport({ ...base, provider: makeProvider({ xaiApiKey: "k", fetchImpl: mock.fetchImpl }) });
+    assert.equal(logs.length, report.dropped.length);
+    for (const drop of report.dropped) assert.ok(logs.some(line => line.includes(drop.reason)));
+    assert.ok(logs.every(line => !line.includes("zombie outbreak")));
+  } finally { console.warn = original; }
 });

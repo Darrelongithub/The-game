@@ -309,3 +309,15 @@ test("coverage matrix keys are pair × dimension and count is monotone", () => {
   assert.equal(twice.coverage["p1\u0000p2|trust"], 2, "subject order does not matter");
   assert.equal(starvedCells(twice, meta).length, cells.length - 1);
 });
+
+test("TEST never labels a one-subject or unbound prompt as a pair probe", () => {
+  const h: Hypothesis = { id: "pair", kind: "onesided", subjects: ["p2", "p4"], status: "open", strength: .5, evidence: [], openedAt: 1 };
+  const wrong = { ...prompt("wrong", "couple"), text: "Would {P2} flirt with someone here?" };
+  const right = { ...prompt("right", "couple"), text: "Would {P1} flirt with {P2} in this room?" };
+  let count = 0;
+  for (let seed = 1; seed < 100; seed++) {
+    const p = planRound({ hypotheses: [h], state: emptyDirectorState(), candidates: [wrong, right], seed, meta });
+    if (p?.mode === "test") { count++; assert.equal(p.prompt.id, "right"); assert.deepEqual(p.subjects, ["p2", "p4"]); }
+  }
+  assert.ok(count > 0);
+});

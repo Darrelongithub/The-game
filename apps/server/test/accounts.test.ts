@@ -17,7 +17,7 @@ let base: string;
 
 before(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "reveal-accounts-"));
-  server = createGameServer({ dataDir });
+  server = createGameServer({ revealMode: "round", dataDir });
   const port = await server.listen(0, "127.0.0.1", false);
   base = `http://127.0.0.1:${port}`;
 });

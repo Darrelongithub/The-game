@@ -334,3 +334,28 @@ Automated coverage is green, but no real Android or iPhone device results have b
 |---|---|---|---|---|
 | Android | _pending_ | _pending_ | **REQUIRES HUMAN** | _pending_ |
 | iPhone | _pending_ | _pending_ | **REQUIRES HUMAN** | _pending_ |
+
+## ROUND 6 — partial status
+
+- N1 — PARTIAL: removed interlude digest teasers; full finale-only anonymity is not implemented. Audit findings: interlude `pickTeasers` could expose attributed answers (removed); ordinary reveal payloads broadcast text and dare pass reasons with aliases, and minigame leaderboards with aliases, to phones, displays and reconnect replay; prompt callbacks can identify an answer through its content or context. `submitted` lists identify responders, and verdict tallies identify the chosen player; these need a mode-aware threat-model audit. Spotlight captions and live dare performances are exempt, but pass reasons are not necessarily performances. No `REVEAL_MODE` implementation exists in this checkout. Do not rely on finale-only anonymity.
+- N2 — NOT DONE: the spicy and deep phase schedules still have no guaranteed dare.
+- N3 — PARTIAL: generation now has the room-specific voice and five runtime bank examples; bank rewrite, callback share and director targeting remain.
+- N4 — PARTIAL: pick/shout/rating defaults are 25s, text is 60s, default grace is zero, and interlude default was already 3.2s. All-connected submissions already finish the round immediately; the ready gate remains, there is no finale mode, and confess is not a separate round kind. No wall-time comparison was performed.
+- N5 — NOT DONE: self-picks remain rejected; scoring and flex reveal are unchanged.
+- N6 — NOT DONE: spice scheduling, bank rewrite and drop logging require work.
+
+Tests: `npx tsx --test apps/server/test/night-pacing.test.ts`, `npx tsx --test apps/server/test/full-game.test.ts`, `npx tsx --test packages/prompts/test/generate.test.ts`, `npm run typecheck`, `npm run selfcheck` (existing 36 checks pass; requested new selfchecks have not been added).
+
+
+## ROUND 6 — continuation status (supersedes the partial status above)
+
+- N1 — Production uses finale-only anonymity by default; ordinary reveals are generic, submitted identities and interlude teasers are suppressed, and callbacks are disabled because context can identify a speaker. Spotlight theatre remains exempt. A five-phone scripted night plus display captures frames, including aliases resembling IDs and regex characters. The legacy round-reveal path is retained only as an in-process test seam, not an environment setting.
+- N2 — Spicy and deep each gain a solo dare; the dare phase keeps its existing dares. Full-night regression and selfcheck cover the floor.
+- N3 — Added register and runtime bank examples, rewrote weak room prompts, increased callbacks in legacy round-reveal mode, and required real bound pair placeholders for TEST; bank pair probes and regressions added. Finale-only production deliberately suppresses callbacks rather than risk contextual identification.
+- N4 — Timer defaults are 25s pick/shout/rating and 60s text, grace defaults to zero, interludes default to 3.2s, and all-in closes immediately; finale-only skips the ready gate and uses a 2s ordinary transition. Tests cover waiting for the last player and compare scripted wall time against a scaled legacy ready gate. There is no separate confess round kind in this checkout.
+- N5 — Self-picks are accepted on pick rounds, tagged as self-image, shown as a flex in the finale, and excluded from pair/consensus calculations; verdict still excludes self. Regression checks pair signals and claims numerically.
+- N6 — Spicy bank rewritten and filtered, first spicy round verified by round 8 in the scripted room, and generated-candidate drops logged by index and reason without prompt text.
+
+N1 audit findings: ordinary text/dare-pass and minigame reveal items carried aliases and answers; interlude digest/name-cluster teasers could disclose attributed answers; callbacks could identify the author through content or context; submitted-status lists exposed respondent IDs. The same reveal/interlude payloads reached display and reconnect replay. Finale-only mode suppresses these ordinary surfaces; spotlight captions and performances are live-theatre exceptions. No automatic system can prevent someone saying their own answer aloud in the room.
+
+Checks: server 74/74, engine 42/42, prompts 109/109, narrator 81/81, component 131/131, selfcheck 39/39, typecheck, production build, and fast verified smoke. Additional bank/director and full-night regressions pass after those runs. Real-device playtesting remains advisable.

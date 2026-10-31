@@ -171,3 +171,26 @@ test("SPICY_TIER env override is respected", () => {
   assert.equal(spicyTierEnabled({ SPICY_TIER: "false" }), false);
   assert.equal(spicyTierEnabled({ SPICY_TIER: " OFF " }), false);
 });
+
+test("every seed is personal to this room and avoids generic scenarios", () => {
+  const room = /\{P\d+\}|\b(you|your|here|this room|the room|the group|this group|you two|everyone|someone)\b/i;
+  for (const prompt of loadBank({ spicy: true })) {
+    assert.match(prompt.text, room, `${prompt.id} must address people present`);
+    assert.doesNotMatch(prompt.text, /horror movie|apocalypse|prison|why are you here tonight/i, `${prompt.id} is a generic scenario`);
+  }
+});
+
+test("spicy bank carries desire and innuendo without triggering the safety filter", () => {
+  const spicy = bankForPhase("spicy", { spicy: false });
+  for (const p of spicy) {
+    assert.match(p.text, /flirt|kiss|crush|attract|chemistry|desire|seduc|tempt|tension|rizz|date|charm|turn.on/i, `${p.id} is not spicy`);
+    assert.equal(checkBanned(p.text), null, p.id);
+    assert.equal(checkHardBlocked(p.text), null, p.id);
+  }
+});
+
+test("actual phase banks have two-subject pick probes for the director", () => {
+  for (const [phase, coding] of [["warmup", "friendship"], ["spicy", "couple"], ["spicy", "rivalry"], ["deep", "friendship"]] as const) {
+    assert.ok(bankForPhase(phase).some(p => p.kind === "pick" && p.coding === coding && p.text.includes("{P1}") && p.text.includes("{P2}")), `${phase}/${coding} has no pair probe`);
+  }
+});

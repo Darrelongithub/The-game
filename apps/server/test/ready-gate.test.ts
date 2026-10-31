@@ -41,7 +41,7 @@ const event = <T>(client: Client, name: string, predicate: (payload: T) => boole
 /** A four-seat room that never presses ready on its own. */
 async function room(t: { after: (fn: () => Promise<void> | void) => void }, options: { readyGraceMs: number; bots?: number }) {
   const dir = mkdtempSync(join(tmpdir(), "reveal-ready-"));
-  const server: GameServer = createGameServer({
+  const server: GameServer = createGameServer({ revealMode: "round",
     dataDir: dir,
     roundTimers: { pick: 1_200, shout: 1_200, text: 1_200, rating: 1_200, ios: 1_200, minigame: 1_200, dare: 1_200, pair_dare: 1_200, debrief: 1_200, spotlight: 1_200, verdict: 1_200 },
     verdictDiscussMs: 0, graceMs: 50, revealHoldMs: 400, interludeHoldMs: 20, botDelayMs: [5, 10],

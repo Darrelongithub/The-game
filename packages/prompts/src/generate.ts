@@ -10,7 +10,7 @@
 // patterns, 20–160 chars, valid {P1}..{P11}, the data-or-dead rule, and the
 // callback rule (verbatim digest quotes only — never an invented answer).
 import type { NightDigest, Prompt } from "../../shared/src/contracts.ts";
-import { PHASE_KINDS, type PromptPhase } from "./bank/index.ts";
+import { PHASE_KINDS, maxPlaceholderIndex, type PromptPhase } from "./bank/index.ts";
 import {
   containsVerbatimQuote,
   filterCandidates,
@@ -105,10 +105,14 @@ function systemPrompt(input: {
   count: number;
   quotes: string[];
   callbackTarget: number;
+  aliases?: readonly string[];
 }): string {
   const kinds = PHASE_KINDS[input.phase].join(", ");
   const lines = [
-    "You write prompts for a private 18+ party game played by a group of friends in one room.",
+    "You write prompts for a private 18+ party game played by close friends in one room on phones.",
+    "Address the group about the group: flirty, teasing, roast and inside-joke energy; one sentence, no disclaimers.",
+    "Use these bank examples for voice, not as text to repeat:",
+    ...BANK.filter((p) => p.phase === input.phase && maxPlaceholderIndex(p.text) <= input.playerCount && !(input.aliases ?? []).some((a) => a && p.text.toLocaleLowerCase().includes(a.toLocaleLowerCase()))).slice(0, 5).map((p) => `  - ${p.text}`),
     `Phase: ${input.phase}. ${PHASE_BRIEF[input.phase]}`,
     `There are exactly ${input.playerCount} players, addressed only as Player 1..Player ${input.playerCount} — never real names.`,
     `Return ONE JSON array of ${input.count} objects. No prose, no markdown.`,
@@ -140,7 +144,7 @@ function systemPrompt(input: {
 
 function callbackTargetFor(phase: PromptPhase, count: number, quoteCount: number): number {
   if (phase === "warmup" || quoteCount === 0) return 0;
-  return Math.max(1, Math.floor(count / 3));
+  return Math.max(1, Math.ceil(count / 2));
 }
 
 function quotedSegments(text: string): string[] {
@@ -180,7 +184,7 @@ export function checkCallbackIntegrity(
 }
 
 /**
- * Keep ~1 in 3 callbacks from spicy onward. When the model under-delivers we
+ * Aim for half callbacks from spicy onward. When the model under-delivers we
  * append a REAL quote to a plain text prompt (still ≤160 chars) instead of
  * inventing one. Deterministic: first eligible prompts, digest order.
  */
@@ -253,7 +257,7 @@ export async function generateBatchReport(input: GenerateBatchInput): Promise<Ge
       purpose: "generate",
       model: provider.modelFor("grok", "generate"),
       messages: [
-        { role: "system", content: systemPrompt({ phase: input.phase, playerCount: input.playerCount, count, quotes, callbackTarget: cbTarget }) },
+        { role: "system", content: systemPrompt({ phase: input.phase, playerCount: input.playerCount, count, quotes, callbackTarget: cbTarget, aliases: input.aliases }) },
         {
           role: "user",
           content: JSON.stringify({
@@ -284,6 +288,7 @@ export async function generateBatchReport(input: GenerateBatchInput): Promise<Ge
     // has no trait field yet), so stamp `trait:<id>` from the wording or drop.
     const dropped: GenerateBatchReport["dropped"] = [];
     const kept: unknown[] = [];
+    const keptIndices: number[] = [];
     for (let i = 0; i < raws.length; i += 1) {
       const verdict = checkCallbackIntegrity(raws[i], quotes);
       if (!verdict.ok) {
@@ -303,6 +308,7 @@ export async function generateBatchReport(input: GenerateBatchInput): Promise<Ge
         candidate.measures = [`${TRAIT_MEASURE_PREFIX}${trait}`, ...measures.filter((m) => !m.startsWith(TRAIT_MEASURE_PREFIX))];
       }
       kept.push(candidate);
+      keptIndices.push(i);
     }
 
     const bankTexts = input.bankTexts ?? BANK.map((p) => p.text);
@@ -321,15 +327,18 @@ export async function generateBatchReport(input: GenerateBatchInput): Promise<Ge
     const isCallback = (p: Prompt) => quotes.some((q) => containsVerbatimQuote(p.text, q));
     const topped = ensureCallbackShare(accepted, quotes, cbTarget, isCallback);
 
+    const allDrops = [
+      ...dropped,
+      ...filtered.dropped.map((d) => ({ index: keptIndices[d.index] ?? d.index, reason: d.reason as GenerateDrop, detail: d.detail })),
+    ];
+    // Never log prompts or answers: only operational diagnostics.
+    for (const drop of allDrops) console.warn(`[prompts] phase=${input.phase} candidate=${drop.index} dropped=${drop.reason}`);
     return {
       prompts: topped,
       lane: "grok",
       candidates: raws.length,
       accepted: topped.length,
-      dropped: [
-        ...dropped,
-        ...filtered.dropped.map((d) => ({ index: d.index, reason: d.reason as GenerateDrop, detail: d.detail })),
-      ],
+      dropped: allDrops,
       callbacks: topped.filter(isCallback).length,
       called: true,
     };

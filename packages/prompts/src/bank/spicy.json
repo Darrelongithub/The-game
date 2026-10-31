@@ -3,7 +3,7 @@
     "id": "s1",
     "phase": "spicy",
     "kind": "pick",
-    "text": "Who's been performing calm all night? Point at the best actor.",
+    "text": "Who here is pretending not to notice the chemistry in this room?",
     "measures": [
       "social awareness"
     ],
@@ -14,7 +14,7 @@
     "id": "s2",
     "phase": "spicy",
     "kind": "pick",
-    "text": "Who flirts their way out of trouble? Point.",
+    "text": "Who here could flirt their way into your attention without even trying?",
     "measures": [
       "flirt-pattern signal"
     ],
@@ -25,7 +25,7 @@
     "id": "s3",
     "phase": "spicy",
     "kind": "text",
-    "text": "What did you hear about someone in this room BEFORE you met them?",
+    "text": "What was your first spark of attraction to someone in this room, if any?",
     "measures": [
       "past-meets-present tags"
     ],
@@ -36,7 +36,7 @@
     "id": "s4",
     "phase": "spicy",
     "kind": "rating",
-    "text": "How spicy are you, really? 1\u201310.",
+    "text": "Rate {P2} on spice from 1 to 10 when they are flirting with this group.",
     "measures": [
       "trait:spice",
       "self-spice baseline",
@@ -49,7 +49,7 @@
     "id": "s5",
     "phase": "spicy",
     "kind": "pick",
-    "text": "Two people here must date to survive the apocalypse. Point at one of them.",
+    "text": "Between {P1} and {P2}, who would you be tempted to kiss if it were mutual?",
     "measures": [
       "couple-coding seed"
     ],
@@ -60,7 +60,7 @@
     "id": "s6",
     "phase": "spicy",
     "kind": "text",
-    "text": "Your worst first-impression moment involving someone in this room. Go.",
+    "text": "Which person here has surprised you with their flirting, and what did they do?",
     "measures": [
       "first-impression tags"
     ],
@@ -71,7 +71,7 @@
     "id": "s7",
     "phase": "spicy",
     "kind": "pick",
-    "text": "Who wins a staring contest against you? Point at your rival.",
+    "text": "Between {P1} and {P2}, who would win a flirtatious staring contest with you?",
     "measures": [
       "rivalry seed"
     ],
@@ -82,7 +82,7 @@
     "id": "s8",
     "phase": "spicy",
     "kind": "ios",
-    "text": "How close are you and {P3}, really? Circles.",
+    "text": "How close would you want to get to {P3} if the chemistry was mutual?",
     "measures": [
       "closeness map"
     ],
@@ -93,7 +93,7 @@
     "id": "s9",
     "phase": "spicy",
     "kind": "pick",
-    "text": "Who here has the most rizz and is wasting it? Point.",
+    "text": "Who here has the most rizz and is wasting it on this group?",
     "measures": [
       "rizz ranking"
     ],
@@ -104,7 +104,7 @@
     "id": "s10",
     "phase": "spicy",
     "kind": "text",
-    "text": "Last lie you told to dodge plans with someone in this room. What did you say?",
+    "text": "What is the boldest flirt you have wanted to send someone in this room?",
     "measures": [
       "harmless-confession tags"
     ],
@@ -115,7 +115,7 @@
     "id": "s11",
     "phase": "spicy",
     "kind": "pick",
-    "text": "Who here is the biggest people-pleaser? Point at them.",
+    "text": "Who here would make a crush obvious before they ever admitted it?",
     "measures": [
       "status reads",
       "friction tags"
@@ -127,7 +127,7 @@
     "id": "s12",
     "phase": "spicy",
     "kind": "rating",
-    "text": "Rate {P5}'s flirting, 1\u201310 \u2014 technique only. They will see it.",
+    "text": "Rate {P5} on spice from 1 to 10 when they flirt with someone here.",
     "measures": [
       "trait:spice",
       "peer spice read",
@@ -140,7 +140,7 @@
     "id": "s13",
     "phase": "spicy",
     "kind": "text",
-    "text": "Whose opinion in this room do you pretend not to care about? Name them.",
+    "text": "Whose attention in this room feels most tempting when they turn on the charm?",
     "measures": [
       "grievance tags",
       "status reads"
@@ -152,7 +152,7 @@
     "id": "s14",
     "phase": "spicy",
     "kind": "pick",
-    "text": "Who here talks the most and says the least? Point at them.",
+    "text": "Who here could turn a completely innocent compliment into flirting?",
     "measures": [
       "status reads",
       "criticism tags"
@@ -164,7 +164,7 @@
     "id": "s15",
     "phase": "spicy",
     "kind": "rating",
-    "text": "Rate how well {P7} actually listens, 1\u201310. They will see it.",
+    "text": "Rate {P3} on spice from 1 to 10 when they notice chemistry in this room.",
     "measures": [
       "trait:warmth",
       "peer warmth read"

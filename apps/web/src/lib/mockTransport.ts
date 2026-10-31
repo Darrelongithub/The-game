@@ -525,6 +525,7 @@ export class MockTransport implements Transport {
     if (this.round.onlyPlayers && !this.round.onlyPlayers.includes(this.you)) {
       return { ok: false, error: "This one isn't yours to answer." };
     }
+    if (this.round.kind === "verdict" && req.value.kind === "pick" && req.value.target === this.you) return { ok: false, error: "Choose another player for the verdict." };
     if (this.round.kind === "verdict" && (this.round.voteOpensAt ?? 0) > Date.now()) {
       return { ok: false, error: "Phones down. Argue it out first." };
     }

@@ -174,9 +174,9 @@ Each heat phase opens with its normal rounds and closes with its live moments:
 
 | phase | rounds | live moments |
 |---|---|---|
-| warmup | 3 questions (pick / shout / text …) | 1 spotlight |
-| spicy | 3 questions (pick / rating / ios …) | 1 spotlight, 1 verdict |
-| deep | 3 questions (text / minigame / pick …) | 1 spotlight, 1 verdict |
+| warmup | 4 questions (2 pick / shout / text) | 1 spotlight |
+| spicy | 4 questions + 1 solo dare | 1 spotlight, 1 verdict |
+| deep | 4 questions + 1 solo dare | 1 spotlight, 1 verdict |
 | dare | 2 dares + the pair dare | 1 spotlight, 1 verdict |
 | debrief | 2 private pair texts (onlyPlayers) | — |
 
@@ -244,3 +244,10 @@ broadcast recipients. The joker weight, negative nomination count and victim tox
 must be actual engine results, not assumptions. At least one negative nomination
 is required to exercise the guard. Without this oracle the test deliberately fails rather than
 claiming to have proved privacy or idempotence.
+
+## Tuning the night
+
+- `ROUND_TIMERS_MS`, `GRACE_MS` and `INTERLUDE_HOLD_MS` in `packages/shared/src/contracts.ts` control the ceilings and interlude. All required connected players answering closes a round immediately; ordinary finale-mode transitions hold for 2s. Dares and the verdict debate keep their longer timers. There is no separate confess kind.
+- `apps/server/src/schedule.ts` defines phase slots and the spicy/deep dare floor; `DARE_ROUNDS` in shared contracts sets the separate dare-phase solo count. Live moments are scheduled in `apps/server/src/game.ts`.
+- `packages/prompts/src/bank/spicy.json` and `unhinged.json` contain heat; `SPICY_TIER=false` removes the unhinged tier. The server's phase order starts spicy after warmup. Generated prompt drops are logged by phase, candidate index and reason, never prompt text.
+- Production always holds ordinary attributed answers for the finale (including with `REVEAL_MODE=finale`). The old round-reveal mode is an in-process testing seam only. Spotlight captions remain live theatre. Callbacks are suppressed in finale-only play because their context can reveal a speaker.
