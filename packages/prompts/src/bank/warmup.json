@@ -1,213 +1,487 @@
 [
   {
-    "id": "w1",
-    "phase": "warmup",
+    "id": "wu-01",
+    "band": "warmup",
+    "role": "observer_subject",
     "kind": "pick",
-    "text": "Who here would survive the longest in a horror movie? Point at them.",
+    "text": "Who in this room do you think {P1} has a crush on?",
     "measures": [
-      "early-favorite signals"
+      "metric:crush",
+      "guess"
     ],
-    "coding": "friendship",
+    "coding": "couple",
     "asksTarget": true
   },
   {
-    "id": "w2",
-    "phase": "warmup",
-    "kind": "pick",
-    "text": "Who's getting us lost on the road trip? Point.",
-    "measures": [
-      "status reads"
-    ],
-    "coding": "status",
-    "asksTarget": true
-  },
-  {
-    "id": "w3",
-    "phase": "warmup",
+    "id": "wu-02",
+    "band": "warmup",
+    "role": "subject",
     "kind": "text",
-    "text": "Most chaotic thing you did this year \u2014 and who here was the accomplice? One line.",
+    "text": "Straight up: who in this room would you kiss if they leaned in right now?",
     "measures": [
-      "chaos baseline"
+      "flavour:confession"
     ],
-    "coding": "neutral",
-    "asksTarget": true
+    "coding": "couple",
+    "asksTarget": false
   },
   {
-    "id": "w4",
-    "phase": "warmup",
-    "kind": "pick",
-    "text": "Who would forget their own birthday? Point.",
+    "id": "wu-03",
+    "band": "warmup",
+    "role": "observer_subject",
+    "kind": "rating",
+    "trait": "spice",
+    "text": "How hot is {P1} on a scale of 1 to 10? Be honest, the room will find out.",
     "measures": [
-      "teasing baseline"
+      "trait:spice"
     ],
     "coding": "tease",
     "asksTarget": true
   },
   {
-    "id": "w5",
-    "phase": "warmup",
-    "kind": "rating",
-    "text": "How warm are you, honestly? 1\u201310.",
-    "measures": [
-      "trait:warmth",
-      "self-image baseline",
-      "blind-spot fuel"
-    ],
-    "coding": "neutral",
-    "asksTarget": false
-  },
-  {
-    "id": "w6",
-    "phase": "warmup",
-    "kind": "shout",
-    "text": "One word for this group's energy tonight.",
-    "measures": [
-      "group vibe snapshot",
-      "running gag seed"
-    ],
-    "coding": "neutral",
-    "asksTarget": false
-  },
-  {
-    "id": "w7",
-    "phase": "warmup",
+    "id": "wu-04",
+    "band": "warmup",
+    "role": "group",
     "kind": "pick",
-    "text": "First person you'd call with good news? Point.",
+    "text": "Who in this room would you kiss at the end of the night if they said yes?",
     "measures": [
-      "trust network"
+      "metric:sex-desire"
     ],
-    "coding": "friendship",
+    "coding": "tease",
     "asksTarget": true
   },
   {
-    "id": "w8",
-    "phase": "warmup",
+    "id": "wu-05",
+    "band": "warmup",
+    "role": "subject",
+    "kind": "pick",
+    "text": "Who in this room would you most want to wake up next to?",
+    "measures": [
+      "metric:crush"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-06",
+    "band": "warmup",
+    "role": "observer_subject",
     "kind": "text",
-    "text": "What's a hill you'd die on that everyone here finds ridiculous?",
+    "text": "Finish this sentence about {P1}: \"{P1} is the kind of person who...\"",
     "measures": [
-      "values reveal"
+      "flavour:roast"
     ],
-    "coding": "trust",
-    "asksTarget": false
-  },
-  {
-    "id": "w9",
-    "phase": "warmup",
-    "kind": "rating",
-    "text": "Rate {P2}'s chaos level 1\u201310. They can take it.",
-    "measures": [
-      "trait:chaos",
-      "peer chaos read",
-      "trait agreement"
-    ],
-    "coding": "friction",
+    "coding": "tease",
     "asksTarget": true
   },
   {
-    "id": "w10",
-    "phase": "warmup",
-    "kind": "minigame",
-    "text": "Tap war: fastest fingers wins. Ready\u2026",
+    "id": "wu-07",
+    "band": "warmup",
+    "role": "solo",
+    "kind": "text",
+    "text": "Say one thing you would never say out loud in front of your mother.",
     "measures": [
-      "tap-war champion"
+      "flavour:confession"
     ],
-    "coding": "neutral",
+    "coding": "status",
     "asksTarget": false
   },
   {
-    "id": "w11",
-    "phase": "warmup",
+    "id": "wu-08",
+    "band": "warmup",
+    "role": "observer_subject",
     "kind": "pick",
-    "text": "Who here would you trust with your unlocked phone for five minutes? Point.",
+    "text": "Who do you think {P1} would swipe right on in this room?",
     "measures": [
-      "trust network",
-      "risk read"
+      "metric:crush",
+      "guess"
     ],
-    "coding": "trust",
+    "coding": "couple",
     "asksTarget": true
   },
   {
-    "id": "w12",
-    "phase": "warmup",
+    "id": "wu-09",
+    "band": "warmup",
+    "role": "group",
     "kind": "pick",
-    "text": "Who here is secretly the most competitive? Point at them.",
+    "text": "Who in this room has the biggest body count? No lying, we all know.",
     "measures": [
-      "status reads",
-      "competition tags"
+      "metric:body-count"
     ],
     "coding": "status",
     "asksTarget": true
   },
   {
-    "id": "w13",
-    "phase": "warmup",
+    "id": "wu-10",
+    "band": "warmup",
+    "role": "subject",
     "kind": "rating",
-    "text": "Rate how good {P3} is at keeping a secret, 1\u201310.",
+    "trait": "spice",
+    "text": "How hot do you think you are, 1 to 10?",
     "measures": [
-      "trait:loyalty",
-      "peer loyalty read",
-      "trait agreement"
+      "trait:spice"
     ],
-    "coding": "friendship",
-    "asksTarget": true
-  },
-  {
-    "id": "w14",
-    "phase": "warmup",
-    "kind": "shout",
-    "text": "Shout one word for how this night ends.",
-    "measures": [
-      "group vibe snapshot",
-      "running gag seed"
-    ],
-    "coding": "neutral",
+    "coding": "tease",
     "asksTarget": false
   },
   {
-    "id": "w15",
-    "phase": "warmup",
-    "kind": "text",
-    "text": "Who here would you fight over the last slice, and why them?",
+    "id": "wu-11",
+    "band": "warmup",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who do you think {P1} would cheat with?",
     "measures": [
-      "friction tags",
-      "dyadic tension"
+      "metric:would-cheat",
+      "guess"
     ],
     "coding": "friction",
     "asksTarget": true
   },
   {
-    "id": "w16",
-    "phase": "warmup",
+    "id": "wu-12",
+    "band": "warmup",
+    "role": "group",
     "kind": "pick",
-    "text": "Who here would you call at 3am with a crisis? Point.",
+    "text": "Who in this room is the best in bed according to the people who have actually been there?",
     "measures": [
-      "trust network",
-      "crisis support"
+      "metric:best-in-bed"
     ],
-    "coding": "friendship",
+    "coding": "status",
     "asksTarget": true
   },
   {
-    "id": "w17",
-    "phase": "warmup",
-    "kind": "ios",
-    "text": "How close are you and {P4}, really? Circles.",
+    "id": "wu-13",
+    "band": "warmup",
+    "role": "observer_subject",
+    "kind": "text",
+    "text": "What is {P1}'s most chaotic habit?",
     "measures": [
-      "closeness map"
+      "flavour:roast"
     ],
-    "coding": "friendship",
+    "coding": "tease",
     "asksTarget": true
   },
   {
-    "id": "w18",
-    "phase": "warmup",
-    "kind": "pick",
-    "text": "Who here would you set up with someone else in this room? Point at the match you'd make.",
+    "id": "wu-14",
+    "band": "warmup",
+    "role": "subject",
+    "kind": "text",
+    "text": "What is the wildest thing you have done in the last six months?",
     "measures": [
-      "couple-coding seed",
-      "matchmaker reads"
+      "flavour:confession"
+    ],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "wu-15",
+    "band": "warmup",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who would {P1} absolutely betray for money?",
+    "measures": [
+      "metric:betrayal",
+      "guess"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-16",
+    "band": "warmup",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who in this room has the wildest stories?",
+    "measures": [
+      "flavour:storyteller"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-17",
+    "band": "warmup",
+    "role": "solo",
+    "kind": "text",
+    "text": "Describe your type in one sentence. No cheating with \"I don't have a type\".",
+    "measures": [
+      "flavour:confession"
     ],
     "coding": "couple",
+    "asksTarget": false
+  },
+  {
+    "id": "wu-18",
+    "band": "warmup",
+    "role": "observer_subject",
+    "kind": "rating",
+    "trait": "honesty",
+    "text": "How honest is {P1}? 1 to 10.",
+    "measures": [
+      "trait:honesty"
+    ],
+    "coding": "trust",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-19",
+    "band": "warmup",
+    "role": "subject",
+    "kind": "rating",
+    "trait": "honesty",
+    "text": "How honest are you, 1 to 10?",
+    "measures": [
+      "trait:honesty"
+    ],
+    "coding": "trust",
+    "asksTarget": false
+  },
+  {
+    "id": "wu-20",
+    "band": "warmup",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who in this room does {P1} talk about the most?",
+    "measures": [
+      "metric:closest",
+      "guess"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-21",
+    "band": "warmup",
+    "role": "subject",
+    "kind": "pick",
+    "text": "Who here do you feel most comfortable around?",
+    "measures": [
+      "metric:closest"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-22",
+    "band": "warmup",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here would you trust with a secret you have never told anyone?",
+    "measures": [
+      "metric:trust"
+    ],
+    "coding": "trust",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-23",
+    "band": "warmup",
+    "role": "observer_subject",
+    "kind": "text",
+    "text": "What is the first thing {P1} would do if they were famous tomorrow?",
+    "measures": [
+      "flavour:roast"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-24",
+    "band": "warmup",
+    "role": "solo",
+    "kind": "text",
+    "text": "What is a rumor about yourself that turned out to be true?",
+    "measures": [
+      "flavour:confession"
+    ],
+    "coding": "tease",
+    "asksTarget": false
+  },
+  {
+    "id": "wu-25",
+    "band": "warmup",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who would {P1} snitch on if the police walked in?",
+    "measures": [
+      "metric:would-snitch",
+      "guess"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-26",
+    "band": "warmup",
+    "role": "subject",
+    "kind": "pick",
+    "text": "Who in this room would you most want on your side in a fight?",
+    "measures": [
+      "metric:trust"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-27",
+    "band": "warmup",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here is the most likely to end up on a dating app this week?",
+    "measures": [
+      "metric:hookups",
+      "guess"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-28",
+    "band": "warmup",
+    "role": "observer_subject",
+    "kind": "text",
+    "text": "What would {P1} do with one million dollars overnight?",
+    "measures": [
+      "metric:money",
+      "guess"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-29",
+    "band": "warmup",
+    "role": "subject",
+    "kind": "text",
+    "text": "What is the pettiest reason you have ever ended it with someone?",
+    "measures": [
+      "flavour:confession"
+    ],
+    "coding": "tease",
+    "asksTarget": false
+  },
+  {
+    "id": "wu-30",
+    "band": "warmup",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who in this room is {P1} most likely to ghost?",
+    "measures": [
+      "metric:is-fake",
+      "guess"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-31",
+    "band": "warmup",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here would you most want to be stuck on a desert island with?",
+    "measures": [
+      "metric:closest"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-32",
+    "band": "warmup",
+    "role": "solo",
+    "kind": "text",
+    "text": "Name one person in this room you have never been able to read properly.",
+    "measures": [
+      "flavour:confession"
+    ],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "wu-33",
+    "band": "warmup",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who do you think {P1} would pick to have a messy night with?",
+    "measures": [
+      "metric:sex-desire",
+      "guess"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-34",
+    "band": "warmup",
+    "role": "subject",
+    "kind": "pick",
+    "text": "Who here do you think has the worst taste in people?",
+    "measures": [
+      "metric:is-fake",
+      "guess"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-35",
+    "band": "warmup",
+    "role": "observer_subject",
+    "kind": "text",
+    "text": "What would {P1} say if they had to describe their night so far?",
+    "measures": [
+      "flavour:roast"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-36",
+    "band": "warmup",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here is the most likely to send a blurry 2am photo to the wrong person?",
+    "measures": [
+      "flavour:chaos"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-37",
+    "band": "warmup",
+    "role": "observer_subject",
+    "kind": "rating",
+    "trait": "chaos",
+    "text": "How chaotic is {P1}, 1 to 10?",
+    "measures": [
+      "trait:chaos"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "wu-38",
+    "band": "warmup",
+    "role": "subject",
+    "kind": "rating",
+    "trait": "chaos",
+    "text": "How chaotic are you, 1 to 10?",
+    "measures": [
+      "trait:chaos"
+    ],
+    "coding": "tease",
+    "asksTarget": false
+  },
+  {
+    "id": "wu-39",
+    "band": "warmup",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who in this room has the most dating app matches right now?",
+    "measures": [
+      "metric:hookups"
+    ],
+    "coding": "status",
     "asksTarget": true
   }
 ]

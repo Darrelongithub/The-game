@@ -200,8 +200,10 @@ async function main() {
   const { FinaleScreen } = await import('../FinaleScreen')
   const { SecretDeck } = await import('../SecretDeck')
   const { HoldToReveal } = await import('../HoldToReveal')
-  const { ReadyScreen } = await import('../ReadyScreen')
-  const { DemoPanel } = await import('../DemoPanel')
+  const { QuestionScreen } = await import('../play/QuestionScreen')
+  const { LoadingScreen } = await import('../LoadingScreen')
+  const { ReadyGate } = await import('../ReadyGate')
+  const { HostScreen } = await import('../HostScreen')
   const { SoundToggle } = await import('../SoundToggle')
   const sound = await import('../sound')
   const { demoFinale } = await import('../__demo__/demoFinale')
@@ -685,178 +687,178 @@ async function main() {
     await unmount()
   }
 
-  /* ── 13. Live moments: spotlight cover, caption wall, verdict flow ── */
+  /* ── 13. v3.2 phone layout: ONE question, one grey line, the controls ─ */
   {
-    const { CaptionWall } = await import('../CaptionWall')
-    const { PromptScreen } = await import('../../screens/PromptScreen')
-    const { RevealScreen } = await import('../../screens/RevealScreen')
-
+    const players = [
+      { id: 'p1', alias: 'You', connected: true, isBot: false, ready: true },
+      { id: 'p2', alias: 'Wanjiru', connected: true, isBot: false, ready: false },
+      { id: 'p3', alias: 'Dee', connected: true, isBot: false, ready: true },
+    ]
     const room = {
       code: 'MOCK',
-      phase: 'spicy' as const,
-      hostId: 'p1',
-      players: [
-        { id: 'p1', alias: 'You', connected: true, isBot: false },
-        { id: 'p2', alias: 'Brian', connected: true, isBot: true },
-        { id: 'p3', alias: 'Chao', connected: true, isBot: true },
-      ],
+      phase: 'play' as const,
+      players,
       round: null,
-      seq: 1,
+      seq: 4,
+      hostPresent: true,
+      lobbyReady: ['p1', 'p3'],
+      progress: { index: 1, total: 12 },
+      pickOptions: ['p2', 'p3'],
     }
-    const round = (over: Record<string, unknown>) => ({
-      roundId: 'live-1', index: 4, phase: 'spicy' as const, kind: 'verdict' as const,
-      promptText: 'THE VERDICT: who here would make the best couple? Debate. Decide.',
-      closesAt: Date.now() + 15000, youSubmitted: false, ...over,
+    const pickRound = {
+      roundId: 'c1',
+      segmentId: 'c1-p0',
+      index: 1,
+      kind: 'pick' as const,
+      promptText: 'Who in this room would you take home from this party?',
+      note: "About Wanjiru. They won't see this.",
+      closesAt: Date.now() + 30000,
+      youSubmitted: false,
+      submitted: [],
+    }
+    const sent: any[] = []
+    const el = await mount(
+      <QuestionScreen
+        round={pickRound as any}
+        view={room as any}
+        you={'p1'}
+        onSubmit={async (value) => { sent.push(value); return true }}
+      />,
+    )
+    ok('question screen shows ONE question', q('[data-testid="question"]')?.textContent === pickRound.promptText)
+    ok('question screen shows the grey line', q('[data-testid="question-note"]')?.textContent === pickRound.note)
+    ok('question screen has the answer controls', !!q('[data-testid="answer-controls"]'))
+    ok('question screen never lists the player itself', !text(el).includes('>You<'))
+    ok('question screen lists the other players', text(el).includes('Wanjiru') && text(el).includes('Dee'))
+    ok('question screen has NO skip button', !/skip/i.test(text(el)))
+    ok('question screen has no phase names', !/warmup|spicy|deep|dare phase/i.test(text(el)))
+
+    const pickButton = qa('[data-testid="pick-option"]').find((b: any) => b.textContent === 'Dee')
+    await click(pickButton!)
+    ok('picking sends the pick', sent.length === 1 && sent[0].kind === 'pick' && sent[0].target === 'p3')
+    await unmount()
+
+    // the text answer
+    const textRound = { ...pickRound, kind: 'text' as const, promptText: 'What is the most fake thing about you?', note: 'Your answer stays between you and the results.' }
+    const sentText: any[] = []
+    const el2 = await mount(
+      <QuestionScreen
+        round={textRound as any}
+        view={room as any}
+        you={'p1'}
+        onSubmit={async (value) => { sentText.push(value); return true }}
+      />,
+    )
+    const box = q('[data-testid="answer-box"]') as HTMLTextAreaElement
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(w.HTMLTextAreaElement.prototype, 'value')!.set!
+      setter.call(box, 'An honest answer.')
+      box.dispatchEvent(new w.Event('input', { bubbles: true }))
     })
-
-    /* 13a. 320px caption wall: captions stack, the punchline lands LAST */
-    w.innerWidth = 320
-    setReduce(false)
-    const wall = await mount(
-      <CaptionWall
-        subject="Diana"
-        captions={[
-          { alias: 'Brian', text: 'Looking at Chao. Again.' },
-          { alias: 'Chao', text: 'The exit.' },
-          { alias: 'Emanuel', text: 'Their own reflection.' },
-        ]}
-        punchline="What did you eat today?"
-      />
-    )
-    ok('caption wall renders at 320px', !!q('[data-testid="caption-wall"]'))
-    ok('caption wall header is the subject', text(q('[data-testid="caption-subject"]') ?? d.createElement('i')) === 'Diana')
-    ok('caption wall stacks every one-liner', qa('[data-testid="caption-item"]').length === 3)
-    ok('caption wall ends on the punchline (last element)', (() => {
-      const main = q('[data-testid="caption-wall"]')!
-      const punch = q('[data-testid="caption-punchline"]')!
-      return main.lastElementChild === punch && text(punch).includes('What did you eat today?')
-    })())
-    ok('caption wall fits 320px (no fixed width > viewport)', (() => {
-      const nodes = [q('[data-testid="caption-wall"]')!, ...qa('[data-testid="caption-item"]'), q('[data-testid="caption-punchline"]')!]
-      return nodes.every((node: any) => {
-        const width = String(node.style.width ?? '')
-        const px = width.endsWith('px') ? Number.parseFloat(width) : 0
-        return !(px > 320)
-      })
-    })())
-    await unmount()
-
-    /* 13b. reduced motion: the wall renders instantly, no stacked motion */
-    setReduce(true)
-    const wallR = await mount(
-      <CaptionWall subject="Diana" captions={[{ alias: 'Brian', text: 'Looking at Chao.' }]} punchline="Nothing, I swear." />
-    )
-    ok('reduced-motion: caption wall flags itself', q('[data-testid="caption-wall"]')!.getAttribute('data-reduced') === 'true')
-    ok('reduced-motion: captions render immediately', qa('[data-testid="caption-item"]').every((node: any) => node.style.opacity !== '0'))
-    ok('reduced-motion: punchline still lands last', !!q('[data-testid="caption-punchline"]'))
-    await unmount()
-    setReduce(false)
-
-    /* 13c. spotlight subject screen: the cover round looks like any text round */
-    const cover = await mount(
-      <PromptScreen
-        round={round({ kind: 'spotlight', roundId: 'live-cover', promptText: 'What did you eat today?', closesAt: Date.now() + 25000, expectsAnswer: true }) as any}
-        room={room as any}
-        you="p2"
-        onSubmit={() => true}
-      />
-    )
-    ok('spotlight cover renders a normal short-text round', !!q('textarea') && !text(cover).includes('Phones down'))
-    ok('spotlight cover caps the answer at 80 chars', q('textarea')!.getAttribute('maxlength') === '80')
-    await unmount()
-
-    const idle = await mount(
-      <PromptScreen
-        round={round({ kind: 'spotlight', roundId: 'live-idle', promptText: 'Nothing for you right now. Soak it in.', closesAt: Date.now() + 25000, expectsAnswer: false }) as any}
-        room={room as any}
-        you="p2"
-        onSubmit={() => true}
-      />
-    )
-    ok('idle cover has no input and no question', !!q('[data-testid="idle-cover"]') && !q('textarea'))
-    await unmount()
-
-    /* 13d. verdict: phones down → secret pick grid → land */
-    const early = await mount(
-      <PromptScreen round={round({ voteOpensAt: Date.now() + 8000 }) as any} room={room as any} you="p1" onSubmit={() => true} />
-    )
-    ok('verdict opens with PHONES DOWN. ARGUE IT OUT.', !!q('[data-testid="verdict-debate"]') && /phones down/i.test(text(early)))
-    ok('verdict hides the pick grid during the debate', !q('[data-testid="verdict-pickgrid"]'))
-    ok('verdict counts the debate down', /\d+s/.test(text(q('[data-testid="verdict-debate"]') ?? d.createElement('i'))))
-    await unmount()
-
-    await mount(<PromptScreen round={round({ roundId: 'live-transition', voteOpensAt: Date.now() + 80 }) as any} room={room as any} you="p1" onSubmit={() => true} />)
-    await tick(120)
-    ok('verdict shows the pick grid automatically when the debate ends', !!q('[data-testid="verdict-pickgrid"]'))
-    await unmount()
-
-    const submitted: any[] = []
-    const open = await mount(
-      <PromptScreen round={round({ voteOpensAt: Date.now() - 1 }) as any} room={room as any} you="p1" onSubmit={(value: any) => { submitted.push(value); return true }} />
-    )
-    ok('verdict opens a simultaneous pick grid', !!q('[data-testid="verdict-pickgrid"]'))
-    const picks = qa('[data-testid="verdict-pickgrid"] button[aria-pressed]')
-    ok('verdict pick grid excludes yourself', picks.length === 2 && !text(open).includes('You'))
-    const lockVote = qa('[data-testid="verdict-pickgrid"] button').find((node: any) => text(node) === 'Lock in answer')!
-    ok('verdict vote needs a selection before locking', (lockVote as HTMLButtonElement).disabled)
-    click(picks[0])
     await tick(30)
-    ok('selecting a verdict is editable before locking', submitted.length === 0 && !(lockVote as HTMLButtonElement).disabled)
-    click(lockVote)
+    const send = q('[data-testid="send-answer"]') as HTMLButtonElement
+    ok('the send button is enabled once there is an answer', !send.disabled)
+    await click(send)
+    ok('the text answer is sent', sentText.length === 1 && sentText[0].kind === 'text')
     await tick(30)
-    ok('verdict pick submits a normal coded pick', submitted.length === 1 && submitted[0].kind === 'pick' && submitted[0].target !== 'p1')
+    ok('the answer locks in', !!q('[data-testid="locked-in"]'))
     await unmount()
 
-    /* 13e. verdict reveal = GroupAnnouncement mini-finale (no confetti unless couple) */
-    await settleConfetti()
-    drawCalls.length = 0
-    vibrates.length = 0
-    let revealed = 0
-    const landEl = await mount(
-      <RevealScreen
-        reveal={{
-          roundId: 'live-1', kind: 'verdict', summary: 'The room decided: Chao', holdMs: 8000, celebrate: false,
-          slide: { beat: 'land', flavor: 'group', title: 'Chao', body: '2 of 3 said it out loud.', numbers: { votes: 2, of: 3, share: 0.667 } },
-        }}
-        onComplete={() => { revealed += 1 }}
-      />
+    // a look chain stage this phone only WATCHES
+    const watchRound = {
+      roundId: 'c9',
+      segmentId: 'c9-watch-0',
+      index: 9,
+      kind: 'text' as const,
+      promptText: 'Everybody look at Wanjiru.',
+      note: 'Wanjiru is looking at someone. You will not see who.',
+      closesAt: Date.now() + 30000,
+      youSubmitted: true,
+      submitted: [],
+      passive: true,
+      stage: 1,
+      chainActor: 'p3',
+    }
+    const elWatch = await mount(
+      <QuestionScreen
+        round={watchRound as any}
+        view={room as any}
+        you={'p1'}
+        onSubmit={async () => true}
+      />,
     )
-    ok('verdict reveal reuses the Group Announcement', !!q('[data-testid="group-announcement"]'))
-    await waitFor(() => qa('[data-testid="vote-bar-fill"]').length === 2, 4000)
-    ok('verdict bars fill one per vote', qa('[data-testid="vote-bar-fill"]').length === 2)
-    await waitFor(() => !!q('[data-testid="ga-subject"]'), 6000)
-    ok('verdict answer lands full-screen', text(q('[data-testid="ga-subject"]')!) === 'Chao')
-    ok('verdict land fires haptics', vibrates.length > 0)
-    await tick(200)
-    ok('non-couple verdict: no confetti', drawCalls.length === 0)
+    ok('a watching phone shows the announcement', q('[data-testid="question"]')?.textContent === watchRound.promptText)
+    ok('a watching phone shows the grey line', q('[data-testid="question-note"]')?.textContent === watchRound.note)
+    ok('a watching phone has NO answer controls', !q('[data-testid="answer-controls"]'))
     await unmount()
 
-    /* 13f. reduced motion kills the verdict bars animation */
-    await settleConfetti()
-    drawCalls.length = 0
-    setReduce(true)
-    const landR = await mount(
-      <RevealScreen
-        reveal={{
-          roundId: 'live-2', kind: 'verdict', summary: 'The room decided: Brian', holdMs: 8000, celebrate: true,
-          slide: { beat: 'land', flavor: 'group', title: 'Brian', body: '3 of 3 said it out loud.', numbers: { votes: 3, of: 3, share: 1 } },
-        }}
-        onComplete={() => {}}
-      />
+    // the hidden pick of a look chain
+    const hiddenRound = {
+      roundId: 'c9',
+      segmentId: 'c9-act',
+      index: 9,
+      kind: 'pick' as const,
+      promptText: 'Look at someone you love.',
+      note: 'Nobody sees this. It comes out at the end.',
+      closesAt: Date.now() + 30000,
+      youSubmitted: false,
+      submitted: [],
+      hidden: true,
+      stage: 1,
+      chainActor: 'p1',
+    }
+    const sentHidden: any[] = []
+    const elHidden = await mount(
+      <QuestionScreen
+        round={hiddenRound as any}
+        view={room as any}
+        you={'p1'}
+        onSubmit={async (value) => { sentHidden.push(value); return true }}
+      />,
     )
-    await waitFor(() => qa('[data-testid="vote-bar-fill"]').length === 3, 4000)
-    const calmBars = qa('[data-testid="vote-bar-fill"]')
-    ok('reduced-motion: verdict bars render full instantly', calmBars.length === 3 && calmBars.every((b: any) => b.style.width === '100%' && b.style.transition === 'none'))
-    await waitFor(() => !!q('[data-testid="ga-subject"]'), 6000)
-    await tick(300)
-    ok('reduced-motion: zero confetti on the verdict land', drawCalls.length === 0)
-    ok('verdict reveal auto-advances on its hold', true)
+    ok('the look chain shows the act line', q('[data-testid="question"]')?.textContent === hiddenRound.promptText)
+    ok('the look chain says the choice is hidden', /nobody sees this/i.test(q('[data-testid="question-note"]')?.textContent ?? ''))
+    const hiddenPick = qa('[data-testid="pick-option"]').find((b: any) => b.textContent === 'Dee')
+    await click(hiddenPick!)
+    ok('the hidden pick is sent', sentHidden.length === 1 && sentHidden[0].kind === 'pick' && sentHidden[0].target === 'p3')
     await unmount()
-    setReduce(false)
-    w.innerWidth = 1024
-    void revealed
-    void landEl
-    void landR
+
+    // the loading screen
+    const el3 = await mount(<LoadingScreen done={14} total={40} />)
+    ok('the loading screen says lets test your friendship', text(el3).includes("Let's test your friendship"))
+    ok('the loading screen shows 14/40 ready', text(el3).includes('14/40 ready'))
+    await unmount()
+
+    // the ONE ready gate
+    let gated = 0
+    const el4 = await mount(
+      <ReadyGate players={players} you={'p1'} youAreReady={false} onReady={() => { gated++ }} />,
+    )
+    ok('the gate asks for the results', text(el4).includes('Ready for the results?'))
+    await click(q('[data-testid="ready-gate-button"]')!)
+    ok('the gate fires onReady', gated === 1)
+    await unmount()
+
+    // the host laptop
+    let started = 0
+    const lobbyRoom = { ...room, phase: 'lobby' as const }
+    const el5 = await mount(
+      <HostScreen
+        view={lobbyRoom as any}
+        finale={null}
+        onStart={() => { started++ }}
+        onForceResults={() => {}}
+        onSkipRound={() => {}}
+        onDelete={() => {}}
+      />,
+    )
+    ok('the host page shows the join QR', !!q('[data-testid="host-qr"]'))
+    ok('the host page lists the players', text(el5).includes('Wanjiru') && text(el5).includes('Dee'))
+    ok('the host page shows the ready ticks', text(el5).includes('ready'))
+    ok('the host page shows the progress', text(el5).includes('cases'))
+    await click(q('[data-testid="host-start"]')!)
+    ok('the host page can start the night', started === 1)
+    await unmount()
   }
 
   /* ── summary ──────────────────────────────────────────────────────── */

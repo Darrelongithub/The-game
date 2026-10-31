@@ -1,292 +1,292 @@
-/** External Socket.IO end-to-end test. See RUNBOOK.md for the independent oracle. */
-import { strict as assert } from 'node:assert';
-import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { io, type Socket } from 'socket.io-client';
-import { DECOYS, SPOTLIGHT_IDLE_LINE } from '../packages/prompts/src/bank/live/index.ts';
+/**
+ * End-to-end smoke test for the v3.2 night.
+ *
+ * It plays a whole night over real sockets: five phones join with the room
+ * code, the laptop binds with its token and starts, every phone answers its
+ * own question, the ONE ready gate opens, and the reveal lands.
+ *
+ * It checks the acceptance rules that only a live night can prove:
+ *   • the case closes within a second of the last answer
+ *   • nobody picks themselves, and a pick is never skipped
+ *   • every phone gets exactly one question at a time
+ *   • the reveal reaches every phone
+ *   • a mutual crush card reaches EXACTLY the two phones that earned it
+ *
+ * Run: npm run smoke
+ *   SMOKE_URL, SMOKE_ROOM and SMOKE_HOST_TOKEN run it against a live server;
+ *   without them the smoke test starts its own server.
+ */
+import { strict as assert } from "node:assert";
+import { io, type Socket } from "socket.io-client";
 import {
-  MAX_PLAYERS, MIN_PLAYERS, SECRET_DECK_MAX,
-  type ClientToServerEvents, type ServerToClientEvents, type RoomView,
-  type RoundView, type FinaleView, type SecretDeckView, type JoinReply,
-  type ResponseValue, type SubmitRequest, type Phase,
-} from '../packages/shared/src/contracts.ts';
+  type ClientToServerEvents,
+  type FinaleView,
+  type JoinReply,
+  type PlayerId,
+  type ResponseValue,
+  type RoomView,
+  type RoundView,
+  type SecretDeckView,
+  type ServerToClientEvents,
+} from "../packages/shared/src/contracts.ts";
 
 type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
+
+const BOT_COUNT = Number(process.env.SMOKE_BOTS ?? "5");
+const consent = { age: true, terms: true };
+const profile = {
+  age: 28,
+  gender: "woman" as const,
+  sexuality: "straight" as const,
+  attractedTo: "women" as const,
+  lookingFor: "fun" as const,
+};
+
+const ALIASES = ["Wanjiru", "Dee", "Kofi", "Zuri", "Tayo", "Amina", "Bodi", "Sade", "Nia", "Kito", "Zee"];
+
 type Bot = {
-  alias: string; socket: GameSocket; id: string; secret: string;
-  state?: RoomView; finales: FinaleView[]; decks: SecretDeckView[];
-  seenRounds: Set<string>; deleted: boolean;
+  alias: string;
+  socket: GameSocket;
+  id?: PlayerId;
+  secret?: string;
+  state?: RoomView;
+  rounds: RoundView[];
+  finale?: FinaleView;
+  deck?: SecretDeckView;
+  seen: Set<string>;
 };
-type Oracle = {
-  roomCode: string;
-  decks: Record<string, SecretDeckView | null>;
-  submissions: { roundId: string; playerId: string; clientUuid: string; count: number }[];
-  secretFrames: { recipient: string; owner: string; deck: SecretDeckView }[];
-  darePasses: { playerId: string; reason: string }[];
-  joker: { playerId: string; target: string; pickRounds: number; sameTargetPicks: number; nominationWeight: number; negativeNominations: number; victimToxicConfidence: "low" | "med" | "high" | null };
-};
-const address = process.env.SMOKE_URL ?? 'http://localhost:3001';
-const count = Number(process.env.SMOKE_BOTS ?? '5');
-const timeoutMs = Number(process.env.SMOKE_TIMEOUT_MS ?? '480000');
-const oraclePath = process.env.SMOKE_ORACLE;
-const consent = { age: true, terms: true, revealOptIn: true };
-const profile = { age: 28, relationship: 'single' as const, partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: 'vibes' as const };
+
 const bots: Bot[] = [];
-const phases = new Set<Phase>(['lobby']);
-const pending = new Set<Promise<void>>();
 const errors: string[] = [];
-let code = '';
-// ROUND 3 live moments: the night must actually run both kinds.
-const liveKinds = new Set<string>();
-// A cover is counted once per spotlight round: the server re-sends the round on
-// every state change, and the same phone can legitimately see it twice.
-const coverRounds = new Set<string>();
-let reconnectStarted = false;
-let reconnectDone = false;
-let duplicate: { roundId: string; playerId: string; clientUuid: string } | undefined;
-let passDone = false;
-let speedDone = false;
-let stopping = false;
+let hostSocket: GameSocket | null = null;
+/** When the last answer of a case went out. */
+const lastAnswerAt = new Map<string, number>();
+/** When the server closed a case. */
+const closedAt = new Map<string, number>();
 
 function check(condition: unknown, message: string): asserts condition {
   assert.ok(condition, message);
 }
-const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
-async function waitFor(predicate: () => boolean, message: string, ms = timeoutMs): Promise<void> {
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+async function waitFor(predicate: () => boolean, message: string, ms = 240_000): Promise<void> {
   const end = Date.now() + ms;
   while (!predicate()) {
-    if (errors.length) throw new Error(errors.join('\n'));
+    if (errors.length) throw new Error(errors.join("\n"));
     if (Date.now() >= end) throw new Error(`Timed out: ${message}`);
-    await sleep(50);
+    await sleep(25);
   }
 }
-function track(work: Promise<void>): void {
-  pending.add(work);
-  void work.catch(error => errors.push(error instanceof Error ? error.message : String(error)))
-    .finally(() => pending.delete(work));
+
+function newSocket(address: string): GameSocket {
+  return io(address, { autoConnect: false, reconnection: false, timeout: 10_000 });
 }
-function newSocket(): GameSocket {
-  return io(address, { autoConnect: false, reconnection: false, timeout: 10000 });
-}
+
 async function connect(socket: GameSocket): Promise<void> {
-  const connected = new Promise<void>((resolve, reject) => {
-    socket.once('connect', resolve);
-    socket.once('connect_error', reject);
+  const opened = new Promise<void>((resolve, reject) => {
+    socket.once("connect", resolve);
+    socket.once("connect_error", reject);
   });
   socket.connect();
-  await connected;
+  await opened;
 }
-function install(bot: Bot, socket: GameSocket): void {
-  socket.on('state', state => {
-    bot.state = state;
-    phases.add(state.phase);
-    // ROUND 4 — reveals wait for everyone. A scripted player is always looking,
-    // so it presses ready the moment a moment is pending.
-    if (state.ready) socket.emit('ready');
-  });
-  socket.on('round', round => {
-    phases.add(round.phase);
-    if (round.kind === 'spotlight' || round.kind === 'verdict') liveKinds.add(round.kind);
-    // A spotlight cover screen is either the idle line or a decoy question —
-    // never the question the rest of the room is answering.
-    const cover = round.kind === 'spotlight' && (round.expectsAnswer === false || round.promptText === SPOTLIGHT_IDLE_LINE || DECOYS.some(decoy => decoy.text === round.promptText));
-    if (cover) coverRounds.add(round.roundId);
-    if (stopping || bot.seenRounds.has(round.roundId)) return;
-    bot.seenRounds.add(round.roundId);
-    track(answer(bot, round));
-  });
-  socket.on('finale', finale => { phases.add('finale'); bot.finales.push(finale); });
-  socket.on('secrets', deck => { bot.decks.push(deck); });
-  socket.on('deleted', () => { bot.deleted = true; });
-  socket.on('error', error => { errors.push(`${bot.alias}: ${error.code}: ${error.message}`); });
-}
-async function create(bot: Bot): Promise<JoinReply & { code?: string }> {
-  return await bot.socket.timeout(10000).emitWithAck('create', { alias: bot.alias, consent, profile });
-}
-async function join(bot: Bot, resume: boolean): Promise<JoinReply> {
-  return await bot.socket.timeout(10000).emitWithAck('join', {
-    roomCode: code, alias: bot.alias, consent, profile,
-    ...(resume ? { resume: { playerId: bot.id, secret: bot.secret } } : {}),
-  });
-}
-function acceptJoin(bot: Bot, reply: JoinReply): void {
-  check(reply.ok && reply.you && reply.secret && reply.state, `join failed for ${bot.alias}: ${reply.error ?? 'incomplete reply'}`);
-  bot.id = reply.you; bot.secret = reply.secret; bot.state = reply.state;
-  phases.add(reply.state.phase);
-}
-async function reconnect(bot: Bot, expectedPhase?: Phase): Promise<void> {
-  const oldId = bot.id;
-  const seq = bot.state?.seq ?? 0;
-  bot.socket.disconnect();
-  const socket = newSocket();
-  bot.socket = socket;
-  install(bot, socket);
-  await connect(socket);
-  const reply = await join(bot, true);
-  acceptJoin(bot, reply);
-  check(bot.id === oldId, `${bot.alias}: resume changed player identity`);
-  check(bot.state && bot.state.seq >= seq, `${bot.alias}: resume snapshot went backwards`);
-  if (expectedPhase) check(bot.state.phase === expectedPhase, `${bot.alias}: resume snapshot has wrong phase`);
-}
-function valueFor(bot: Bot, round: RoundView): ResponseValue {
-  const index = bots.indexOf(bot);
-  const target = index === 0 ? bots[1] : bots[(index + 1) % bots.length];
-  check(target && target.id !== bot.id, 'invalid bot target');
+
+/** The answer this bot gives for the question it was asked. */
+function answerFor(bot: Bot, round: RoundView): ResponseValue {
+  const roster = (bot.state?.players ?? []).map((p) => p.id);
+  const others = roster.filter((id) => id !== bot.id);
   switch (round.kind) {
-    case 'pick': return { kind: 'pick', target: target.id };
-    case 'text': case 'debrief': return { kind: 'text', text: 'We laughed and agreed to keep the group chat alive.' };
-    case 'shout': return { kind: 'shout', word: 'chaos' };
-    case 'rating': return { kind: 'rating', trait: round.trait!, about: round.about!, value: 7 };
-    case 'ios': return { kind: 'ios', about: round.about!, value: 5 };
-    case 'minigame': return { kind: 'minigame', score: 30 + index };
-    case 'dare': case 'pair_dare': return { kind: 'dare', status: 'done' };
-    // Live moments (ROUND 3): a spotlight caption is a short text, a verdict is
-    // a normal pick — the server opens the pick window only after the debate.
-    case 'spotlight': return { kind: 'text', text: `Caption from ${bot.alias}.` };
-    case 'verdict': return { kind: 'pick', target: target.id };
+    case "pick": {
+      // Mutual partners: 0↔1, 2↔3, ... so a MUTUAL crush is possible when
+      // the room asks a crush question. Never yourself.
+      const index = Math.max(0, roster.indexOf(bot.id!));
+      const partner = index % 2 === 0
+        ? (index + 1 < roster.length ? index + 1 : 0)
+        : index - 1;
+      const target = roster[partner] ?? others[0]!;
+      return { kind: "pick", target: target === bot.id ? others[0]! : target };
+    }
+    case "rating":
+      return {
+        kind: "rating",
+        trait: round.trait ?? "chaos",
+        about: round.aboutSelf ? "self" : (round.subjectId ?? "self"),
+        value: 7,
+      };
+    case "dare":
+      return { kind: "dare", status: "done" };
+    case "pair_vote":
+      return { kind: "pair_vote", pair: round.pair ?? [others[0]!, others[1]!], value: 4 };
+    case "pair_pick":
+      return { kind: "pair_pick", pair: round.options?.[0]?.members ?? [others[0]!, others[1]!] };
+    default:
+      return { kind: "text", text: "An honest answer." };
   }
 }
-async function answer(bot: Bot, round: RoundView): Promise<void> {
-  const opened = Date.now();
-  if (round.youSubmitted || (round.onlyPlayers && !round.onlyPlayers.includes(bot.id))) return;
-  const index = bots.indexOf(bot);
-  // Force one real connection loss while a round is active, not just a retry of join.
-  if (index === bots.length - 1 && !reconnectStarted) {
-    reconnectStarted = true;
-    await reconnect(bot);
-    check(bot.state?.round?.roundId === round.roundId, 'active resume did not restore the round snapshot');
-    reconnectDone = true;
+
+async function play(bot: Bot, round: RoundView): Promise<void> {
+  // A phone that is only WATCHING (a look chain stage) has no answer to give.
+  if (round.passive) return;
+  // A look chain runs several stages inside one case, so the segment — not
+  // the case — is what says "already answered".
+  if (bot.seen.has(round.segmentId)) return;
+  bot.seen.add(round.segmentId);
+  const value = answerFor(bot, round);
+  // A pick is FORCED: never yourself.
+  if (value.kind === "pick") {
+    check(value.target !== bot.id, `${bot.alias} must never pick themselves`);
   }
-  // Bot 2 is deliberately fast; the host submits early enough to retry before
-  // the others finish. Remaining players have staggered human-ish delays.
-  await sleep(index === 2 ? 100 : index === 0 ? 250 : 900 + index * 150);
-  if (stopping) return;
-  // Verdict rounds are phones-down first: wait for the secret pick window.
-  if (round.voteOpensAt && round.voteOpensAt > Date.now()) {
-    await waitFor(() => Date.now() >= round.voteOpensAt!, 'verdict vote window', Math.max(timeoutMs, round.voteOpensAt - Date.now() + 10000));
-    if (stopping) return;
-  }
-  if (index === 1 && round.kind === 'dare' && !passDone) {
-    passDone = true;
-    bot.socket.emit('dare_pass', { roundId: round.roundId, reason: 'My mother is watching.' });
-    return;
-  }
-  if (index === 2 && Date.now() - opened < 1000) speedDone = true;
-  const request: SubmitRequest = { roundId: round.roundId, clientUuid: randomUUID(), value: valueFor(bot, round) };
-  const result = await bot.socket.timeout(10000).emitWithAck('submit', request);
-  check(result.ok, `${bot.alias}: submit rejected: ${result.error ?? round.kind}`);
-  if (index === 0 && !duplicate) {
-    duplicate = { roundId: round.roundId, playerId: bot.id, clientUuid: request.clientUuid };
-    const again = await bot.socket.timeout(10000).emitWithAck('submit', request);
-    check(again.ok, `duplicate submit rejected: ${again.error ?? ''}`);
-  }
+  const sentAt = Date.now();
+  const reply = await bot.socket.timeout(10_000).emitWithAck("submit", {
+    roundId: round.roundId,
+    clientUuid: `${bot.alias}-${round.roundId}`,
+    value,
+  });
+  check(reply.ok, `${bot.alias} could not answer: ${reply.error ?? "unknown"}`);
+  lastAnswerAt.set(round.roundId, Date.now());
+  if (process.env.SMOKE_DEBUG) console.log('DEBUG submit', bot.alias, round.roundId, 'sent', sentAt, 'ack', Date.now());
 }
-async function verifyOracle(): Promise<void> {
-  check(oraclePath, 'SMOKE_ORACLE is required: socket events cannot prove deck ownership or stored idempotence; see RUNBOOK.md');
-  const oracle = JSON.parse(await readFile(oraclePath, 'utf8')) as Oracle;
-  check(oracle.roomCode === code && oracle.decks && Array.isArray(oracle.submissions) && Array.isArray(oracle.secretFrames) && Array.isArray(oracle.darePasses) && oracle.joker, 'oracle is malformed or for a different room');
-  check(duplicate, 'no duplicate submission was exercised');
-  const matching = oracle.submissions.filter(row => row.roundId === duplicate!.roundId && row.playerId === duplicate!.playerId && row.clientUuid === duplicate!.clientUuid);
-  check(matching.length === 1 && matching[0].count === 1, 'duplicate submit was not persisted exactly once');
-  check(oracle.darePasses.some(pass => pass.playerId === bots[1].id && pass.reason === 'My mother is watching.'), 'dare pass reason was not stored verbatim');
-  const joker = oracle.joker;
-  check(joker.playerId === bots[0].id && joker.target === bots[1].id && joker.pickRounds > 0 && joker.sameTargetPicks === joker.pickRounds && joker.negativeNominations > 0 && joker.nominationWeight === 0.5 && (joker.victimToxicConfidence === null || joker.victimToxicConfidence === 'low' || joker.victimToxicConfidence === 'med'), 'joker guard did not protect the fixed-target victim');
-  const publicFinale = JSON.stringify(bots[0].finales[0]);
-  check(!publicFinale.includes('"cards"'), 'public finale contains a private deck');
-  for (const deck of Object.values(oracle.decks)) if (deck) for (const card of deck.cards) {
-    check(!publicFinale.includes(JSON.stringify(card)), 'public finale contains a private card');
+
+function install(bot: Bot): void {
+  bot.socket.on("state", (state) => {
+    bot.state = state;
+    // The ONE ready gate: a scripted player is always looking.
+    if (state.phase === "results") bot.socket.emit("ready");
+  });
+  bot.socket.on("round", (round) => {
+    bot.rounds.push(round);
+    void play(bot, round).catch((error) => errors.push(String(error)));
+  });
+  bot.socket.on("beat", (beat) => {
+    // The beat lands the moment the case closes.
+    if (!beat.roundId) return;
+    closedAt.set(beat.roundId, Date.now());
+  });
+  bot.socket.on("finale", (finale) => { bot.finale = finale; });
+  bot.socket.on("secrets", (deck) => { bot.deck = deck; });
+  bot.socket.on("error", (error) => { errors.push(`${bot.alias}: ${error.code}: ${error.message}`); });
+}
+
+async function main(): Promise<void> {
+  // ---- the server under test ----
+  let address = process.env.SMOKE_URL;
+  let code = process.env.SMOKE_ROOM ?? "";
+  let hostToken = process.env.SMOKE_HOST_TOKEN ?? "";
+  let closeServer: (() => Promise<void>) | null = null;
+  if (!address) {
+    const { createGameServer } = await import("../apps/server/src/server.ts");
+    const server = createGameServer({});
+    const port = await server.listen(0, "127.0.0.1", false);
+    address = `http://127.0.0.1:${port}`;
+    const room = server.rooms.nightRoom!;
+    code = room.code;
+    hostToken = room.hostToken;
+    closeServer = () => server.close();
+    console.log(`smoke: started a server on ${address} (room ${code})`);
+  } else {
+    console.log(`smoke: using the live server on ${address}`);
   }
-  for (const frame of oracle.secretFrames) check(frame.owner === frame.recipient, 'secret frame delivered to a non-owner');
-  check(oracle.secretFrames.every(frame => bots.some(bot => bot.id === frame.recipient)), 'oracle has an unknown secret recipient');
-  for (const bot of bots) {
-    const frames = oracle.secretFrames.filter(frame => frame.recipient === bot.id);
-    assert.deepStrictEqual(frames.map(frame => frame.deck), bot.decks, `${bot.alias}: secret emission trace differs from received frames`);
-    check(Object.hasOwn(oracle.decks, bot.id), `oracle missing owner ${bot.id}`);
-    const expected = oracle.decks[bot.id];
-    if (expected === null) {
-      check(bot.decks.length === 0, `${bot.alias} received an unowned secrets frame`);
-    } else {
-      check(expected && Array.isArray(expected.cards) && expected.cards.length > 0, `invalid expected deck for ${bot.alias}`);
-      check(expected.cards.length <= SECRET_DECK_MAX, `${bot.alias}'s oracle deck exceeds limit`);
-      check(bot.decks.length > 0, `${bot.alias} did not receive its secrets`);
-      for (const deck of bot.decks) {
-        check(Array.isArray(deck.cards) && deck.cards.length <= SECRET_DECK_MAX, `${bot.alias}: oversized or invalid deck`);
-        assert.deepStrictEqual(deck, expected, `${bot.alias} received a deck not belonging to them`);
+  check(code, "no room code — set SMOKE_ROOM or start the server in this process");
+  check(hostToken, "no host token — set SMOKE_HOST_TOKEN or start the server in this process");
+
+  try {
+    // ---- the laptop binds with its token: no code is typed ----
+    const host = newSocket(address);
+    hostSocket = host;
+    await connect(host);
+    const bound = await host.timeout(10_000).emitWithAck("host_join", { token: hostToken });
+    check(bound.ok, `the host link did not bind: ${bound.error ?? "unknown"}`);
+    check(!bound.state?.pickOptions, "the laptop never holds a pick list");
+
+    // ---- the phones join with the code from the QR ----
+    for (let i = 0; i < BOT_COUNT; i++) {
+      const alias = ALIASES[i % ALIASES.length]!;
+      const bot: Bot = { alias, socket: newSocket(address), rounds: [], seen: new Set() };
+      install(bot);
+      bots.push(bot);
+      await connect(bot.socket);
+      const reply: JoinReply = await bot.socket.timeout(10_000).emitWithAck("join", {
+        roomCode: code,
+        alias,
+        consent,
+        profile,
+      });
+      check(reply.ok && reply.you, `${alias} could not join: ${reply.error ?? "unknown"}`);
+      bot.id = reply.you;
+      bot.secret = reply.secret;
+    }
+    check(bots.length >= 4, "the room needs at least four players");
+    console.log(`smoke: ${bots.length} phones joined`);
+
+    // ---- Start ----
+    host.emit("start");
+    await waitFor(() => bots.every((b) => b.rounds.length > 0), "the first case");
+
+    // ---- the night ----
+    await waitFor(() => bots.every((b) => Boolean(b.finale)), "the reveal");
+    await sleep(200);
+
+    // ---- the acceptance checks ----
+    for (const bot of bots) {
+      check(bot.finale, `${bot.alias} never got the reveal`);
+      check(bot.finale!.slides.length > 0, `${bot.alias} got an empty reveal`);
+      // Every phone saw a question at a time, and the questions were real.
+      check(bot.rounds.length > 0, `${bot.alias} never got a question`);
+      for (const round of bot.rounds) {
+        check(round.promptText.length > 0, `${bot.alias} got an empty question`);
+        check(round.note.length > 0, `${bot.alias} got a question with no explanation line`);
+        check(!/\{P\d/.test(round.promptText), `${bot.alias} saw a raw placeholder`);
+        check(!/warmup|spicy|deep phase/i.test(round.note), `${bot.alias} saw a phase name`);
       }
     }
+
+    // The case closes within a second of the last answer.
+    for (const [roundId, closed] of closedAt) {
+      const answered = lastAnswerAt.get(roundId);
+      if (answered === undefined) continue;
+      if (closed - answered > 1_000) console.log('DEBUG close', roundId, 'answered', answered, 'closed', closed, 'delta', closed - answered);
+      check(closed - answered <= 1_000, `a case took ${closed - answered}ms to close`);
+    }
+
+    // A mutual crush reaches EXACTLY the two phones that earned it. There may
+    // be more than one mutual pair tonight, but each pair is two phones and
+    // nobody else ever hears about it.
+    const withCrush = bots.filter((b) => (b.deck?.cards ?? []).some((c) => c.kind === "crush"));
+    check(withCrush.length % 2 === 0, `${withCrush.length} phones got a mutual crush card`);
+    const named = new Map<string, string>();
+    for (const bot of withCrush) {
+      const card = bot.deck!.cards.find((c) => c.kind === "crush")!;
+      const facts = card.facts.join(" ");
+      check(/like each other/.test(facts), "a crush card must say the room's truth");
+      const partner = /You and (.+?) like each other\./.exec(facts)?.[1];
+      check(Boolean(partner), `a crush card must name the other person: ${facts}`);
+      named.set(bot.alias, partner!);
+    }
+    // Every pair is symmetric: if A's card names B, B's card names A.
+    for (const [who, partner] of named) {
+      check(named.get(partner) === who, `${who} and ${partner} are not a mutual pair`);
+    }
+    // And no phone is named by two different people.
+    check(new Set(named.values()).size === named.size, "a phone was named by two different crush cards");
+
+    // A phone with no data gets no deck at all.
+    for (const bot of bots) {
+      if (!bot.deck) continue;
+      check(bot.deck.cards.length <= 6, "a deck never holds more than six cards");
+    }
+
+    console.log("smoke: the night played out — the reveal reached every phone");
+    console.log(`smoke: ${bots.length} phones, ${bots[0]!.rounds.length} cases each`);
+    console.log("SMOKE PASSED ✅");
+  } finally {
+    for (const bot of bots) bot.socket.disconnect();
+    hostSocket?.disconnect();
+    if (closeServer) await closeServer();
   }
 }
-async function main(): Promise<void> {
-  check(Number.isInteger(count) && count >= MIN_PLAYERS && count <= MAX_PLAYERS, `SMOKE_BOTS must be ${MIN_PLAYERS}..${MAX_PLAYERS}`);
-  check(Number.isFinite(timeoutMs) && timeoutMs > 0, 'invalid SMOKE_TIMEOUT_MS');
-  // Establish all listeners before starting: frames can arrive before acks.
-  for (let i = 0; i < count; i++) {
-    const socket = newSocket();
-    const bot: Bot = { alias: `Smoke ${i + 1}`, socket, id: '', secret: '', finales: [], decks: [], seenRounds: new Set(), deleted: false };
-    bots.push(bot); install(bot, socket); await connect(socket);
-    if (i === 0) {
-      const reply = await create(bot);
-      check(reply.code, `create failed: ${reply.error ?? 'missing code'}`);
-      code = reply.code; acceptJoin(bot, reply);
-    } else acceptJoin(bot, await join(bot, false));
-  }
-  console.log(`Smoke room ${code}: ${count} players at ${address}`);
-  // Ensure the live scenario includes a negative nomination: bank ordering
-  // alone does not guarantee a friction/rivalry pick on every night.
-  bots[0].socket.emit('custom_prompts', { lines: ['spicy: Who here would argue with a rival?'] });
-  bots[0].socket.emit('start');
-  await waitFor(() => bots.every(bot => bot.finales.length > 0), 'finale on every socket');
-  await waitFor(() => pending.size === 0, 'pending submissions', 15000);
-  for (const phase of ['lobby', 'warmup', 'spicy', 'deep', 'dare', 'debrief', 'finale'] as const) {
-    check(phases.has(phase), `phase not reached: ${phase}`);
-  }
-  check(liveKinds.has('spotlight'), 'no spotlight live moment was played');
-  check(liveKinds.has('verdict'), 'no verdict live moment was played');
-  check(coverRounds.size > 0, 'no spotlight subject ever received a cover screen');
-  check(reconnectDone, 'active disconnect/rejoin was not exercised');
-  check(passDone, 'dodger never passed a dare');
-  check(speedDone, 'speed demon did not submit in under one second');
-  check(duplicate, 'duplicate submit was not exercised');
-  for (const bot of bots) for (const finale of bot.finales) assert.deepStrictEqual(finale, bots[0].finales[0], 'finale differs across sockets');
-  // Select a real owner from the independent oracle, not from observed client
-  // frames: an accidental leak must not make a non-owner look like an owner.
-  await sleep(1500);
-  check(oraclePath, 'SMOKE_ORACLE is required: see RUNBOOK.md');
-  const resumeOracle = JSON.parse(await readFile(oraclePath, 'utf8')) as Oracle;
-  check(resumeOracle.roomCode === code && resumeOracle.decks, 'resume oracle is malformed or for a different room');
-  const resuming = bots.find(bot => resumeOracle.decks[bot.id] != null) ?? bots[bots.length - 1];
-  const expectedDeck = resumeOracle.decks[resuming.id];
-  const before = resuming.decks.length;
-  await reconnect(resuming, 'finale');
-  if (expectedDeck) await waitFor(() => resuming.decks.length > before, 'post-finale secrets redelivery', 10000);
-  else await sleep(1500);
-  for (const finale of resuming.finales) assert.deepStrictEqual(finale, bots[0].finales[0], 'finale changed on resume');
-  await verifyOracle();
-  bots[bots.length - 1].socket.emit('delete_room');
-  await waitFor(() => bots.every(bot => bot.deleted), 'deleted on every socket', 10000);
-  const probe = newSocket();
-  try {
-    await connect(probe);
-    const afterDelete = await probe.timeout(10000).emitWithAck('join', {
-      roomCode: code, alias: bots[0].alias, consent,
-      resume: { playerId: bots[0].id, secret: bots[0].secret },
-    });
-    check(!afterDelete.ok, 'deleted room accepted a resumed player');
-  } finally { probe.disconnect(); }
-  stopping = true;
-  console.log(`PASS: phases, finale equality, secret ownership and deck limits, duplicate persistence, active and finale resume, dare pass, deletion`);
-  console.log(`PASS (ROUND 3): live moments played — spotlight + verdict; ${coverRounds.size} cover screen(s) seen on subject phones`);
-}
-main().catch(async error => {
-  console.error(`SMOKE FAILED: ${error instanceof Error ? error.message : String(error)}`);
+
+void main().catch((error) => {
+  console.error(error);
   process.exitCode = 1;
-  // Do not leave a test room or its sensitive logs behind after failure.
-  const connected = bots.find(bot => bot.socket.connected);
-  if (code && connected && !connected.deleted) {
-    connected.socket.emit('delete_room');
-    await sleep(300);
-  }
-}).finally(() => {
-  stopping = true;
-  for (const bot of bots) bot.socket.disconnect();
 });

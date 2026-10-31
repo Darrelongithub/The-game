@@ -1,104 +1,134 @@
-/** Local-only integration harness: runs the unchanged production services with
- * independent server-side disk/Socket.IO/engine observations. No debug endpoint
- * or oracle is exposed by the hosted production server. */
-import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { spawn } from 'node:child_process';
-import { isDeepStrictEqual } from 'node:util';
-import { createGameServer } from '../apps/server/src/server.ts';
-import { createProductionServices } from '../apps/server/src/integratedServices.ts';
-import type { LogRecord, Results, SecretDeckView } from '../packages/shared/src/contracts.ts';
+/** Local-only integration harness: it runs the PRODUCTION services and
+ * watches the real Socket.IO traffic from the outside.
+ *
+ * The oracle is deliberately independent of the game's own code paths:
+ *   • every "secrets" frame is observed per RECIPIENT — a deck that reaches a
+ *     socket that does not own it is a leak, and the harness fails;
+ *   • the night's log is re-read from the server and the verdicts are
+ *     recomputed, so the reveal is checked against the answers;
+ *   • no slide may print an orientation claim ("X is gay");
+ *   • only the allowed verdict kinds may appear.
+ *
+ * No debug endpoint and no oracle is exposed by the hosted production server.
+ */
+import { spawn } from "node:child_process";
+import { createGameServer } from "../apps/server/src/server.ts";
+import { createProductionServices } from "../apps/server/src/integratedServices.ts";
+import { computeResults, assertNoOrientationLeak } from "../packages/engine/src/index.ts";
+import type { LogRecord, SecretDeckView, VerdictKind } from "../packages/shared/src/contracts.ts";
 
-const directory = mkdtempSync(join(tmpdir(), 'reveal-verified-smoke-'));
-const oraclePath = join(directory, 'oracle.json');
-const persist: { roomCode: string; file: string; roundId: string; playerId: string; clientUuid: string }[] = [];
-const weights = new Map<string, ReadonlyMap<string, number>>();
-let current: { roomCode: string; roomId: string; players: string[]; decks: Record<string, SecretDeckView | null>; results: Results; file: string } | undefined;
-const frames: { recipient: string; owner: string; deck: SecretDeckView }[] = [];
-let injectedLeak = false;
-
-function publish(): void {
-  if (!current) return;
-  const rows = readFileSync(current.file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as LogRecord);
-  const submissions = persist.filter(p => p.roomCode === current!.roomCode).map(p => ({
-    roundId: p.roundId, playerId: p.playerId, clientUuid: p.clientUuid,
-    // The on-disk log intentionally does not store UUIDs. There can be at most
-    // one accepted answer per player/round, so count independently on disk.
-    count: rows.filter(row => row.roundId === p.roundId && row.playerId === p.playerId).length,
-  }));
-  const darePasses = rows.flatMap(row => row.value.kind === 'dare' && row.value.status === 'passed' && row.value.reason
-    ? [{ playerId: row.playerId, reason: row.value.reason }] : []);
-  const picker = current.players[0]!, target = current.players[1]!;
-  const picks = rows.filter(row => row.playerId === picker && row.value.kind === 'pick');
-  const same = picks.filter(row => row.value.kind === 'pick' && row.value.target === target);
-  const negative = same.filter(row => row.coding === 'friction' || row.coding === 'rivalry');
-  const victim = current.results.claims.find(claim => claim.type === 'toxic' && claim.subjects.includes(target));
-  const oracle = {
-    roomCode: current.roomCode, decks: current.decks, secretFrames: frames, submissions, darePasses,
-    joker: { playerId: picker, target, pickRounds: picks.length, sameTargetPicks: same.length,
-      negativeNominations: negative.length, nominationWeight: weights.get(current.roomId)?.get(picker) ?? null,
-      victimToxicConfidence: victim?.confidence ?? null },
-  };
-  // Atomic replacement prevents the client from reading a partially written file.
-  const tmp = `${oraclePath}.tmp`;
-  writeFileSync(tmp, JSON.stringify(oracle), { mode: 0o600 });
-  renameSync(tmp, oraclePath);
-}
-
-// This observer runs the actual default adapter, with keys explicitly disabled.
+// Keys explicitly disabled: this harness never calls a hosted model.
 delete process.env.XAI_API_KEY;
 delete process.env.GEMINI_API_KEY;
-const services = createProductionServices((room, observed) => weights.set(room, new Map(observed)));
-const fast = process.env.SMOKE_FAST === '1';
-if (fast) console.log('SMOKE_FAST: isolated fixture uses shortened live-moment timers; assertions are unchanged.');
-const server = createGameServer({
-  dataDir: join(directory, 'data'), services, revealHoldMs: 10, interludeHoldMs: 10,
-  ...(fast ? { roundTimers: { spotlight: 7000, verdict: 8000 }, verdictDiscussMs: 1000, graceMs: 100 } : {}),
-  audit: {
-    persisted(roomCode, file, request) { persist.push({ roomCode, file, ...request }); },
-    decks(roomCode, roomId, players, decks, results) {
-      const item = persist.find(p => p.roomCode === roomCode);
-      if (!item) throw new Error('No persisted records for test room');
-      current = { roomCode, roomId, players: [...players], decks: Object.fromEntries(players.map(id => [id, decks.has(id) ? structuredClone(decks.get(id)!) : null])), results: structuredClone(results), file: item.file };
-      publish();
-    },
-  },
-});
-// Socket.IO calls onAnyOutgoing for both direct emits and broadcasts, so an
-// accidental broadcast is observed for *every* actual recipient, not merely
-// the intended owner. Ambiguous/unrecognized decks fail closed in bots.ts.
-server.io.on('connection', socket => {
+
+const ALLOWED_KINDS: VerdictKind[] = [
+  "hates", "core", "couple", "sex", "percent", "gaycouple",
+  "bodycount", "bestinbed", "besties", "rivals", "freeagent", "blindspot",
+];
+
+const services = createProductionServices();
+const server = createGameServer({ services });
+
+/** Every "secrets" frame, with the socket that received it. */
+const secretFrames: { recipient: string; isHost: boolean; deck: SecretDeckView }[] = [];
+/** Every "finale" frame. */
+const finales: { slides: { title: string; body?: string }[] }[] = [];
+
+server.io.on("connection", (socket) => {
   socket.onAnyOutgoing((event, ...args) => {
-    if (event !== 'secrets' || !current) return;
-    const deck = structuredClone(args[0]) as SecretDeckView;
-    const owners = Object.entries(current.decks).filter(([, expected]) => expected !== null && isDeepStrictEqual(expected, deck)).map(([id]) => id);
-    frames.push({ recipient: socket.data.playerId ?? 'unknown', owner: owners.length === 1 ? owners[0]! : 'unknown', deck });
-    publish();
-    // Test the oracle itself by deliberately leaking one deck in this isolated
-    // harness. This branch cannot be enabled in the production entry point.
-    if (process.env.SMOKE_INJECT_LEAK === '1' && !injectedLeak) {
-      injectedLeak = true;
-      const roomCode = current.roomCode;
-      queueMicrotask(() => server.io.to(roomCode).emit('secrets', deck));
+    if (event === "secrets") {
+      secretFrames.push({
+        recipient: String(socket.data.playerId ?? "unknown"),
+        isHost: Boolean(socket.data.isHost),
+        deck: structuredClone(args[0]) as SecretDeckView,
+      });
+    }
+    if (event === "finale") {
+      finales.push(structuredClone(args[0]) as { slides: { title: string; body?: string }[] });
     }
   });
 });
 
+function check(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(`verified smoke: ${message}`);
+}
+
 async function main(): Promise<void> {
-try {
-  const port = await server.listen(0, '127.0.0.1', false);
-  const child = spawn(process.execPath, ['--import', 'tsx', 'scripts/bots.ts'], {
-    cwd: process.cwd(), stdio: 'inherit', env: { ...process.env, XAI_API_KEY: '', GEMINI_API_KEY: '', SMOKE_URL: `http://127.0.0.1:${port}`, SMOKE_ORACLE: oraclePath, SMOKE_TIMEOUT_MS: '420000' },
+  const port = await server.listen(0, "127.0.0.1", false);
+  const room = server.rooms.nightRoom!;
+
+  const child = spawn(process.execPath, ["--import", "tsx", "scripts/bots.ts"], {
+    cwd: process.cwd(),
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      XAI_API_KEY: "",
+      GEMINI_API_KEY: "",
+      SMOKE_URL: `http://127.0.0.1:${port}`,
+      SMOKE_ROOM: room.code,
+      SMOKE_HOST_TOKEN: room.hostToken,
+    },
   });
   const code = await new Promise<number>((resolve, reject) => {
-    child.once('error', reject);
-    child.once('exit', (value, signal) => resolve(value ?? (signal ? 1 : 0)));
+    child.once("error", reject);
+    child.once("exit", (value, signal) => resolve(value ?? (signal ? 1 : 0)));
   });
-  process.exitCode = code;
-} finally {
-  await server.close();
-  rmSync(directory, { recursive: true, force: true });
+  check(code === 0, "the night did not play out");
+
+  // ---- the oracle ----
+  const after = server.rooms.get(room.code);
+  check(after, "the room is gone");
+  check(after!.log.length > 0, "the night produced answers");
+
+  // 1. A deck only ever reaches the socket that owns it.
+  for (const frame of secretFrames) {
+    check(!frame.isHost, "a secret deck reached the host laptop");
+    check(frame.recipient !== "unknown", "a secret deck reached an unidentified socket");
+    check(frame.deck.cards.length <= 6, "a deck holds more than six cards");
+    for (const card of frame.deck.cards) {
+      check(card.kind !== "crush" || card.facts.join(" ").includes("like each other"), "a one-sided crush card escaped");
+    }
+  }
+  const recipients = new Set(secretFrames.map((f) => f.recipient));
+  check(recipients.size === secretFrames.length, "a socket received more than one deck");
+
+  // 2. The reveal never prints an orientation claim.
+  for (const finale of finales) {
+    for (const slide of finale.slides) {
+      const text = `${slide.title} ${slide.body ?? ""}`;
+      check(!/\bis gay\b/i.test(text), `the reveal printed an orientation claim: "${text}"`);
+      check(!/\bstraight\b|\bgay\b|\bbisexual\b/i.test(text), `the reveal printed an orientation: "${text}"`);
+    }
+  }
+
+  // 3. The verdicts are only the allowed kinds, and they are data-backed.
+  const meta = {
+    roomId: after!.code,
+    players: after!.order.map((id) => ({ id, alias: after!.players.get(id)?.alias ?? id })),
+  };
+  const results = computeResults(after!.log as LogRecord[], meta);
+  assertNoOrientationLeak(results);
+  for (const verdict of results.verdicts) {
+    check(ALLOWED_KINDS.includes(verdict.kind), `an unknown verdict kind: ${verdict.kind}`);
+    check(verdict.subjects.length > 0, `a verdict with no subject: ${verdict.id}`);
+    check(verdict.text.length > 0, `a verdict with no copy: ${verdict.id}`);
+  }
+
+  // 4. The log never carries a profile answer.
+  const logJson = JSON.stringify(after!.log);
+  for (const field of ["sexuality", "attractedTo", "lookingFor"]) {
+    check(!logJson.includes(field), `the log carries a profile answer: ${field}`);
+  }
+
+  console.log(`verified smoke: ${after!.log.length} answers, ${results.verdicts.length} verdicts, ${secretFrames.length} private decks`);
+  console.log("VERIFIED SMOKE PASSED ✅");
 }
-}
-void main().catch(error => { console.error(error); process.exitCode = 1; });
+
+void main()
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await server.close();
+  });

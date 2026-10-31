@@ -1,175 +1,624 @@
 [
   {
-    "id": "s1",
-    "phase": "spicy",
+    "id": "sp-01",
+    "band": "spicy",
+    "role": "observer_subject",
     "kind": "pick",
-    "text": "Who's been performing calm all night? Point at the best actor.",
+    "text": "Who do you think {P1} would take home from this party?",
     "measures": [
-      "social awareness"
-    ],
-    "coding": "status",
-    "asksTarget": true
-  },
-  {
-    "id": "s2",
-    "phase": "spicy",
-    "kind": "pick",
-    "text": "Who flirts their way out of trouble? Point.",
-    "measures": [
-      "flirt-pattern signal"
-    ],
-    "coding": "tease",
-    "asksTarget": true
-  },
-  {
-    "id": "s3",
-    "phase": "spicy",
-    "kind": "text",
-    "text": "What did you hear about someone in this room BEFORE you met them?",
-    "measures": [
-      "past-meets-present tags"
-    ],
-    "coding": "friction",
-    "asksTarget": true
-  },
-  {
-    "id": "s4",
-    "phase": "spicy",
-    "kind": "rating",
-    "text": "How spicy are you, really? 1\u201310.",
-    "measures": [
-      "trait:spice",
-      "self-spice baseline",
-      "blind-spot fuel"
-    ],
-    "coding": "neutral",
-    "asksTarget": false
-  },
-  {
-    "id": "s5",
-    "phase": "spicy",
-    "kind": "pick",
-    "text": "Two people here must date to survive the apocalypse. Point at one of them.",
-    "measures": [
-      "couple-coding seed"
+      "metric:sex-desire",
+      "guess"
     ],
     "coding": "couple",
     "asksTarget": true
   },
   {
-    "id": "s6",
-    "phase": "spicy",
-    "kind": "text",
-    "text": "Your worst first-impression moment involving someone in this room. Go.",
+    "id": "sp-02",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who has the higher body count, {P1} or the rest of this room combined?",
     "measures": [
-      "first-impression tags"
+      "metric:body-count",
+      "guess"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-03",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who do you think {P1} has been in a threesome with?",
+    "measures": [
+      "metric:hookups",
+      "guess"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-04",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "text",
+    "text": "What is the most obviously fake thing about {P1}?",
+    "measures": [
+      "metric:is-fake",
+      "guess"
     ],
     "coding": "friction",
     "asksTarget": true
   },
   {
-    "id": "s7",
-    "phase": "spicy",
+    "id": "sp-05",
+    "band": "spicy",
+    "role": "observer_subject",
     "kind": "pick",
-    "text": "Who wins a staring contest against you? Point at your rival.",
+    "text": "Who would {P1} text at 2am if they were bored tonight?",
     "measures": [
-      "rivalry seed"
+      "metric:crush",
+      "guess"
     ],
-    "coding": "rivalry",
+    "coding": "couple",
     "asksTarget": true
   },
   {
-    "id": "s8",
-    "phase": "spicy",
-    "kind": "ios",
-    "text": "How close are you and {P3}, really? Circles.",
+    "id": "sp-06",
+    "band": "spicy",
+    "role": "subject",
+    "kind": "text",
+    "text": "Who in this room would you most want to see in a magazine, and what would the headline be?",
     "measures": [
-      "closeness map"
+      "flavour:confession"
+    ],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-07",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here has the highest body count?",
+    "measures": [
+      "metric:body-count"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-08",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here is the best in bed?",
+    "measures": [
+      "metric:best-in-bed"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-09",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here would you sleep with if they said yes right now?",
+    "measures": [
+      "metric:sex-desire"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-10",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here has the most exes?",
+    "measures": [
+      "metric:ex",
+      "guess"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-11",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pair_vote",
+    "text": "Would {P1} and {P2} make a good couple?",
+    "measures": [
+      "metric:couple-fit"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-12",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pair_vote",
+    "text": "If {P1} and {P2} were gay, would they make a good couple?",
+    "measures": [
+      "metric:gay-hypothetical"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-13",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pair_pick",
+    "text": "Who do you think would make the best couple here?",
+    "measures": [
+      "metric:couple-fit"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-14",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "Describe the last time you hooked up. Someone in this room has a story about it.",
+    "measures": [
+      "flavour:confession"
+    ],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-15",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who do you think {P1} would pick if they had to sleep with someone tonight?",
+    "measures": [
+      "metric:sex-desire",
+      "guess"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-16",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who in this room is {P1} crushing on but would never admit it?",
+    "measures": [
+      "metric:crush",
+      "guess"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-17",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "text",
+    "text": "What is the wildest thing you have heard {P1} did in bed?",
+    "measures": [
+      "metric:hookups",
+      "guess"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-18",
+    "band": "spicy",
+    "role": "subject",
+    "kind": "pick",
+    "text": "Who in this room would you kiss first if the lights went out?",
+    "measures": [
+      "metric:crush"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-19",
+    "band": "spicy",
+    "role": "observer_pair",
+    "kind": "text",
+    "text": "What would {P1} and {P2} look like as a couple, in one sentence?",
+    "measures": [
+      "metric:couple-fit",
+      "guess"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-20",
+    "band": "spicy",
+    "role": "observer_pair",
+    "kind": "pair_vote",
+    "text": "Would you rather see {P1} and {P2} together, or neither of them ever again?",
+    "measures": [
+      "metric:couple-fit",
+      "guess"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-21",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here has the wildest stories from their exes?",
+    "measures": [
+      "metric:ex",
+      "guess"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-22",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here would you swipe right on even though you know better?",
+    "measures": [
+      "metric:crush"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-23",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "text",
+    "text": "What is the worst lie {P1} has told in this room tonight?",
+    "measures": [
+      "metric:is-fake",
+      "guess"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-24",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who would {P1} ruin a friendship for?",
+    "measures": [
+      "metric:ruin-friendship",
+      "guess"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-25",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here would you let near your phone unlocked?",
+    "measures": [
+      "metric:trust"
+    ],
+    "coding": "trust",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-26",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here is the most dangerous person in this room?",
+    "measures": [
+      "metric:most-dangerous"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-27",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here is the weirdest?",
+    "measures": [
+      "metric:weirdest"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-28",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who do you think {P1} would sleep with and then pretend it never happened?",
+    "measures": [
+      "metric:is-fake",
+      "guess"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-29",
+    "band": "spicy",
+    "role": "subject",
+    "kind": "text",
+    "text": "Who in this room have you wanted but never went for? Say the name and the reason.",
+    "measures": [
+      "flavour:confession"
+    ],
+    "coding": "couple",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-30",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who do you think {P1} has been rejected the most?",
+    "measures": [
+      "metric:ex",
+      "guess"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-31",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "What is the pettiest thing you have done to make someone jealous?",
+    "measures": [
+      "flavour:confession"
+    ],
+    "coding": "friction",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-32",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here has the most body shots this year?",
+    "measures": [
+      "metric:body-count"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-33",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who would {P1} betray for a free holiday?",
+    "measures": [
+      "metric:betrayal",
+      "guess"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-34",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "rating",
+    "trait": "spice",
+    "text": "How much would {P1} ruin your night in the best possible way? 1 to 10.",
+    "measures": [
+      "trait:spice"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-35",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here would cheat if the price was right?",
+    "measures": [
+      "metric:would-cheat"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-36",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here would snitch if the fun got serious?",
+    "measures": [
+      "metric:would-snitch"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-37",
+    "band": "spicy",
+    "role": "observer_pair",
+    "kind": "text",
+    "text": "Rank {P1} and {P2} from most to least likely to hook up tonight. Explain yourself.",
+    "measures": [
+      "metric:sex-desire",
+      "guess"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-38",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here is the biggest player in this room?",
+    "measures": [
+      "metric:hookups"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-39",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who do you think {P1} is secretly in love with?",
+    "measures": [
+      "metric:crush",
+      "guess"
+    ],
+    "coding": "couple",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-40",
+    "band": "spicy",
+    "role": "subject",
+    "kind": "pick",
+    "text": "Who here would you absolutely hook up with if they said yes right now?",
+    "measures": [
+      "metric:sex-desire"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-41",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here has the most money, and who is the most broke? Pick the richest.",
+    "measures": [
+      "metric:money"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-42",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "text",
+    "text": "What has {P1} done that they would take back if they could?",
+    "measures": [
+      "flavour:roast"
+    ],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-43",
+    "band": "spicy",
+    "role": "group",
+    "kind": "pick",
+    "text": "Who here would you never leave alone with someone else in the room?",
+    "measures": [
+      "metric:trust"
+    ],
+    "coding": "trust",
+    "asksTarget": true
+  },
+  {
+    "id": "sp-44",
+    "band": "spicy",
+    "role": "solo",
+    "kind": "text",
+    "text": "What is the boldest thing you would do tonight if nobody would ever find out?",
+    "measures": [
+      "flavour:confession"
+    ],
+    "coding": "tease",
+    "asksTarget": false
+  },
+  {
+    "id": "sp-45",
+    "band": "spicy",
+    "role": "observer_subject",
+    "kind": "pick",
+    "text": "Who in this room would {P1} tell their deepest secret to?",
+    "measures": [
+      "metric:trust",
+      "guess"
     ],
     "coding": "friendship",
     "asksTarget": true
   },
   {
-    "id": "s9",
-    "phase": "spicy",
-    "kind": "pick",
-    "text": "Who here has the most rizz and is wasting it? Point.",
-    "measures": [
-      "rizz ranking"
-    ],
-    "coding": "status",
-    "asksTarget": true
-  },
-  {
-    "id": "s10",
-    "phase": "spicy",
+    "id": "sp-46",
+    "band": "spicy",
+    "role": "subject",
     "kind": "text",
-    "text": "Last lie you told to dodge plans with someone in this room. What did you say?",
+    "text": "Which person in this room would you most want to be stuck in a lift with for two hours?",
     "measures": [
-      "harmless-confession tags"
+      "flavour:confession"
     ],
-    "coding": "friction",
-    "asksTarget": true
+    "coding": "tease",
+    "asksTarget": false
   },
   {
-    "id": "s11",
-    "phase": "spicy",
+    "id": "sp-47",
+    "band": "spicy",
+    "role": "subject",
     "kind": "pick",
-    "text": "Who here is the biggest people-pleaser? Point at them.",
+    "text": "Who in this room are you most tempted to send a 2am message to right now?",
     "measures": [
-      "status reads",
-      "friction tags"
+      "metric:crush"
     ],
-    "coding": "status",
+    "coding": "couple",
     "asksTarget": true
   },
   {
-    "id": "s12",
-    "phase": "spicy",
+    "id": "sp-48",
+    "band": "spicy",
+    "role": "subject",
     "kind": "rating",
-    "text": "Rate {P5}'s flirting, 1\u201310 \u2014 technique only. They will see it.",
+    "trait": "spice",
+    "text": "How much trouble are you in tonight, 1 to 10?",
     "measures": [
-      "trait:spice",
-      "peer spice read",
-      "trait agreement"
+      "trait:spice"
     ],
-    "coding": "status",
-    "asksTarget": true
+    "coding": "tease",
+    "asksTarget": false
   },
   {
-    "id": "s13",
-    "phase": "spicy",
+    "id": "sp-49",
+    "band": "spicy",
+    "role": "subject",
     "kind": "text",
-    "text": "Whose opinion in this room do you pretend not to care about? Name them.",
+    "text": "Who in this room have you been texting the most this week?",
     "measures": [
-      "grievance tags",
-      "status reads"
+      "flavour:confession"
     ],
-    "coding": "friction",
-    "asksTarget": true
+    "coding": "status",
+    "asksTarget": false
   },
   {
-    "id": "s14",
-    "phase": "spicy",
+    "id": "sp-50",
+    "band": "spicy",
+    "role": "subject",
     "kind": "pick",
-    "text": "Who here talks the most and says the least? Point at them.",
+    "text": "Who in this room would you swear you have never slept with, but actually have?",
     "measures": [
-      "status reads",
-      "criticism tags"
+      "metric:hookups"
     ],
-    "coding": "friction",
-    "asksTarget": true
-  },
-  {
-    "id": "s15",
-    "phase": "spicy",
-    "kind": "rating",
-    "text": "Rate how well {P7} actually listens, 1\u201310. They will see it.",
-    "measures": [
-      "trait:warmth",
-      "peer warmth read"
-    ],
-    "coding": "friendship",
+    "coding": "tease",
     "asksTarget": true
   }
 ]

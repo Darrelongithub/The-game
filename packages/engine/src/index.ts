@@ -1,62 +1,50 @@
 // packages/engine/src/index.ts
 // Reveal Game scoring engine — PURE functions, zero I/O, zero network.
-// Public API (Agent C contract):
-//   computeSignals(log, meta)
-//   computeResults(signals, log, meta, config = DEFAULT_WEIGHTS, tagOf?)
-//   buildNightDigest(log, meta)
-//   buildSecrets(results, digest, meta)
-export { computeSignals, pairScoreOf, type PairWeights } from "./signals.ts";
-export { computeResults } from "./results.ts";
-export { buildNightDigest } from "./digest.ts";
-export { buildSecrets } from "./secrets.ts";
-// Live moments (ROUND 3): name clustering + decoy pairing. Never a Claim.
+//
+// Public API:
+//   computeSignals(log, meta)          pair signals
+//   computeResults(log, meta)          the verdicts (data-backed only)
+//   buildNightDigest(log, meta)        quotes, stats, dodges
+//   buildSecrets(results, log, meta)   the private per-phone decks
+export { computeSignals, pairSignalOf, topCouple, topFriends, pickTally, tallyAcross, pairVotes, pairPicks, pickResponses, traitAgreementOf, isDirectedAboutOthers, type PairWeights } from "./signals.ts";
+export { computeResults, assertNoOrientationLeak, resetVerdictIds, type ResultsConfig } from "./results.ts";
+export { buildNightDigest, collectQuotes, collectStats, collectDodges, collectRunningGags, collectLookChains, selfVsRoom } from "./digest.ts";
 export {
-  clusterNames,
-  decoyPairings,
-  decoyQuote,
-  detectNamedPlayers,
-  nameClusterTeaser,
-  normalizeName,
-  type DecoyPairing,
-  type NameCandidate,
-  type NameCluster,
-  type NameClusterResult,
-} from "./live.ts";
-
-// ROUND 4 — the Director. INTERNAL: hypotheses are game-direction hints and
-// are never serialized to a client. Selection is deterministic (seeded).
+  buildSecrets,
+  mutualCrushes,
+  blindSpots,
+  lookChains,
+  deckViewOf,
+  crushStrength,
+  verdictsFor,
+  METRIC_LOOKCHAIN,
+  METRIC_LOOKCHAIN_GUESS,
+  type CrushPair,
+  type BlindSpotFinding,
+  type LookChainOutcome,
+} from "./secrets.ts";
 export {
-  assertNoHypothesisLeak,
-  aboveBand,
-  carryOver,
-  consecutiveTouches,
-  coverageCells,
-  coverageCount,
-  coverageKey,
-  DIMENSIONS,
-  directNextRound,
-  emptyDirectorState,
-  formHypotheses,
-  HYPOTHESIS_DIMENSION,
-  inBand,
-  pickMode,
-  planRound,
-  recordSelection,
-  starvedCells,
-  subjectPairKey,
-  updateHypotheses,
-  type Coverage,
-  type CoverageCell,
-  type Dimension,
-  type DirectedMode,
-  type DirectedRound,
-  type DirectorState,
-  type HypothesisOptions,
-  type HypothesisUpdate,
-  type PlanInput,
-} from "./director.ts";
-
-// Exposed for tuning, tests and Agent Z's hand-verification:
-export { maximumWeightMatching, constrainedMatching, type Matching } from "./matching.ts";
+  ENGINE_TUNING,
+  DESIRE_METRICS,
+  NEGATIVE_METRICS,
+  CLOSENESS_METRICS,
+  COUPLE_METRICS,
+  clamp01,
+  meanOf,
+  pairKey,
+  sortedPair,
+  pseudoOf,
+  aliasOf,
+  getPicks,
+  buildRatingIndex,
+  pooledPairRate,
+  directedPicks,
+  tokenJaccard,
+  formatNumber,
+  confidenceFromCount,
+  assertScorableMeta,
+  playerIdsInOrder,
+  playerIdsSorted,
+  logRecordId,
+} from "./internal.ts";
 export { mulberry32 } from "./rng.ts";
-export { ENGINE_TUNING, jokerNominationWeights, logRecordId, tokenJaccard } from "./internal.ts";

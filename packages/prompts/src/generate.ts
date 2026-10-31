@@ -1,340 +1,233 @@
 // packages/prompts/src/generate.ts
-// BATCHED GENERATION — ONE Grok call per phase, in the lobby background.
+// THE GENERATION RUN — Ollama rewrites the night's bank prompts.
 //
-// Spec §6: "generation = ONE call per phase (~15 candidates per call) … in the
-// lobby background — never in the gameplay loop". The provider is never on the
-// critical path: any refusal, timeout, 429 or garbage returns `[]` and the bank
-// carries the night. Generated prompts only AUGMENT the bank.
+// FLOW (per GAME BRIEF v3.2):
+//   • The host presses Start. The server generates the night's prompts with
+//     the real names filled in at deal time, THEN plays.
+//   • All four heat bands are covered in ONE run, SPICY FIRST.
+//   • The safety cap (180s) cuts the run short; the missing prompts are
+//     backfilled from the bank and the night starts anyway.
+//   • The terminal prints, per batch:
+//         Ollama: asked 15, accepted 12, dropped 3 (not-in-room:1, repeat:2)
 //
-// The model proposes; deterministic code disposes: schema, dedupe, banned
-// patterns, 20–160 chars, valid {P1}..{P11}, the data-or-dead rule, and the
-// callback rule (verbatim digest quotes only — never an invented answer).
-import type { NightDigest, Prompt } from "../../shared/src/contracts.ts";
-import { PHASE_KINDS, type PromptPhase } from "./bank/index.ts";
+// The bank carries the night. Ollama only makes it sharper: on any failure the
+// bank prompt is used unchanged.
 import {
-  containsVerbatimQuote,
-  filterCandidates,
-  normalizeKind,
-  normalizeMeasures,
-  type DropReason,
-} from "./filter.ts";
-import type { Provider, ProviderFailReason } from "./provider.ts";
-import { redactAliases } from "./provider.ts";
-import { BANK } from "./bank/index.ts";
-import { inferTrait, TRAIT_MEASURE_PREFIX } from "./trait.ts";
+    BAND_ORDER,
+    type Band,
+    type MetricKey,
+    type PlayerId,
+    type Prompt,
+} from "../../shared/src/contracts.ts";
+import { BANK, metricOf, selectFromBank } from "./bank/index.ts";
+import {
+    BAND_BATCH_SIZE,
+    GEN_SAFETY_CAP_MS,
+    GEN_TARGET_PROMPTS,
+    type OllamaBankPrompt,
+    type OllamaBatchReport,
+    type OllamaRunReport,
+    generateNightWithOllama,
+    ollamaConfig,
+    type OllamaConfig,
+    type OllamaFetch,
+} from "./ollama.ts";
 
-export type GenerateDrop = DropReason | "invented-quote" | "no-quote" | "no-trait";
+export type GenerateDrop =
+    | "not-in-room"
+    | "repeat"
+    | "too-long"
+    | "refusal"
+    | "missing"
+    | "extra"
+    | "unavailable";
 
 export interface GenerateBatchInput {
-  phase: PromptPhase;
-  playerCount: number;
-  usedIds?: readonly string[];
-  digest?: NightDigest | null;
-  /** Room id for the call guard (defaults to a stable per-process label). */
-  room?: string;
-  /** Target number of candidates to ask for / keep (default 15). */
-  count?: number;
-  provider?: Provider | null;
-  /** Known aliases — scrubbed from the payload and from any digested quote. */
-  aliases?: readonly string[];
-  /** Override the dedupe corpus (tests). Defaults to the whole bank. */
-  bankTexts?: readonly string[];
+    /** Players in the room — placeholder slots must resolve to them. */
+    playerCount: number;
+    /** The night's seed (seeded shuffle). */
+    seed: number;
+    /** Room id for the call guard. */
+    room?: string;
+    /** Aliases — scrubbed from anything that leaves the process. */
+    aliases?: readonly string[];
+    /** Overrides for tests. */
+    config?: Partial<OllamaConfig>;
+    fetchImpl?: OllamaFetch | null;
+    now?: () => number;
+    safetyCapMs?: number;
+    log?: (line: string) => void;
 }
 
 export interface GenerateBatchReport {
-  prompts: Prompt[];
-  lane: "grok" | "bank";
-  reason?: ProviderFailReason;
-  /** Candidates the model returned. */
-  candidates: number;
-  accepted: number;
-  dropped: { index: number; reason: GenerateDrop; detail?: string }[];
-  /** Accepted prompts that quote a digest answer verbatim. */
-  callbacks: number;
-  /** True when a provider call was actually attempted (and budgeted). */
-  called: boolean;
-}
-
-const DEFAULT_COUNT = 15;
-const QUOTE_MAX = 6;
-
-/** Strip every alias out of the digest before it is allowed near a provider. */
-export function pseudonymizedDigest(
-  digest: NightDigest | null | undefined,
-  aliases: readonly string[] | undefined,
-): Record<string, unknown> | null {
-  if (!digest) return null;
-  const scrub = (value: string) => redactAliases(value, aliases);
-  return {
-    quotes: (digest.quotes ?? []).slice(0, 12).map((q) => ({
-      text: scrub(q.text ?? ""),
-      context: scrub(q.context ?? ""),
-    })),
-    runningGags: (digest.runningGags ?? []).slice(0, 6).map((g) => ({ word: scrub(g.word ?? ""), count: g.count })),
-    pickTeasers: (digest.pickTeasers ?? []).slice(0, 6).map(scrub),
-    dodges: (digest.dodges ?? []).slice(0, 6).map((d) => ({ reason: scrub(d.reason ?? "") })),
-    stats: {
-      fastest: digest.stats?.fastest ? { ms: digest.stats.fastest.ms } : undefined,
-      slowest: digest.stats?.slowest ? { ms: digest.stats.slowest.ms } : undefined,
-      topDodger: digest.stats?.topDodger ? { count: digest.stats.topDodger.count } : undefined,
-      tapWar: digest.stats?.tapWar ? { score: digest.stats.tapWar.score } : undefined,
-    },
-    selfVsRoom: (digest.selfVsRoom ?? []).slice(0, 8).map((s) => ({ trait: s.trait, self: s.self, roomMean: s.roomMean })),
-  };
-}
-
-/** The verbatim answers a callback may quote (alias-scrubbed). */
-export function callbackQuotes(digest: NightDigest | null | undefined, aliases: readonly string[] | undefined): string[] {
-  if (!digest) return [];
-  return (digest.quotes ?? [])
-    .map((q) => redactAliases(String(q.text ?? ""), aliases).trim())
-    .filter((q) => q.length >= 8)
-    .slice(0, QUOTE_MAX);
-}
-
-const PHASE_BRIEF: Record<PromptPhase, string> = {
-  warmup: "Warm-up: light, social, fast. Picks, one-word shouts, self-ratings, a tap-war.",
-  spicy: "Spicy: flirty, teasing, status and desire reads. Adult banter inside an R-rated envelope.",
-  deep: "Deep: vulnerability, trust, old grievances, who people really are to each other.",
-  dare: "Dare: social-risk only (cringe, reveals, embarrassment) — never physical danger, never illegal.",
-};
-
-function systemPrompt(input: {
-  phase: PromptPhase;
-  playerCount: number;
-  count: number;
-  quotes: string[];
-  callbackTarget: number;
-}): string {
-  const kinds = PHASE_KINDS[input.phase].join(", ");
-  const lines = [
-    "You write prompts for a private 18+ party game played by a group of friends in one room.",
-    `Phase: ${input.phase}. ${PHASE_BRIEF[input.phase]}`,
-    `There are exactly ${input.playerCount} players, addressed only as Player 1..Player ${input.playerCount} — never real names.`,
-    `Return ONE JSON array of ${input.count} objects. No prose, no markdown.`,
-    "Each object:",
-    '  "text": string, 20-160 characters, second person, a single question or dare,',
-    '  "kind": one of: ' + kinds + ",",
-    '  "coding": one of: couple, friendship, trust, friction, rivalry, status, neutral,',
-    '  "measures": string[] with 1-3 short signal names this prompt extracts,',
-    '  "asksTarget": boolean (true when the player must name someone in the room),',
-    '  "callback": boolean (see below).',
-    "DATA-OR-DEAD RULE: every prompt must be directed at someone in the room (or a pair, or the group)",
-    "and must extract a real signal (a directed pick, a peer rating, closeness circles, a shout, a dare outcome).",
-    "Use placeholders {P1}..{P" + input.playerCount + "} where a player is named; never write 'Player 3' inline.",
-    "BANNED: favorites, zombies, desert island, untwisted 'most likely to', generic icebreakers,",
-    "anything involving minors, non-consent, explicit sexual acts, real people, or illegal acts.",
-    "Never ask for physical danger. Dares always allow 'I can't' plus a reason.",
-  ];
-  if (input.quotes.length > 0 && input.phase !== "warmup") {
-    lines.push(
-      `CALLBACKS: exactly ${input.callbackTarget} of the ${input.count} prompts must quote one of these earlier`,
-      "answers VERBATIM inside quotation marks (copy the words exactly; never invent an answer):",
-      ...input.quotes.map((q) => `  - "${q}"`),
-    );
-  } else {
-    lines.push("Set \"callback\": false on every prompt.");
-  }
-  return lines.join("\n");
-}
-
-function callbackTargetFor(phase: PromptPhase, count: number, quoteCount: number): number {
-  if (phase === "warmup" || quoteCount === 0) return 0;
-  return Math.max(1, Math.floor(count / 3));
-}
-
-function quotedSegments(text: string): string[] {
-  const out: string[] = [];
-  for (const m of text.matchAll(/["“]([^"”]{8,})["”]/g)) {
-    const segment = m[1]?.trim();
-    if (segment) out.push(segment);
-  }
-  return out;
+    /** The prompts to play tonight: Ollama's where they passed, the bank elsewhere. */
+    prompts: Prompt[];
+    batches: OllamaBatchReport[];
+    accepted: number;
+    dropped: number;
+    /** True when the safety cap cut the run short. */
+    capped: boolean;
+    /** True when Ollama was unreachable — the bank carries the night alone. */
+    offline: boolean;
+    /** How many prompts the loading screen counts towards ("14/40 ready"). */
+    target: number;
 }
 
 /**
- * Callback integrity: any quoted segment in a generated prompt must be
- * VERBATIM from the digest. An invented quote kills the candidate (spec §6:
- * "quote verbatim, never invent").
+ * The bank prompts we hand to Ollama for rewriting, per band.
+ * These are the prompts that will actually be PLAYED tonight, so the model
+ * only ever sees questions we know we want.
  */
-export function checkCallbackIntegrity(
-  raw: unknown,
-  quotes: readonly string[],
-): { ok: true; isCallback: boolean } | { ok: false; reason: GenerateDrop; detail?: string } {
-  if (!raw || typeof raw !== "object") return { ok: false, reason: "schema" };
-  const candidate = raw as { text?: unknown; callback?: unknown };
-  const text = typeof candidate.text === "string" ? candidate.text : "";
-  const segments = quotedSegments(text);
-  const matched = quotes.filter((q) => containsVerbatimQuote(text, q));
-  if (segments.length > 0) {
-    for (const segment of segments) {
-      const found = quotes.some((q) => q.toLowerCase().includes(segment.toLowerCase()) || containsVerbatimQuote(q, segment));
-      if (!found) return { ok: false, reason: "invented-quote", detail: segment.slice(0, 60) };
+export function seedPromptsForBand(
+    band: Band,
+    count: number,
+    opts: { playerCount: number; seed: number },
+): OllamaBankPrompt[] {
+    const prompts = selectFromBank(count, {
+        bands: [band],
+        playerCount: opts.playerCount,
+        seed: opts.seed,
+    });
+    return prompts.map((p) => ({
+        id: p.id,
+        band: p.band,
+        role: p.role,
+        kind: p.kind,
+        text: p.text,
+        metric: metricOf(p),
+    }));
+}
+
+/**
+ * Run the whole night's generation.
+ *
+ * Returns the prompts to play: Ollama's accepted rephrases plus the bank
+ * prompts that were not rewritten (unchanged). The caller never has to think
+ * about which is which — a prompt with `source: "ollama"` came from the model,
+ * everything else is the bank.
+ */
+export async function generateNight(input: GenerateBatchInput): Promise<GenerateBatchReport> {
+    const config = { ...ollamaConfig(), ...(input.config ?? {}) };
+    const seedByBand: Record<Band, OllamaBankPrompt[]> = {
+        warmup: [],
+        spicy: [],
+        deep: [],
+        dare: [],
+    };
+    for (const band of BAND_ORDER) {
+        seedByBand[band] = seedPromptsForBand(band, BAND_BATCH_SIZE[band], {
+            playerCount: input.playerCount,
+            seed: input.seed + band.length * 7919,
+        });
     }
-  }
-  if (candidate.callback === true) {
-    if (matched.length === 0) return { ok: false, reason: "no-quote", detail: "callback without a verbatim quote" };
-    return { ok: true, isCallback: true };
-  }
-  return { ok: true, isCallback: matched.length > 0 };
-}
 
-/**
- * Keep ~1 in 3 callbacks from spicy onward. When the model under-delivers we
- * append a REAL quote to a plain text prompt (still ≤160 chars) instead of
- * inventing one. Deterministic: first eligible prompts, digest order.
- */
-export function ensureCallbackShare(
-  prompts: Prompt[],
-  quotes: readonly string[],
-  target: number,
-  isCallback: (p: Prompt) => boolean,
-  maxChars = 160,
-): Prompt[] {
-  if (target <= 0 || quotes.length === 0) return prompts;
-  let have = prompts.filter(isCallback).length;
-  if (have >= target) return prompts;
-  const out = [...prompts];
-  let quoteIndex = 0;
-  for (let i = 0; i < out.length && have < target; i += 1) {
-    const prompt = out[i]!;
-    if (isCallback(prompt)) continue;
-    if (prompt.kind !== "text") continue;
-    const quote = quotes[quoteIndex % quotes.length]!;
-    quoteIndex += 1;
-    const suffix = `Callback: someone here said "${quote}" — defend or deny it.`;
-    const base = prompt.text.trim();
-    const joiner = /[.?!]$/.test(base) ? " " : ". ";
-    const text = `${base}${joiner}${suffix}`;
-    if (text.length > maxChars) continue;
-    out[i] = { ...prompt, text };
-    have += 1;
-  }
-  return out;
-}
-
-function fallbackReason(reason: ProviderFailReason | undefined): ProviderFailReason {
-  return reason ?? "http";
-}
-
-/**
- * ONE Grok call → filtered, deduped, data-or-dead-compliant prompts.
- * Returns `[]` (never throws) when the lane is silent or the output is unusable.
- */
-export async function generateBatch(input: GenerateBatchInput): Promise<Prompt[]> {
-  const report = await generateBatchReport(input);
-  return report.prompts;
-}
-
-export async function generateBatchReport(input: GenerateBatchInput): Promise<GenerateBatchReport> {
-  const provider = input.provider ?? null;
-  const empty: GenerateBatchReport = {
-    prompts: [],
-    lane: "bank",
-    candidates: 0,
-    accepted: 0,
-    dropped: [],
-    callbacks: 0,
-    called: false,
-  };
-  if (!provider || !provider.canGenerate()) {
-    return { ...empty, reason: "no-key" };
-  }
-
-  const count = Math.max(1, Math.min(20, input.count ?? DEFAULT_COUNT));
-  const room = input.room ?? "room-unknown";
-  const quotes = callbackQuotes(input.digest, input.aliases);
-  const cbTarget = callbackTargetFor(input.phase, count, quotes.length);
-  const digestPayload = pseudonymizedDigest(input.digest, input.aliases);
-
-  try {
-    const { result, value } = await provider.grokJson({
-      room,
-      purpose: "generate",
-      model: provider.modelFor("grok", "generate"),
-      messages: [
-        { role: "system", content: systemPrompt({ phase: input.phase, playerCount: input.playerCount, count, quotes, callbackTarget: cbTarget }) },
-        {
-          role: "user",
-          content: JSON.stringify({
-            phase: input.phase,
-            players: input.playerCount,
-            count,
-            nightDigest: digestPayload,
-            callbacksWanted: cbTarget,
-          }),
-        },
-      ],
-      temperature: 0.9,
-      maxTokens: 2_400,
-      aliases: input.aliases,
+    const run: OllamaRunReport = await generateNightWithOllama(seedByBand, {
+        config,
+        playerCount: input.playerCount,
+        seed: input.seed,
+        fetchImpl: input.fetchImpl ?? null,
+        now: input.now,
+        safetyCapMs: input.safetyCapMs ?? GEN_SAFETY_CAP_MS,
+        log: input.log,
     });
 
-    if (!result.ok) return { ...empty, reason: fallbackReason(result.reason), called: true };
-
-    const raws = Array.isArray(value)
-      ? value
-      : Array.isArray((value as { prompts?: unknown }).prompts)
-        ? ((value as { prompts: unknown[] }).prompts)
-        : [];
-    if (raws.length === 0) return { ...empty, reason: "empty", called: true };
-
-    // Pre-pass 1: callbacks must be real — an invented quote is never shown.
-    // Pre-pass 2: a rating round needs a readable trait (the Prompt contract
-    // has no trait field yet), so stamp `trait:<id>` from the wording or drop.
-    const dropped: GenerateBatchReport["dropped"] = [];
-    const kept: unknown[] = [];
-    for (let i = 0; i < raws.length; i += 1) {
-      const verdict = checkCallbackIntegrity(raws[i], quotes);
-      if (!verdict.ok) {
-        dropped.push({ index: i, reason: verdict.reason, detail: verdict.detail });
-        continue;
-      }
-      const candidate = { ...(raws[i] as Record<string, unknown>) };
-      const kind = normalizeKind(candidate.kind);
-      if (kind === "rating") {
-        const text = typeof candidate.text === "string" ? candidate.text : "";
-        const trait = inferTrait(text);
-        if (!trait) {
-          dropped.push({ index: i, reason: "no-trait", detail: "rating with no readable trait" });
-          continue;
+    // Build the playable set: Ollama's accepted prompts, plus every bank
+    // prompt that was NOT successfully rewritten (used unchanged).
+    const accepted: Prompt[] = [];
+    const acceptedIds = new Set<string>();
+    for (const batch of run.batches) {
+        for (const p of batch.prompts) {
+            accepted.push(p);
+            acceptedIds.add(p.id.replace(/-ollama$/, ""));
         }
-        const measures = normalizeMeasures(candidate.measures);
-        candidate.measures = [`${TRAIT_MEASURE_PREFIX}${trait}`, ...measures.filter((m) => !m.startsWith(TRAIT_MEASURE_PREFIX))];
-      }
-      kept.push(candidate);
     }
 
-    const bankTexts = input.bankTexts ?? BANK.map((p) => p.text);
-    const filtered = filterCandidates(kept, {
-      phase: input.phase,
-      playerCount: input.playerCount,
-      usedIds: input.usedIds ?? [],
-      usedTexts: bankTexts,
-      idPrefix: "grok",
-      limit: count,
-    });
+    const bankBackfill: Prompt[] = [];
+    for (const band of BAND_ORDER) {
+        for (const seed of seedByBand[band]) {
+            if (acceptedIds.has(seed.id)) continue;
+            const original = BANK.find((p) => p.id === seed.id);
+            if (original) bankBackfill.push(original);
+        }
+    }
 
-    const accepted: Prompt[] = filtered.prompts;
-    // A prompt is a callback when it carries a real digest quote verbatim —
-    // detection by content, not by the model's own flag (flags lie).
-    const isCallback = (p: Prompt) => quotes.some((q) => containsVerbatimQuote(p.text, q));
-    const topped = ensureCallbackShare(accepted, quotes, cbTarget, isCallback);
+    // Anything else in the bank stays available for the case engine to draw
+    // on (the night needs more prompts than the model rewrote).
+    const usedIds = new Set([...acceptedIds, ...bankBackfill.map((p) => p.id)]);
+    const rest = BANK.filter((p) => !usedIds.has(p.id));
 
     return {
-      prompts: topped,
-      lane: "grok",
-      candidates: raws.length,
-      accepted: topped.length,
-      dropped: [
-        ...dropped,
-        ...filtered.dropped.map((d) => ({ index: d.index, reason: d.reason as GenerateDrop, detail: d.detail })),
-      ],
-      callbacks: topped.filter(isCallback).length,
-      called: true,
+        prompts: [...accepted, ...bankBackfill, ...rest],
+        batches: run.batches,
+        accepted: run.accepted,
+        dropped: run.dropped,
+        capped: run.capped,
+        offline: run.offline,
+        target: GEN_TARGET_PROMPTS,
     };
-  } catch {
-    // Never throw into the lobby loop — the bank is always there.
-    return { ...empty, reason: "network", called: true };
-  }
 }
+
+/**
+ * The one-line verdict writer. Ollama may restate what the data says, in one
+ * sentence, naming a real player. On any failure the template stands.
+ */
+export async function writeVerdictLines(
+    lines: { id: string; template: string; names: string[] }[],
+    opts: {
+        config?: Partial<OllamaConfig>;
+        fetchImpl?: OllamaFetch | null;
+        aliases?: readonly string[];
+        room?: string;
+        log?: (line: string) => void;
+    } = {},
+): Promise<{ id: string; text: string; source: "ollama" | "template" }[]> {
+    const config = { ...ollamaConfig(), ...(opts.config ?? {}) };
+    const out: { id: string; text: string; source: "ollama" | "template" }[] = [];
+    if (lines.length === 0) return out;
+
+    const { callOllama, validateVerdictLine, verdictSystemPrompt, normalizeForMatch } = await import("./ollama.ts");
+    const seen = new Set<string>();
+
+    for (const line of lines) {
+        const result = await callOllama(
+            config,
+            {
+                messages: [
+                    { role: "system", content: verdictSystemPrompt() },
+                    {
+                        role: "user",
+                        content: `Rewrite this verdict in one funny sentence using only the given names and numbers:\n${line.template}`,
+                    },
+                ],
+                temperature: 0.8,
+                maxTokens: 200,
+            },
+            opts.fetchImpl ?? null,
+        );
+        if (!result.ok || !result.text) {
+            out.push({ id: line.id, text: line.template, source: "template" });
+            continue;
+        }
+        const check = validateVerdictLine(result.text, {
+            playerCount: opts.aliases?.length ?? 0,
+            allowedNames: line.names,
+            seen,
+        });
+        if (!check.ok) {
+            out.push({ id: line.id, text: line.template, source: "template" });
+            continue;
+        }
+        seen.add(normalizeForMatch(result.text));
+        out.push({ id: line.id, text: result.text.trim(), source: "ollama" });
+    }
+    return out;
+}
+
+/** Re-exported so callers do not have to reach into two modules. */
+export { BAND_BATCH_SIZE, GEN_SAFETY_CAP_MS, GEN_TARGET_PROMPTS };
+
+/** The metrics the engine can read off a prompt. */
+export type { MetricKey };
+
+/** Every player id in the room — used to check generated lines name someone real. */
+export const roomPlayers = (ids: readonly PlayerId[]): PlayerId[] => [...ids];

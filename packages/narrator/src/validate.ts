@@ -77,13 +77,13 @@ const REFUSALS: readonly string[] = [
 
 /** All digit tokens in free text, ignoring "Player N" labels. */
 export function digitTokens(text: string): string[] {
-  const stripped = text.replace(PLAYER_TOKEN, " ");
+  const stripped = String(text ?? "").replace(PLAYER_TOKEN, " ");
   return stripped.match(DIGITS) ?? [];
 }
 
-export function digitsIn(texts: readonly string[]): Set<string> {
+export function digitsIn(texts: readonly (string | number)[]): Set<string> {
   const out = new Set<string>();
-  for (const text of texts) for (const token of digitTokens(text)) out.add(token);
+  for (const text of texts) for (const token of digitTokens(String(text ?? ""))) out.add(token);
   return out;
 }
 

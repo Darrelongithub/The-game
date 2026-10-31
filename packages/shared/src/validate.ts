@@ -1,8 +1,22 @@
 // packages/shared/src/validate.ts
 // Minimal runtime guards shared by server, engine, mock transport, and selfcheck.
 import {
-  ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, MIN_PLAYERS, MAX_PLAYERS,
-  TRAITS, type ResponseValue, type TraitId, type PlayerId,
+  DARE_REASON_MAX_CHARS,
+  ROOM_CODE_ALPHABET,
+  ROOM_CODE_LENGTH,
+  MIN_PLAYERS,
+  MAX_PLAYERS,
+  SHORT_TEXT_MAX_CHARS,
+  TEXT_MAX_CHARS,
+  TRAITS,
+  type Attraction,
+  type Gender,
+  type LookingFor,
+  type ProfileAnswers,
+  type ResponseValue,
+  type Sexuality,
+  type TraitId,
+  type PlayerId,
 } from "./contracts.ts";
 
 export const isRoomCode = (code: string): boolean =>
@@ -19,28 +33,48 @@ export const playerCountOk = (n: number): boolean =>
 const intInRange = (n: unknown, lo: number, hi: number): n is number =>
   typeof n === "number" && Number.isInteger(n) && n >= lo && n <= hi;
 
+export const GENDERS: readonly Gender[] = ["woman", "man", "nonbinary", "other", "undisclosed"];
+export const SEXUALITIES: readonly Sexuality[] = ["straight", "gay", "bi", "pan", "queer", "asexual", "other", "undisclosed"];
+export const ATTRACTIONS: readonly Attraction[] = ["women", "men", "everyone", "nobody", "undisclosed"];
+export const LOOKING_FOR: readonly LookingFor[] = ["relationship", "hookup", "fun", "chaos", "undisclosed"];
+
+export function isProfileAnswers(v: unknown): v is ProfileAnswers {
+  if (!v || typeof v !== "object") return false;
+  const p = v as ProfileAnswers;
+  return (
+    intInRange(p.age, 18, 120) &&
+    GENDERS.includes(p.gender) &&
+    SEXUALITIES.includes(p.sexuality) &&
+    ATTRACTIONS.includes(p.attractedTo) &&
+    LOOKING_FOR.includes(p.lookingFor)
+  );
+}
+
 export function isResponseValue(v: unknown): v is ResponseValue {
   if (v === null || typeof v !== "object") return false;
   const r = v as Record<string, unknown>;
   switch (r.kind) {
     case "pick":
       return typeof r.target === "string" && r.target.length > 0;
+    case "pair_pick":
+      return Array.isArray(r.pair) && r.pair.length === 2 &&
+        r.pair.every((p) => typeof p === "string" && p.length > 0);
+    case "pair_vote":
+      return Array.isArray(r.pair) && r.pair.length === 2 &&
+        r.pair.every((p) => typeof p === "string" && p.length > 0) &&
+        intInRange(r.value, 1, 5);
     case "text":
-      return typeof r.text === "string" && r.text.trim().length > 0 && r.text.length <= 280;
-    case "shout":
-      return typeof r.word === "string" && r.word.trim().length > 0 && r.word.length <= 24;
+      return typeof r.text === "string" && r.text.trim().length > 0 && r.text.length <= TEXT_MAX_CHARS;
     case "rating":
       return TRAITS.includes(r.trait as TraitId) &&
         (r.about === "self" || typeof r.about === "string") &&
         intInRange(r.value, 1, 10);
-    case "ios":
-      return typeof r.about === "string" && intInRange(r.value, 1, 7);
-    case "minigame":
-      return typeof r.score === "number" && Number.isFinite(r.score) && r.score >= 0 && r.score < 1000;
     case "dare":
       return r.status === "done" ||
         (r.status === "passed" &&
-          typeof r.reason === "string" && r.reason.trim().length > 0 && r.reason.length <= 140);
+          typeof r.reason === "string" &&
+          r.reason.trim().length > 0 &&
+          r.reason.length <= DARE_REASON_MAX_CHARS);
     default:
       return false;
   }
@@ -53,9 +87,10 @@ export function isResponseValue(v: unknown): v is ResponseValue {
 export function targetsOther(v: ResponseValue, self: PlayerId): boolean {
   switch (v.kind) {
     case "pick":   return v.target !== self;
-    case "ios":    return v.about !== self;
     case "rating": return v.about === "self" ? true : v.about !== self;
-    default:       return true; // text / shout / minigame / dare are not directed
+    case "pair_pick": return !v.pair.includes(self);
+    case "pair_vote": return !v.pair.includes(self);
+    default:       return true; // text / dare are not directed
   }
 }
 
@@ -63,3 +98,5 @@ export function targetsOther(v: ResponseValue, self: PlayerId): boolean {
 export function validSubmit(v: unknown, self: PlayerId): boolean {
   return isResponseValue(v) && targetsOther(v, self);
 }
+
+export { SHORT_TEXT_MAX_CHARS };

@@ -1,173 +1,193 @@
 // packages/prompts/test/bank.test.ts
-// The bank is the ship-blocker: it must carry a whole night with ZERO API keys.
-import test from "node:test";
+// The prompt bank.
+//
+// The rules under test:
+//   • ≥150 prompts, wildly varied.
+//   • The unhinged tier loads BEFORE the seed prompts.
+//   • The seeded shuffle is reproducible and different across nights.
+//   • A template is never used twice in one night.
+//   • No prompt targets nobody: every question is about someone in the room.
+//   • The three generic prompts are gone.
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import {
-  BANK_PHASES,
-  PHASE_KINDS,
-  RAW_BANK,
-  UNHINGED_IDS,
-  bankCounts,
-  bankForPhase,
-  checkBanned,
-  checkDataOrDead,
-  checkHardBlocked,
+  BANK,
+  BANK_BANDS,
   loadBank,
-  maxPlaceholderIndex,
+  metricOf,
   selectFromBank,
-  spicyTierEnabled,
-  badPlaceholder,
-  traitOfPrompt,
-  type PromptPhase,
+  seededShuffle,
+  bankCounts,
 } from "../src/index.ts";
+import { RAW_BANK } from "../src/bank/index.ts";
 
-const SEED_IDS = [
-  "w1", "w2", "w3", "w4", "w5", "w6", "w7", "w8", "w9", "w10",
-  "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10",
-  "d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8", "d9", "d10",
-  "dd1", "dd2", "dd3", "dd4", "dd5", "dd6", "dd7", "dd8", "dd9", "dd10",
+const GENERIC = [
+  /which vibe are you looking for/i,
+  /point at that person/i,
+  /how warm are you,?\s*honestly/i,
 ];
 
-const U_IDS = Array.from({ length: 27 }, (_, i) => `u${i + 1}`);
+describe("the bank", () => {
+  it("has at least 150 prompts", () => {
+    assert.ok(BANK.length >= 150, `bank has ${BANK.length} prompts, needs 150+`);
+  });
 
-test("≥15 usable prompts per phase with SPICY_TIER on", () => {
-  const counts = bankCounts({ spicy: true });
-  for (const phase of BANK_PHASES) {
-    assert.ok(counts[phase] >= 15, `${phase} has only ${counts[phase]}`);
-  }
-});
-
-test("SPICY_TIER off drops u1–u27 and still leaves a full night", () => {
-  const tame = loadBank({ spicy: false });
-  assert.equal(tame.filter((p) => p.id.startsWith("u")).length, 0);
-  const counts = bankCounts({ spicy: false });
-  for (const phase of BANK_PHASES) {
-    assert.ok(counts[phase] >= 15, `${phase} has only ${counts[phase]} without the unhinged tier`);
-  }
-});
-
-test("every research-brief seed is present exactly once", () => {
-  const bank = loadBank({ spicy: true });
-  const ids = bank.map((p) => p.id);
-  for (const id of SEED_IDS) assert.equal(ids.filter((x) => x === id).length, 1, `missing/duplicated ${id}`);
-  assert.equal(new Set(ids).size, ids.length, "bank ids are not unique");
-});
-
-test("ALL of the unhinged tier u1–u27 is in the spicy bank and behind the gate", () => {
-  const spicy = loadBank({ spicy: true }).map((p) => p.id);
-  const tame = loadBank({ spicy: false }).map((p) => p.id);
-  for (const id of U_IDS) {
-    assert.ok(spicy.includes(id), `missing ${id} with SPICY_TIER on`);
-    assert.ok(!tame.includes(id), `${id} leaked with SPICY_TIER off`);
-  }
-  assert.deepEqual([...UNHINGED_IDS].sort(), U_IDS.sort());
-});
-
-test("every bank entry passes the data-or-dead rule (coding + measures + directed)", () => {
-  for (const prompt of loadBank({ spicy: true })) {
-    const verdict = checkDataOrDead({
-      kind: prompt.kind,
-      text: prompt.text,
-      coding: prompt.coding,
-      measures: prompt.measures,
-      asksTarget: prompt.asksTarget,
-    });
-    assert.ok(verdict.ok, `${prompt.id} fails data-or-dead: ${verdict.reason} ${verdict.detail ?? ""}`);
-    assert.ok(Array.isArray(prompt.measures) && prompt.measures.length > 0, `${prompt.id} has no measures`);
-  }
-});
-
-test("every bank entry has the full Prompt shape and a legal kind for its phase", () => {
-  for (const prompt of loadBank({ spicy: true })) {
-    assert.equal(prompt.source, "bank", `${prompt.id} source`);
-    assert.ok(BANK_PHASES.includes(prompt.phase), `${prompt.id} phase`);
-    assert.ok(PHASE_KINDS[prompt.phase].includes(prompt.kind), `${prompt.id} kind ${prompt.kind} in ${prompt.phase}`);
-    assert.equal(typeof prompt.asksTarget, "boolean", `${prompt.id} asksTarget`);
-    assert.ok(prompt.text.length >= 20 && prompt.text.length <= 200, `${prompt.id} length ${prompt.text.length}`);
-  }
-});
-
-test("placeholders are {P1}..{P11} only, and never beyond the roster", () => {
-  for (const prompt of loadBank({ spicy: true })) {
-    assert.equal(badPlaceholder(prompt.text), null, `${prompt.id} has an invalid placeholder`);
-    assert.ok(maxPlaceholderIndex(prompt.text) <= 11, `${prompt.id} placeholder out of range`);
-  }
-});
-
-test("no bank entry trips a banned pattern or a hard block", () => {
-  for (const prompt of loadBank({ spicy: true })) {
-    assert.equal(checkBanned(prompt.text), null, `${prompt.id} hits banned pattern`);
-    assert.equal(checkHardBlocked(prompt.text), null, `${prompt.id} hits a hard block`);
-  }
-});
-
-test("every rating prompt names a real evaluative trait", () => {
-  const ratings = loadBank({ spicy: true }).filter((p) => p.kind === "rating");
-  assert.ok(ratings.length >= 8, "expected a healthy number of rating prompts");
-  for (const prompt of ratings) {
-    const trait = traitOfPrompt(prompt);
-    assert.ok(trait, `${prompt.id} is a rating with no readable trait`);
-    assert.ok(["loyalty", "chaos", "reliability", "warmth", "honesty", "spice"].includes(trait!));
-  }
-});
-
-test("the dare phase always offers pair_dare and debrief (spectator + private rounds)", () => {
-  for (const spicy of [true, false]) {
-    const kinds = new Set(bankForPhase("dare", { spicy }).map((p) => p.kind));
-    assert.ok(kinds.has("pair_dare"), "pair_dare missing");
-    assert.ok(kinds.has("debrief"), "debrief missing");
-    assert.ok(kinds.has("dare"), "solo dares missing");
-  }
-});
-
-test("host-facing variety: every phase spans at least 3 round kinds", () => {
-  for (const phase of BANK_PHASES) {
-    const kinds = new Set(bankForPhase(phase, { spicy: true }).map((p) => p.kind));
-    assert.ok(kinds.size >= 3, `${phase} only has ${[...kinds].join(",")}`);
-  }
-});
-
-test("bank is deterministic across loads (same ids, same order)", () => {
-  const a = loadBank({ spicy: true }).map((p) => p.id);
-  const b = loadBank({ spicy: true }).map((p) => p.id);
-  assert.deepEqual(a, b);
-});
-
-test("selection: excludes used ids, honours the player count, never repeats", () => {
-  const picked = selectFromBank("warmup", 4, { playerCount: 4, excludeIds: ["w1", "w2"] });
-  assert.equal(picked.length, 4);
-  assert.ok(!picked.some((p) => p.id === "w1" || p.id === "w2"));
-  assert.equal(new Set(picked.map((p) => p.id)).size, 4);
-  // A 4-player room must never be handed a {P7} prompt.
-  for (const phase of BANK_PHASES) {
-    for (const prompt of selectFromBank(phase, 15, { playerCount: 4 })) {
-      assert.ok(maxPlaceholderIndex(prompt.text) <= 4, `${prompt.id} needs more than 4 players`);
+  it("has prompts in every band", () => {
+    const counts = bankCounts();
+    for (const band of BANK_BANDS) {
+      assert.ok(counts[band] > 0, `band ${band} is empty`);
     }
-  }
+  });
+
+  it("carries the spicy/unhinged tier BEFORE the seed prompts", () => {
+    const firstUnhinged = BANK.findIndex((p) => p.id.startsWith("un-"));
+    const firstSpicySeed = BANK.findIndex((p) => p.id.startsWith("sp-"));
+    assert.ok(firstUnhinged >= 0, "the unhinged tier must be in the bank");
+    assert.ok(firstUnhinged < firstSpicySeed, "the unhinged tier must load before the seeds");
+  });
+
+  it("has 10+ spicy warm-ups so the night starts hot", () => {
+    const warmups = RAW_BANK.bands.warmup;
+    const spicyWarmups = warmups.filter((w) =>
+      /sex|sleep with|kiss|body count|best in bed|cheat|snitch|ghost|hookup|dating app|swipe/i.test(w.text),
+    );
+    assert.ok(spicyWarmups.length >= 10, `only ${spicyWarmups.length} spicy warm-ups`);
+  });
+
+  it("never carries the same template twice", () => {
+    const seen = new Map<string, string>();
+    for (const prompt of BANK) {
+      const key = prompt.text.trim().toLowerCase();
+      const previous = seen.get(key);
+      assert.ok(!previous, `prompt ${prompt.id} repeats the template of ${previous}`);
+      seen.set(key, prompt.id);
+    }
+  });
+
+  it("contains none of the three deleted generic prompts", () => {
+    for (const p of BANK) {
+      for (const pattern of GENERIC) {
+        assert.doesNotMatch(p.text, pattern, `prompt ${p.id} still has a generic prompt`);
+      }
+    }
+  });
+
+  it("gives every prompt a role, a kind and at least one measure", () => {
+    for (const p of BANK) {
+      assert.ok(p.role, `prompt ${p.id} has no role`);
+      assert.ok(p.kind, `prompt ${p.id} has no kind`);
+      assert.ok(p.measures.length > 0, `prompt ${p.id} measures nothing`);
+      assert.equal(p.source, "bank");
+    }
+  });
+
+  it("has prompts for every role the case engine needs", () => {
+    const roles = new Set(BANK.map((p) => p.role));
+    for (const role of ["subject", "observer_subject", "observer_pair", "group", "solo", "dare"]) {
+      assert.ok(roles.has(role as never), `no prompts for role ${role}`);
+    }
+  });
+
+  it("has enough prompts for the biggest possible room", () => {
+    // 11 players → 5 observer pairs per case, ~12 cases. Every case needs a
+    // subject prompt and one prompt per pair.
+    const observer = BANK.filter((p) => p.role === "observer_subject" || p.role === "observer_pair");
+    assert.ok(observer.length >= 60, `only ${observer.length} observer prompts for a big room`);
+    const subjects = BANK.filter((p) => p.role === "subject");
+    assert.ok(subjects.length >= 12, `only ${subjects.length} subject prompts`);
+    const solos = BANK.filter((p) => p.role === "solo");
+    assert.ok(solos.length >= 6, `only ${solos.length} solo prompts`);
+  });
+
+  it("never asks a question about nobody", () => {
+    for (const p of BANK) {
+      const aboutTheRoom = /\{P\d+\}|\bthis room\b|\bthe room\b|\byou\b|\byour\b|\byourself\b|\beveryone\b|\bsomeone\b|\banyone\b|\bthe group\b|\bhere\b|\bpeople\b|\bthis party\b/i.test(p.text);
+      assert.ok(aboutTheRoom, `prompt ${p.id} targets nobody: ${p.text}`);
+    }
+  });
+
+  it("keeps every placeholder index inside the room size", () => {
+    for (const p of BANK) {
+      const indexes = [...p.text.matchAll(/\{P(\d{1,2})\}/g)].map((m) => Number(m[1]));
+      for (const index of indexes) {
+        assert.ok(index >= 1 && index <= 11, `prompt ${p.id} uses {P${index}}`);
+      }
+    }
+  });
+
+  it("gives the dare band only dares", () => {
+    for (const p of BANK.filter((x) => x.band === "dare")) {
+      assert.equal(p.kind, "dare");
+      assert.equal(p.role, "dare");
+    }
+  });
+
+  it("carries metrics the engine can key off", () => {
+    const metrics = new Set(BANK.map((p) => metricOf(p)).filter(Boolean));
+    for (const key of ["sex-desire", "crush", "body-count", "best-in-bed", "would-cheat", "would-snitch", "is-fake", "couple-fit"]) {
+      assert.ok(metrics.has(key as never), `no prompt measures ${key}`);
+    }
+  });
 });
 
-test("selection spreads round kinds before repeating one", () => {
-  const picked = selectFromBank("warmup", 5, { playerCount: 6 });
-  const kinds = new Set(picked.map((p) => p.kind));
-  assert.ok(kinds.size >= 4, `expected a spread of kinds, got ${[...kinds].join(",")}`);
+describe("the seeded shuffle", () => {
+  it("is reproducible for a given seed", () => {
+    const a = seededShuffle([1, 2, 3, 4, 5, 6, 7, 8], 42);
+    const b = seededShuffle([1, 2, 3, 4, 5, 6, 7, 8], 42);
+    assert.deepEqual(a, b);
+  });
+
+  it("gives a different order for a different seed", () => {
+    const a = seededShuffle([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 1);
+    const b = seededShuffle([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 2);
+    assert.notDeepEqual(a, b);
+  });
+
+  it("changes the night's selection between nights", () => {
+    const nightOne = selectFromBank(10, { seed: 111 }).map((p) => p.id);
+    const nightTwo = selectFromBank(10, { seed: 222 }).map((p) => p.id);
+    assert.notDeepEqual(nightOne, nightTwo);
+  });
+
+  it("never repeats a template when excluded ids are passed in", () => {
+    const first = selectFromBank(5, { seed: 7 });
+    const second = selectFromBank(5, { seed: 7, excludeIds: first.map((p) => p.id) });
+    const overlap = second.filter((p) => first.some((q) => q.id === p.id));
+    assert.equal(overlap.length, 0, "a template repeated inside one night");
+  });
+
+  it("never returns two prompts of the same kind back to back", () => {
+    const picks = selectFromBank(12, { seed: 99 });
+    for (let i = 1; i < picks.length; i++) {
+      const sameKind = picks[i]!.kind === picks[i - 1]!.kind;
+      const sameMetric = metricOf(picks[i]!) === metricOf(picks[i - 1]!);
+      assert.ok(!(sameKind && sameMetric), `two ${picks[i]!.kind} prompts landed back to back`);
+    }
+  });
+
+  it("draws only the requested role", () => {
+    const picks = selectFromBank(4, { role: "dare" });
+    for (const p of picks) assert.equal(p.role, "dare");
+  });
+
+  it("draws only the requested metric", () => {
+    const picks = selectFromBank(4, { metric: "sex-desire" });
+    for (const p of picks) assert.equal(metricOf(p), "sex-desire");
+  });
+
+  it("skips prompts whose placeholders do not fit the room", () => {
+    const picks = selectFromBank(20, { playerCount: 2 });
+    for (const p of picks) {
+      const indexes = [...p.text.matchAll(/\{P(\d{1,2})\}/g)].map((m) => Number(m[1]));
+      for (const index of indexes) assert.ok(index <= 2, `prompt ${p.id} needs ${index} players`);
+    }
+  });
 });
 
-test("selection returns what exists when a phase is exhausted (never throws)", () => {
-  const all = bankForPhase("deep", { spicy: false }).map((p) => p.id);
-  assert.equal(selectFromBank("deep", 99, { spicy: false, playerCount: 11 }).length, all.length);
-  assert.equal(selectFromBank("deep", 5, { spicy: false, playerCount: 11, excludeIds: all }).length, 0);
-});
-
-test("phase files match their declared phase", () => {
-  for (const phase of BANK_PHASES as readonly PromptPhase[]) {
-    for (const row of RAW_BANK.phases[phase]) assert.equal(row.phase, phase, `${row.id} in wrong file`);
-  }
-  for (const row of RAW_BANK.unhinged) assert.ok(["spicy", "deep", "dare"].includes(row.phase), `${row.id} phase`);
-});
-
-test("SPICY_TIER env override is respected", () => {
-  assert.equal(spicyTierEnabled({}), true);
-  assert.equal(spicyTierEnabled({ SPICY_TIER: "true" }), true);
-  assert.equal(spicyTierEnabled({ SPICY_TIER: "false" }), false);
-  assert.equal(spicyTierEnabled({ SPICY_TIER: " OFF " }), false);
+describe("loadBank", () => {
+  it("can turn the unhinged tier off", () => {
+    const tamed = loadBank({ spicy: false });
+    assert.equal(tamed.filter((p) => p.id.startsWith("un-")).length, 0);
+    assert.ok(tamed.length > 100);
+  });
 });

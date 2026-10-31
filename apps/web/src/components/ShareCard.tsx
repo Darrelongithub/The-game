@@ -62,11 +62,10 @@ function wrapLines(
   return lines
 }
 
-const SUMMARY_ORDER: { key: 'ship' | 'besties' | 'toxic' | 'rivals'; label: string }[] = [
-  { key: 'ship', label: 'THE SHIP' },
-  { key: 'besties', label: 'BESTIES' },
-  { key: 'toxic', label: 'MOST TOXIC' },
-  { key: 'rivals', label: 'RIVALS' },
+const SUMMARY_ORDER: { key: 'couple' | 'core' | 'hates'; label: string }[] = [
+  { key: 'couple', label: 'THE SHIP' },
+  { key: 'core', label: 'THE CORE' },
+  { key: 'hates', label: 'THE TARGET' },
 ]
 
 export function ShareCard({

@@ -62,7 +62,7 @@ export function naturalCompare(a: string, b: string): number {
 /** Every player the engine mentioned anywhere in Results. */
 export function collectPlayerIds(results: Results): PlayerId[] {
   const seen = new Set<PlayerId>();
-  for (const claim of results.claims) for (const id of claim.subjects) seen.add(id);
+  for (const verdict of results.verdicts) for (const id of verdict.subjects) seen.add(id);
   for (const pair of results.pairScores) {
     seen.add(pair.a);
     seen.add(pair.b);

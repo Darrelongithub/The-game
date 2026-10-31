@@ -1,216 +1,282 @@
 // packages/engine/src/secrets.ts
-// buildSecrets — spec §7 Secret Cards. Deterministic; numbers come ONLY
-// from Claims and the NightDigest (never recomputed from any log — this
-// function doesn't even receive one). Decks are returned only for players
-// who actually have cards. Facts use "Player N" pseudonyms like the rest
-// of the engine's copy; the server swaps aliases in after narration.
+// SECRET CARDS — private, per-phone, hold-to-open.
+//
+// THE RULE THAT MATTERS: a crush card exists ONLY for a MUTUAL pick. If A
+// picked B and B did not pick A, there is NO CARD AT ALL — not for A, not
+// for B. There is no one-sided card. There is no "who picked you" card. The
+// only thing a phone ever learns is: "You and X like each other."
+//
+// Other cards come from real data too:
+//   blindspot  your self-rating vs what the room said about you
+//   lookchain  you looked at someone; how many guessed, and why
+//
+// No data → no card. Never invent.
 import {
-  SECRET_DECK_MAX,
-  type NightDigest,
-  type PairSignal,
-  type PlayerId,
-  type Results,
-  type RoomMeta,
-  type SecretCard,
+    SECRET_DECK_MAX,
+    type LogRecord,
+    type MetricKey,
+    type PlayerId,
+    type Results,
+    type RoomMeta,
+    type SecretCard,
+    type SecretDeckView,
+    type TraitId,
+    type Verdict,
 } from "../../shared/src/contracts.ts";
 import {
-  ENGINE_TUNING,
-  formatNumber,
-  pairKey,
-  pseudoOf,
+    ENGINE_TUNING,
+    buildRatingIndex,
+    clamp01,
+    formatNumber,
+    meanOf,
+    pseudoOf,
 } from "./internal.ts";
+import { pickTally } from "./signals.ts";
 
-const KIND_ORDER: SecretCard["kind"][] = ["spark", "onesided", "blindspot", "roomnote", "stat"];
-const FACT_MAX_CHARS = 120; // spec §7: each secret fact ≤120 chars
-const FACTS_MAX = 4;          // spec §7: 1–4 lines per card
+// ---------------------------------------------------------------------------
+// look chains
+// ---------------------------------------------------------------------------
 
-const fit = (fact: string): string =>
-  fact.length <= FACT_MAX_CHARS ? fact : `${fact.slice(0, FACT_MAX_CHARS - 1)}…`;
+/**
+ * A Look Chain is a four-step live moment:
+ *   1. everybody looks at X
+ *   2. X taps the person they are looking at (hidden from everyone else)
+ *   3. everybody else guesses who X is looking at
+ *   4. X says why
+ *
+ * The server stores the chain's outcome in the log as a `pick` by the actor
+ * with the `lookchain` metric, the guesses as `pair_pick`-style records with
+ * the `lookchain-guess` metric, and the reason as a `text`.
+ */
+export const METRIC_LOOKCHAIN = "lookchain" as MetricKey;
+export const METRIC_LOOKCHAIN_GUESS = "lookchain-guess" as MetricKey;
 
-const card = (id: string, kind: SecretCard["kind"], title: string, facts: string[]): SecretCard => ({
-  id,
-  kind,
-  title,
-  facts: facts.slice(0, FACTS_MAX).map(fit),
-});
+export interface LookChainOutcome {
+    /** The round the chain happened in — one chain per round. */
+    roundId: string;
+    actor: PlayerId;
+    target: PlayerId;
+    /** How many players guessed the target correctly. */
+    guessedRight: number;
+    /** How many players guessed at all. */
+    guessers: number;
+    /** X's reason, verbatim. */
+    reason?: string;
+    /** The chain's act line, e.g. "Look at someone you love." */
+    act?: string;
+}
 
-export function buildSecrets(
-  results: Results,
-  digest: NightDigest,
-  meta: RoomMeta,
-): Map<PlayerId, SecretCard[]> {
-  const optIn = new Set(meta.revealOptIn);
-  const buckets = new Map<PlayerId, SecretCard[]>();
-  const add = (player: PlayerId, c: SecretCard): void => {
-    const arr = buckets.get(player);
-    if (arr) arr.push(c);
-    else buckets.set(player, [c]);
-  };
-
-  // ---------- spark: one card for EACH of the two (both must be revealOptIn) ----------
-  for (const claim of results.claims) {
-    if (claim.confidence === "low" || claim.type !== "spark" || claim.subjects.length !== 2) continue;
-    const [x, y] = claim.subjects as [PlayerId, PlayerId];
-    if (!optIn.has(x) || !optIn.has(y)) continue;
-    for (const [holder, other] of [[x, y], [y, x]] as [PlayerId, PlayerId][]) {
-      add(holder, card(`secret-spark-${holder}-${other}`, "spark", "A quiet spark", [
-        `You and ${pseudoOf(meta, other)} picked each other on couple-coded rounds.`,
-        ...claim.evidence.slice(0, 2),
-      ]));
-    }
-  }
-
-  // ---------- onesided: the PICKER's phone only (picker must be revealOptIn) ----------
-  for (const claim of results.claims) {
-    if (claim.confidence === "low" || claim.type !== "onesided" || claim.subjects.length !== 2) continue;
-    const [picker, target] = claim.subjects as [PlayerId, PlayerId];
-    if (!optIn.has(picker)) continue;
-    add(picker, card(`secret-onesided-${picker}-${target}`, "onesided", "A one-way signal", [
-      `Your picks kept landing on ${pseudoOf(meta, target)}.`,
-      ...claim.evidence.slice(0, 2),
-      `No pressure in that — the room is just data tonight.`,
-    ]));
-  }
-
-  // ---------- blindspot: each player's top ≤3 self-vs-room gaps ----------
-  const aliasToId = new Map(meta.players.map((p) => [p.alias, p.id]));
-  const gapsByPlayer = new Map<PlayerId, NightDigest["selfVsRoom"]>();
-  for (const entry of digest.selfVsRoom) {
-    const id = aliasToId.get(entry.alias);
-    if (!id) continue;
-    const arr = gapsByPlayer.get(id);
-    if (arr) arr.push(entry);
-    else gapsByPlayer.set(id, [entry]);
-  }
-  for (const player of meta.players) {
-    const gaps = (gapsByPlayer.get(player.id) ?? [])
-      .filter((g) => Math.abs(g.self - g.roomMean) >= ENGINE_TUNING.blindspotSecretMinGap)
-      .slice(0, 3); // digest is already sorted biggest-gap first
-    if (gaps.length === 0) continue;
-    add(player.id, card(`secret-blindspot-${player.id}`, "blindspot", "Your blind spot", gaps.map(
-      (g) =>
-        `You rated your ${g.trait} ${formatNumber(g.self)} out of 10; the room averaged ${formatNumber(g.roomMean)}.`,
-    )));
-  }
-
-  // ---------- roomnote: med-confidence pair notes the engine did NOT publish ----------
-  // Positive-only by construction (friendship/couple-coded pair signals for a
-  // pair that is neither a public ship/besties pair nor a spark) — never
-  // low-confidence, never unkind, never about toxic/rival material.
-  {
-    const publishedOrSparked = new Set<string>();
-    for (const claim of results.claims) {
-      if ((claim.type === "ship" || claim.type === "besties" || claim.type === "spark") && claim.subjects.length === 2) {
-        publishedOrSparked.add(pairKey(claim.subjects[0] as PlayerId, claim.subjects[1] as PlayerId));
-      }
-    }
-    const supportCount = (s: PairSignal): number => {
-      let n = 0;
-      if (s.pickOverlap > ENGINE_TUNING.support.pickOverlap) n++;
-      if (s.mutualPick > ENGINE_TUNING.support.mutualPick) n++;
-      if (s.debriefSim > ENGINE_TUNING.support.debriefSim) n++;
-      if (s.iosMean >= ENGINE_TUNING.support.iosMean) n++;
-      if (s.traitAgreement >= ENGINE_TUNING.support.traitAgreement) n++;
-      return n;
-    };
-    for (const player of meta.players) {
-      let best: PairSignal | undefined;
-      let bestOther: PlayerId | undefined;
-      for (const s of results.pairScores) {
-        if (s.a !== player.id && s.b !== player.id) continue;
-        if (publishedOrSparked.has(pairKey(s.a, s.b))) continue;
-        if (s.coupleEvidence + s.friendEvidence === 0) continue;
-        if (supportCount(s) !== 2) continue; // med confidence = exactly 2 signal types
-        const other = s.a === player.id ? s.b : s.a;
-        if (
-          !best ||
-          s.pairScore > best.pairScore ||
-          (s.pairScore === best.pairScore && bestOther !== undefined && other < bestOther)
-        ) {
-          best = s;
-          bestOther = other;
+/** Pull the look chains out of the log. */
+export function lookChains(log: readonly LogRecord[]): LookChainOutcome[] {
+    // A chain is identified by its ROUND, not by its actor: the same player
+    // may look at somebody more than once in a night, and each of those is
+    // its own chain with its own guesses and its own reason.
+    const chains = new Map<string, LookChainOutcome>();
+    for (const rec of log) {
+        if (rec.metric === METRIC_LOOKCHAIN && rec.value.kind === "pick") {
+            chains.set(rec.roundId, {
+                roundId: rec.roundId,
+                actor: rec.playerId,
+                target: rec.value.target,
+                guessedRight: 0,
+                guessers: 0,
+            });
         }
-      }
-      if (best && bestOther) {
-        add(player.id, card(`secret-roomnote-${player.id}-${bestOther}`, "roomnote", "A note from the room", [
-          `Between you and ${pseudoOf(meta, bestOther)}, the picks kept quietly lining up.`,
-          `Not a headline tonight — just a pattern worth knowing.`,
-        ]));
-      }
     }
-  }
+    // Second pass: the guesses share the chain's roundId with the act.
+    for (const rec of log) {
+        if (rec.metric !== METRIC_LOOKCHAIN_GUESS || rec.value.kind !== "pick") continue;
+        const chain = chains.get(rec.roundId);
+        if (!chain) continue;
+        chain.guessers += 1;
+        if (rec.value.target === chain.target) chain.guessedRight += 1;
+    }
+    // Third pass: the actor's own reason for the look.
+    for (const rec of log) {
+        if (rec.metric !== METRIC_LOOKCHAIN || rec.value.kind !== "text") continue;
+        const chain = chains.get(rec.roundId);
+        if (chain && chain.actor === rec.playerId) chain.reason = rec.value.text;
+    }
+    return [...chains.values()];
+}
 
-  // ---------- profile-derived notes: shared stated intent, never romantic inference ----------
-  // Only the least-sensitive profile axis (tonight's intent) is compared. Both
-  // people must explicitly opt in to reveal cards; private crush and dating
-  // history answers are never used or exposed by inference.
-  for (let i = 0; i < meta.players.length; i++) {
-    const a = meta.players[i]!;
-    for (let j = i + 1; j < meta.players.length; j++) {
-      const b = meta.players[j]!;
-      if (!optIn.has(a.id) || !optIn.has(b.id)) continue;
-      const intent = meta.profiles?.[a.id]?.tonight;
-      if (!intent || intent !== meta.profiles?.[b.id]?.tonight) continue;
-      const label = ({ chaos: "a little chaos", vibes: "good vibes", feelings: "real feelings", mission: "a shared mission" } as const)[intent];
-      add(a.id, card(`secret-profile-intent-${a.id}-${b.id}`, "roomnote", "A shared vibe", [
-        `You and ${pseudoOf(meta, b.id)} both came looking for ${label}.`,
-        `A shared intention is a conversation starter, not proof of compatibility.`,
-      ]));
-      add(b.id, card(`secret-profile-intent-${b.id}-${a.id}`, "roomnote", "A shared vibe", [
-        `You and ${pseudoOf(meta, a.id)} both came looking for ${label}.`,
-        `A shared intention is a conversation starter, not proof of compatibility.`,
-      ]));
-    }
-  }
+// ---------------------------------------------------------------------------
+// crush — MUTUAL ONLY
+// ---------------------------------------------------------------------------
 
-  // ---------- stat: that player's digest stats (dodges, speed, contradiction) ----------
-  for (const player of meta.players) {
-    const facts: string[] = [];
-    const myDodges = digest.dodges.filter((d) => d.alias === player.alias);
-    if (digest.stats.fastest?.alias === player.alias) {
-      facts.push(`Quickest finger tonight: you answered in ${digest.stats.fastest.ms} milliseconds once.`);
-    }
-    if (digest.stats.slowest?.alias === player.alias) {
-      facts.push(`You once took ${digest.stats.slowest.ms} milliseconds to answer. Contemplative.`);
-    }
-    if (digest.stats.tapWar?.alias === player.alias) {
-      facts.push(`Tap-war champion: ${digest.stats.tapWar.score} taps. Officially a lot.`);
-    }
-    if (digest.stats.topDodger?.alias === player.alias) {
-      facts.push(`Most "I can't" cards played tonight: yours.`);
-    }
-    if (myDodges.length > 0) {
-      facts.push(
-        myDodges.length === 1
-          ? `You passed on a dare once. Your stated reason: "${myDodges[0]?.reason}"`
-          : `You passed on dares ${myDodges.length} times. First stated reason: "${myDodges[0]?.reason}"`,
-      );
-      // One contradiction, if the digest holds one: high self-rated
-      // honesty/chaos, then a dodge anyway.
-      const gaps = gapsByPlayer.get(player.id) ?? [];
-      const boasting = gaps.find(
-        (g) => (g.trait === "honesty" || g.trait === "chaos") && g.self >= 8,
-      );
-      if (boasting) {
-        facts.push(
-          `You rated your ${boasting.trait} ${formatNumber(boasting.self)} out of 10 — then passed on a dare anyway.`,
-        );
-      }
-    }
-    if (facts.length > 0) {
-      add(player.id, card(`secret-stat-${player.id}`, "stat", "Your night in numbers", facts));
-    }
-  }
+export interface CrushPair {
+    a: PlayerId;
+    b: PlayerId;
+    /** How many times each picked the other (>=1 each). */
+    strength: number;
+}
 
-  // ---------- fixed order spark → onesided → blindspot → roomnote → stat, capped ----------
-  const decks = new Map<PlayerId, SecretCard[]>();
-  for (const player of meta.players) {
-    // The reveal opt-in gates the entire private deck, not only spark/onesided.
-    if (!optIn.has(player.id)) continue;
-    const cards = buckets.get(player.id);
-    if (!cards || cards.length === 0) continue;
-    const ordered = [...cards].sort((x, y) => KIND_ORDER.indexOf(x.kind) - KIND_ORDER.indexOf(y.kind));
-    decks.set(player.id, ordered.slice(0, SECRET_DECK_MAX));
-  }
-  return decks;
+/**
+ * The mutual crush pairs in the log.
+ *
+ * A pair qualifies ONLY when BOTH players picked the other for a
+ * crush-ish metric. One-sided picks are invisible here by construction —
+ * they never produce a card.
+ */
+export function mutualCrushes(log: readonly LogRecord[]): CrushPair[] {
+    const tally = pickTally(log, "crush");
+    const out: CrushPair[] = [];
+    const seen = new Set<string>();
+    for (const [a, setA] of tally) {
+        for (const b of setA) {
+            if (a === b) continue;
+            const setB = tally.get(b);
+            if (!setB || !setB.has(a)) continue;
+            // Each pair counts ONCE, no matter which side we found it from.
+            const key = a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push({ a, b, strength: Math.min(setA.size, setB.size) });
+        }
+    }
+    out.sort((x, y) => y.strength - x.strength);
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// blind spot
+// ---------------------------------------------------------------------------
+
+export interface BlindSpotFinding {
+    id: PlayerId;
+    trait: TraitId;
+    self: number;
+    room: number;
+    raters: number;
+}
+
+export function blindSpots(log: readonly LogRecord[]): BlindSpotFinding[] {
+    const idx = buildRatingIndex(log);
+    const traits: TraitId[] = ["loyalty", "chaos", "reliability", "warmth", "honesty", "spice"];
+    const out: BlindSpotFinding[] = [];
+    for (const [id, selfMap] of idx.self) {
+        for (const trait of traits) {
+            const self = selfMap.get(trait);
+            if (self === undefined) continue;
+            const peerMap = idx.peerByRater.get(id)?.get(trait);
+            if (!peerMap) continue;
+            const ratings = [...peerMap.values()];
+            if (ratings.length < ENGINE_TUNING.blindspotMinRaters) continue;
+            const room = meanOf(ratings);
+            if (Math.abs(self - room) < ENGINE_TUNING.blindspotMinGap) continue;
+            out.push({ id, trait, self, room, raters: ratings.length });
+        }
+    }
+    out.sort((x, y) => Math.abs(y.self - y.room) - Math.abs(x.self - x.room));
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// the deck builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Build every player's private deck.
+ *
+ * Returns a map keyed by player id. A player with no real data gets NO deck
+ * entry at all (the server simply never sends them a `secrets` event).
+ */
+export function buildSecrets(
+    results: Results,
+    log: readonly LogRecord[],
+    meta: RoomMeta,
+): Map<PlayerId, SecretCard[]> {
+    const decks = new Map<PlayerId, SecretCard[]>();
+    const add = (id: PlayerId, card: SecretCard): void => {
+        const list = decks.get(id) ?? [];
+        if (list.length >= SECRET_DECK_MAX) return;
+        list.push(card);
+        decks.set(id, list);
+    };
+
+    // ---- 1. mutual crush card (ONLY the two mutual pickers) ----
+    for (const crush of mutualCrushes(log)) {
+        const aName = pseudoOf(meta, crush.a);
+        const bName = pseudoOf(meta, crush.b);
+        add(crush.a, {
+            id: `crush-${crush.a}-${crush.b}`,
+            kind: "crush",
+            title: "Mutual crush",
+            facts: [`You and ${bName} like each other.`],
+        });
+        add(crush.b, {
+            id: `crush-${crush.b}-${crush.a}`,
+            kind: "crush",
+            title: "Mutual crush",
+            facts: [`You and ${aName} like each other.`],
+        });
+    }
+
+    // ---- 2. blind spot card ----
+    const traitLabel: Record<TraitId, string> = {
+        loyalty: "loyal",
+        chaos: "chaotic",
+        reliability: "reliable",
+        warmth: "warm",
+        honesty: "honest",
+        spice: "hot",
+    };
+    for (const bs of blindSpots(log)) {
+        const facts = [
+            `You rated yourself ${formatNumber(bs.self)}/10 ${traitLabel[bs.trait]}.`,
+            `The room said ${formatNumber(bs.room)}.`,
+        ];
+        if (bs.self > bs.room) facts.push("You are your own biggest fan.");
+        else facts.push("You have been underselling yourself all night.");
+        add(bs.id, {
+            id: `blindspot-${bs.id}-${bs.trait}`,
+            kind: "blindspot",
+            title: "Blind spot",
+            facts,
+        });
+    }
+
+    // ---- 3. look chain card ----
+    for (const chain of lookChains(log)) {
+        const targetName = pseudoOf(meta, chain.target);
+        const facts: string[] = [];
+        if (chain.act) facts.push(chain.act);
+        facts.push(`You looked at ${targetName}.`);
+        if (chain.guessers > 0) {
+            facts.push(
+                `${chain.guessedRight} of ${chain.guessers} guessed right.`,
+            );
+        } else {
+            facts.push("Nobody guessed right.");
+        }
+        if (chain.reason) facts.push(`"${chain.reason}"`);
+        add(chain.actor, {
+            id: `lookchain-${chain.roundId}`,
+            kind: "lookchain",
+            title: "Look chain",
+            facts,
+        });
+    }
+
+    // NOTE: there is deliberately NO fourth source. The brief allows exactly
+    // three card kinds — mutual crush, blind spot, look chain — and every one
+    // of them must come from real answers. A "hates"/"rivals" verdict is
+    // public copy on the laptop reveal; it never becomes a secret card.
+
+    return decks;
+}
+
+/** The view for one player's deck. */
+export function deckViewOf(cards: readonly SecretCard[]): SecretDeckView {
+    return { cards: [...cards] };
+}
+
+/** How strong a crush is, 0..1 — used for ordering. */
+export function crushStrength(strength: number, playerCount: number): number {
+    return clamp01(strength / Math.max(1, playerCount - 1));
+}
+
+/** Every verdict that mentions a given player. */
+export function verdictsFor(results: Results, id: PlayerId): Verdict[] {
+    return results.verdicts.filter((v) => v.subjects.includes(id));
 }

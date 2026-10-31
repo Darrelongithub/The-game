@@ -1,401 +1,324 @@
 // packages/engine/test/engine.test.ts
-// Golden fixtures (hand-computed) + the false-positive suite (a)–(j).
-// Run: npm --prefix packages/engine test
+// The verdicts and the secret cards.
+//
+// The rules under test:
+//   • Every verdict is backed by data. Weak data → no verdict.
+//   • Only the allowed verdict kinds ever appear.
+//   • A crush card exists ONLY for a mutual pick — and only for the two
+//     people who picked each other.
+//   • No verdict or card ever prints an orientation claim.
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { SECRET_DECK_MAX, type Claim, type PairSignal } from "../../shared/src/contracts.ts";
+import { describe, it } from "node:test";
 import {
-  buildNightDigest,
   buildSecrets,
   computeResults,
-  computeSignals,
-  constrainedMatching,
-  jokerNominationWeights,
-  maximumWeightMatching,
-  mulberry32,
+  lookChains,
+  mutualCrushes,
+  assertNoOrientationLeak,
 } from "../src/index.ts";
-import { RANDOM_META, digestLog, goldenLog1, goldenLog2, jokerLog, meta5, randomLog } from "./fixtures.ts";
+import type { VerdictKind } from "../../shared/src/contracts.ts";
+import { ids, meta, peerRate, pick, selfRate, text, vote, pairPick, look, lookGuess, lookWhy } from "./fixtures.ts";
 
-const approx = (actual: number, expected: number, label: string): void => {
-  assert.ok(Math.abs(actual - expected) < 1e-9, `${label}: expected ${expected}, got ${actual}`);
-};
+const ALLOWED: VerdictKind[] = [
+  "hates", "core", "couple", "sex", "percent", "gaycouple",
+  "bodycount", "bestinbed", "besties", "rivals", "freeagent", "blindspot",
+];
 
-const signal = (signals: PairSignal[], a: string, b: string): PairSignal => {
-  const s = signals.find((x) => x.a === a && x.b === b);
-  assert.ok(s, `missing signal ${a}-${b}`);
-  return s;
-};
-
-const claimSummary = (claims: Claim[]) =>
-  claims.map((c) => ({ id: c.id, type: c.type, subjects: c.subjects, audience: c.audience, confidence: c.confidence }));
-
-// ---------------------------------------------------------------------------
-// Golden fixture 1 — signals, hand-computed.
-// p1–p2: overlap rounds where neither picked the other are F1 (p3,p3 ✓),
-// F2 (p3,p4 ✗), N1 (p3,p3 ✓) → 2/3. Positive picks: p1 hit p2 twice of 4,
-// p2 hit p1 twice of 4 → pooled mutualPick 4/8 = 0.5, couple 4/4 = 1,
-// friend 0/4 = 0. Debrief Jaccard 4/6. IOS (6+7)/14. Trait agreement:
-// dir(p1) = mean(1−|8−7|/9, 1−|6−8|/9) = 0.8333…, dir(p2) = 1 → 0.9166….
-// pairScore = .30(2/3)+.20(.5)+.20(4/6)+.15(13/14)+.15(11/12) = 0.710119…
-// ---------------------------------------------------------------------------
-test("golden 1: pair components are hand-computable", () => {
-  const signals = computeSignals(goldenLog1(), meta5("room-g1"));
-  assert.equal(signals.length, 10); // C(5,2)
-  assert.ok(signals.every((s) => s.a < s.b && s.room === "room-g1"));
-
-  const s12 = signal(signals, "p1", "p2");
-  approx(s12.pickOverlap, 2 / 3, "p1p2 overlap");
-  approx(s12.mutualPick, 0.5, "p1p2 mutualPick");
-  approx(s12.coupleEvidence, 1, "p1p2 coupleEvidence");
-  approx(s12.friendEvidence, 0, "p1p2 friendEvidence");
-  approx(s12.debriefSim, 4 / 6, "p1p2 debriefSim");
-  approx(s12.iosMean, 13 / 14, "p1p2 iosMean");
-  approx(s12.traitAgreement, 11 / 12, "p1p2 traitAgreement");
-  approx(s12.pairScore, 0.3 * (2 / 3) + 0.2 * 0.5 + 0.2 * (4 / 6) + 0.15 * (13 / 14) + 0.15 * (11 / 12), "p1p2 pairScore");
-
-  // p3–p4: eligible overlap rounds C2 (p1,p1 ✓), N1 (p5,p5 ✓) → 1.
-  // Positive pooled hits (3+2)/8 = 0.625; couple (1+0)/4; friend (2+2)/4 = 1.
-  // IOS (5+5)/14. Trait: dir(p3)=mean(1−3/9, 1−1/9)=7/9, dir(p4)=1 → 8/9.
-  const s34 = signal(signals, "p3", "p4");
-  approx(s34.pickOverlap, 1, "p3p4 overlap");
-  approx(s34.mutualPick, 5 / 8, "p3p4 mutualPick");
-  approx(s34.coupleEvidence, 1 / 4, "p3p4 coupleEvidence");
-  approx(s34.friendEvidence, 1, "p3p4 friendEvidence");
-  approx(s34.debriefSim, 0, "p3p4 absent debrief does not vote");
-  approx(s34.iosMean, 10 / 14, "p3p4 iosMean");
-  approx(s34.traitAgreement, 8 / 9, "p3p4 traitAgreement");
-  approx(s34.pairScore, (0.3 * 1 + 0.2 * (5 / 8) + 0.15 * (10 / 14) + 0.15 * (8 / 9)) / 0.8, "p3p4 renormalized pairScore");
-
-  // p1–p5: eligible overlap rounds F1 (p3,p4 ✗), N1 (p3,p3 ✓) → 1/2.
-  // Positive pooled: p5 hit p1 3 times, p1 never hit p5 → 3/8. No IOS → 0.
-  const s15 = signal(signals, "p1", "p5");
-  approx(s15.pickOverlap, 0.5, "p1p5 overlap");
-  approx(s15.mutualPick, 3 / 8, "p1p5 mutualPick");
-  approx(s15.iosMean, 0, "p1p5 iosMean");
-  for (const s of signals) {
-    for (const v of [s.pickOverlap, s.mutualPick, s.debriefSim, s.iosMean, s.traitAgreement, s.pairScore, s.coupleEvidence, s.friendEvidence, s.negativeMutual]) {
-      assert.ok(v >= 0 && v <= 1, `component out of range: ${v}`);
-    }
-  }
-});
-
-test("golden 1: exact claim set, free agent, and claim numbers", () => {
-  const log = goldenLog1();
-  const meta = meta5("room-g1");
-  const results = computeResults(computeSignals(log, meta), log, meta);
-  assert.deepEqual(claimSummary(results.claims), [
-    { id: "ship-p1-p2", type: "ship", subjects: ["p1", "p2"], audience: "public", confidence: "high" },
-    { id: "ship-p3-p4", type: "ship", subjects: ["p3", "p4"], audience: "public", confidence: "high" },
-    { id: "besties-p3-p4", type: "besties", subjects: ["p3", "p4"], audience: "public", confidence: "high" },
-    { id: "spark-p1-p2", type: "spark", subjects: ["p1", "p2"], audience: "private", confidence: "high" },
-    { id: "consensus-C2-p1", type: "consensus", subjects: ["p1"], audience: "public", confidence: "med" }, // single verdict round = med
-    { id: "blindspot-p3-loyalty", type: "blindspot", subjects: ["p3"], audience: "public", confidence: "high" },
-    { id: "onesided-p5-p1", type: "onesided", subjects: ["p5", "p1"], audience: "private", confidence: "low" }, // picks only, no IOS asymmetry
-  ]);
-  assert.equal(results.freeAgent, "p5");
-
-  const consensus = results.claims.find((c) => c.type === "consensus");
-  assert.deepEqual(consensus?.numbers, { votes: 4, of: 5, share: 0.8 }); // real fraction, always
-  const blind = results.claims.find((c) => c.type === "blindspot");
-  assert.equal(blind?.numbers?.self, 5);
-  approx(blind?.numbers?.groupMean ?? NaN, 8.25, "blindspot groupMean"); // (8+9+8+8)/4
-  assert.equal(blind?.numbers?.spread, 1); // max−min of {8,9,8,8}
-  const onesided = results.claims.find((c) => c.type === "onesided");
-  assert.deepEqual(onesided?.numbers, { rate: 0.75, reverseRate: 0, hits: 3, of: 4 });
-  // Evidence uses pseudonyms only, never aliases.
-  for (const c of results.claims) {
-    for (const line of c.evidence) {
-      assert.ok(!/(Ana|Ben|Cia|Dan|Eli)/.test(line), `alias leaked into evidence: ${line}`);
-    }
-  }
-});
-
-// ---------------------------------------------------------------------------
-// Golden fixture 2 — toxic by hand: p4 receives 4+4+2 friction + 2+1 rivalry
-// = 13 raw negative picks of 25. Same-target shares per picker across all 8
-// pick rounds peak at 5/8 (p3) → nobody is joker-guarded → weighted = 13.
-// Rivals p1–p5: negative pooled 6/10 = 0.6, rivalry pooled 4/4 = 1,
-// pairScore .30(.8)+.20(0)+.20(.5)+.15(8/14)+.15(1) = 0.5757… (mid-range).
-// ---------------------------------------------------------------------------
-test("golden 2: toxic percentile case, rivals, consensus — exact claim set", () => {
-  const log = goldenLog2();
-  const meta = meta5("room-g2");
-  const signals = computeSignals(log, meta);
-  const s15 = signal(signals, "p1", "p5");
-  approx(s15.pickOverlap, 4 / 5, "rivals overlap");
-  approx(s15.negativeMutual, 0.6, "rivals negativeMutual");
-  approx(s15.pairScore, 0.594642857142857, "rivals pairScore with only measured components voting");
-
-  const results = computeResults(signals, log, meta);
-  assert.deepEqual(claimSummary(results.claims), [
-    { id: "ship-p1-p2", type: "ship", subjects: ["p1", "p2"], audience: "public", confidence: "high" },
-    { id: "ship-p3-p5", type: "ship", subjects: ["p3", "p5"], audience: "public", confidence: "med" }, // mutualPick exactly 1/2 does not count
-    { id: "besties-p1-p2", type: "besties", subjects: ["p1", "p2"], audience: "public", confidence: "med" }, // friendEvidence exactly 1/2 does not count
-    { id: "rival-p1-p5", type: "rival", subjects: ["p1", "p5"], audience: "public", confidence: "med" }, // both pick rates strong; ratings agree, so no 3rd type
-    { id: "toxic-p4", type: "toxic", subjects: ["p4"], audience: "public", confidence: "high" },
-    { id: "consensus-X1-p4", type: "consensus", subjects: ["p4"], audience: "public", confidence: "med" },
-    { id: "consensus-X2-p4", type: "consensus", subjects: ["p4"], audience: "public", confidence: "med" },
-  ]);
-  assert.equal(results.freeAgent, "p4");
-  const toxic = results.claims.find((c) => c.type === "toxic");
-  assert.equal(toxic?.numbers?.votes, 13);
-  assert.equal(toxic?.numbers?.of, 25);
-  approx(toxic?.numbers?.share ?? NaN, 13 / 25, "toxic share");
-  assert.equal(toxic?.numbers?.weightedVotes, 13); // no picker is joker-guarded here
-  assert.ok((toxic?.numbers?.percentile ?? 0) >= 0.99, `percentile ${toxic?.numbers?.percentile}`);
-  approx(toxic?.numbers?.score ?? NaN, 0.6 * (toxic?.numbers?.percentile ?? 0), "toxic score = .6*pct (tags 0)");
-  const rival = results.claims.find((c) => c.type === "rival");
-  approx(rival?.numbers?.rivalryRate ?? NaN, 1, "rivalry pooled rate");
-  approx(rival?.numbers?.score ?? NaN, 1.6, "rival score 0.6 + 1.0");
-});
-
-test("toxic tag seam: tagOf contempt density feeds TOXIC_WEIGHTS", () => {
-  const log = goldenLog2();
-  const meta = meta5("room-g2");
-  const signals = computeSignals(log, meta);
-  const plain = computeResults(signals, log, meta);
-  const tagged = computeResults(signals, log, meta, undefined, (recordId) =>
-    recordId.includes(":p4:") ? ["contempt"] : [],
-  );
-  const plainScore = plain.claims.find((c) => c.type === "toxic")?.numbers?.score ?? 0;
-  const taggedScore = tagged.claims.find((c) => c.type === "toxic")?.numbers?.score ?? 0;
-  // p4 authored exactly one text → contempt density 1 → score += 0.4 * 1.
-  approx(taggedScore - plainScore, 0.4, "contempt density contribution");
-});
-
-test("config weights re-weight pairScore (tuning replay)", () => {
-  const log = goldenLog1();
-  const meta = meta5("room-g1");
-  const signals = computeSignals(log, meta);
-  const iosOnly = computeResults(signals, log, meta, { pickOverlap: 0, mutualPick: 0, debriefSim: 0, iosMean: 1, traitAgreement: 0 });
-  approx(signal(iosOnly.pairScores, "p1", "p2").pairScore, 13 / 14, "ios-only pairScore");
-});
-
-// ---------- (a) joker guard ----------
-test("(a) everyone picks the same friend every round → NO high-confidence toxic claim", () => {
-  const log = jokerLog();
-  const meta = meta5("room-joker");
-  const results = computeResults(computeSignals(log, meta), log, meta);
-  assert.equal(jokerNominationWeights(log, meta.players.map((player) => player.id)).get("p1"), 0.5);
-  assert.deepEqual(results.claims.filter((c) => c.type === "toxic"), []); // stronger: no toxic claim at all
-});
-
-// ---------- (b) uniform random room ----------
-test("(b) uniform random rooms → zero high-confidence claims", () => {
-  for (const seed of [7, 42, 1234]) {
-    const log = randomLog(seed);
-    const results = computeResults(computeSignals(log, RANDOM_META), log, RANDOM_META);
-    const high = results.claims.filter((c) => c.confidence === "high");
-    assert.deepEqual(high.map((c) => c.id), [], `seed ${seed} produced high-confidence claims`);
-  }
-});
-
-// ---------- (c) player-count bounds ----------
-test("(c) n=4 works, n<4 throws", () => {
-  const meta4: typeof RANDOM_META = {
-    roomId: "room-4",
-    players: RANDOM_META.players.slice(0, 4),
-    revealOptIn: [],
-  };
-  const signals = computeSignals([], meta4);
-  assert.equal(signals.length, 6);
-  const results = computeResults(signals, [], meta4);
-  assert.deepEqual(results.claims, []); // no data → no claims (debrief "unknown" alone is not evidence)
-  assert.equal(results.freeAgent, undefined);
-  const meta3 = { ...meta4, players: meta4.players.slice(0, 3) };
-  assert.throws(() => computeSignals([], meta3), /at least 4 players/);
-  assert.throws(() => computeResults([], [], meta3), /at least 4 players/);
-});
-
-// ---------- (d) exactly one free agent at n=5 ----------
-test("(d) n=5 → exactly one freeAgent (ship matching)", () => {
-  const log = goldenLog1();
-  const meta = meta5("room-g1");
-  const results = computeResults(computeSignals(log, meta), log, meta);
-  assert.equal(results.freeAgent, "p5");
-  const shipPairs = results.claims.filter((c) => c.type === "ship").flatMap((c) => c.subjects);
-  assert.equal(new Set(shipPairs).size, 4);
-  assert.ok(!shipPairs.includes("p5"));
-});
-
-// ---------- (e) matching optimality ----------
-test("(e) matching beats 10,000 random matchings on total weight", () => {
-  const log = goldenLog1();
-  const meta = meta5("room-g1");
-  const signals = computeSignals(log, meta);
-  const weight = new Map(signals.map((s) => [`${s.a}|${s.b}`, s.pairScore]));
-  const w = (a: string, b: string): number => weight.get(a < b ? `${a}|${b}` : `${b}|${a}`) ?? 0;
-  const ids = meta.players.map((p) => p.id);
-  const optimal = maximumWeightMatching(ids, w);
-  const alsoShip = constrainedMatching(ids, w, (a, b) => {
-    const s = signals.find((x) => x.a === (a < b ? a : b) && x.b === (a < b ? b : a));
-    return (s?.coupleEvidence ?? 0) > 0 || (s?.friendEvidence ?? 0) > 0;
+describe("computeResults", () => {
+  it("returns nothing when the night had no answers", () => {
+    const results = computeResults([], meta);
+    assert.equal(results.verdicts.length, 0);
+    assertNoOrientationLeak(results);
   });
-  approx(alsoShip.totalWeight, optimal.totalWeight, "constrained ship reaches the unconstrained optimum here");
 
-  const rng = mulberry32(99);
-  let bestRandom = 0;
-  for (let i = 0; i < 10_000; i++) {
-    const shuffled = [...ids];
-    for (let j = shuffled.length - 1; j > 0; j--) {
-      const k = Math.floor(rng() * (j + 1));
-      [shuffled[j], shuffled[k]] = [shuffled[k] as string, shuffled[j] as string];
+  it("only ever emits the allowed verdict kinds", () => {
+    const log = [
+      ...ids.map((id) => pick(id, "p1", "would-cheat", "friction")),
+      pick("p2", "p1", "sex-desire", "couple"),
+      pick("p1", "p2", "sex-desire", "couple"),
+      pick("p3", "p4", "closest", "friendship"),
+      pick("p4", "p3", "closest", "friendship"),
+      vote("p3", "p1", "p2", 5, "couple-fit"),
+      vote("p4", "p1", "p2", 5, "couple-fit"),
+    ];
+    const results = computeResults(log, meta);
+    for (const verdict of results.verdicts) {
+      assert.ok(ALLOWED.includes(verdict.kind), `unexpected verdict kind ${verdict.kind}`);
+      assert.ok(verdict.text.length > 0, "a verdict must have text");
+      assert.ok(Object.keys(verdict.numbers).length > 0, "a verdict must carry its numbers");
     }
-    let total = 0;
-    for (let j = 0; j + 1 < shuffled.length; j += 2) total += w(shuffled[j] as string, shuffled[j + 1] as string);
-    if (total > bestRandom) bestRandom = total;
-  }
-  assert.ok(optimal.totalWeight >= bestRandom - 1e-9, `optimal ${optimal.totalWeight} < random ${bestRandom}`);
-});
+  });
 
-// ---------- (f)(g)(h) determinism ----------
-test("(f)(g)(h) same log twice → deep-equal results, digest, and secrets", () => {
-  const log = goldenLog2(); // includes the Monte-Carlo path
-  const meta = meta5("room-g2");
-  const r1 = computeResults(computeSignals(log, meta), log, meta);
-  const r2 = computeResults(computeSignals(log, meta), log, meta);
-  assert.deepEqual(r1, r2);
-  const d1 = buildNightDigest(log, meta);
-  assert.deepEqual(d1, buildNightDigest(log, meta));
-  assert.deepEqual([...buildSecrets(r1, d1, meta).entries()], [...buildSecrets(r2, d1, meta).entries()]);
-});
+  it("builds a mutual-sex verdict only when both picked each other", () => {
+    const log = [pick("p1", "p2", "sex-desire"), pick("p2", "p1", "sex-desire")];
+    const results = computeResults(log, meta);
+    const sex = results.verdicts.find((v) => v.kind === "sex");
+    assert.ok(sex, "a mutual sex-desire pair should produce a sex verdict");
+    assert.deepEqual([...sex!.subjects].sort(), ["p1", "p2"]);
+  });
 
-// ---------- digest golden ----------
-test("digest: quotes filtered/deduped/ranked, dodges verbatim, gags, stats, teasers", () => {
-  const digest = buildNightDigest(digestLog(), meta5("room-digest"));
-  assert.deepEqual(digest.quotes.map((q) => q.alias), ["Ben", "Ana", "Ana"]); // ranked by word count (9, 8, 8→longer first)
-  assert.equal(digest.quotes[0]?.text, "nobody here can keep a secret past midnight honestly");
-  assert.ok(digest.quotes.every((q) => q.text.length >= 20 && q.text.length <= 160));
-  assert.ok(!digest.quotes.some((q) => q.text.includes("finances")), "debrief text must never be quoted");
-  assert.deepEqual(digest.dodges, [
-    { alias: "Ben", reason: "absolutely not in these shoes" },
-    { alias: "Ben", reason: "my mother follows this account" },
-  ]);
-  assert.deepEqual(digest.runningGags, [{ word: "chaos", count: 3 }]);
-  assert.deepEqual(digest.stats.topDodger, { alias: "Ben", count: 2 });
-  assert.deepEqual(digest.stats.tapWar, { alias: "Cia", score: 55 });
-  assert.deepEqual(digest.stats.fastest, { alias: "Dan", ms: 250 });
-  assert.deepEqual(digest.stats.slowest, { alias: "Ana", ms: 89000 });
-  assert.deepEqual(digest.pickTeasers, [
-    "The room has cast 5 picks so far.",
-    "One player has quietly collected 3 of those picks.",
-    "In 1 round, at least half the room pointed at the same person.",
-  ]);
-  const gap = digest.selfVsRoom.find((e) => e.alias === "Ana" && e.trait === "chaos");
-  assert.deepEqual(gap, { alias: "Ana", trait: "chaos", self: 9, roomMean: 5 });
-  assert.deepEqual(buildNightDigest([], meta5("room-digest")), {
-    quotes: [], stats: {}, runningGags: [], pickTeasers: [], dodges: [], selfVsRoom: [],
+  it("does NOT build a sex verdict from a one-sided pick", () => {
+    const log = [pick("p1", "p2", "sex-desire")];
+    const results = computeResults(log, meta);
+    assert.equal(results.verdicts.find((v) => v.kind === "sex"), undefined);
+  });
+
+  it("reports a ship verdict with the percentage of yes votes", () => {
+    const log = [
+      vote("p3", "p1", "p2", 5, "couple-fit"),
+      vote("p4", "p1", "p2", 5, "couple-fit"),
+      vote("p5", "p1", "p2", 1, "couple-fit"),
+    ];
+    const results = computeResults(log, meta);
+    const couple = results.verdicts.find((v) => v.kind === "couple");
+    assert.ok(couple, "a clear yes majority should produce a couple verdict");
+    assert.equal(couple!.numbers.yes, 2);
+    assert.equal(couple!.numbers.voters, 3);
+    assert.match(couple!.text, /67%/);
+  });
+
+  it("does not ship a pair the room said no to", () => {
+    const log = [
+      vote("p3", "p1", "p2", 1, "couple-fit"),
+      vote("p4", "p1", "p2", 1, "couple-fit"),
+      vote("p5", "p1", "p2", 2, "couple-fit"),
+    ];
+    const results = computeResults(log, meta);
+    assert.equal(results.verdicts.find((v) => v.kind === "couple"), undefined);
+  });
+
+  it("computes percent lines from OTHER players only", () => {
+    // Three of the four other players pick p2 for sex.
+    const log = [
+      pick("p1", "p2", "sex-desire"),
+      pick("p3", "p2", "sex-desire"),
+      pick("p4", "p2", "sex-desire"),
+    ];
+    const results = computeResults(log, meta);
+    const percent = results.verdicts.find((v) => v.kind === "percent" && v.subjects.includes("p2"));
+    assert.ok(percent, "a spicy percent line should exist");
+    // 5 players → 4 others → 3/4 = 75%
+    assert.equal(percent!.numbers.voters, 3);
+    assert.equal(percent!.numbers.eligible, 4);
+    assert.match(percent!.text, /75%/);
+  });
+
+  it("produces a gay-hypothetical couple line without ever claiming anyone is gay", () => {
+    const log = [
+      vote("p1", "p3", "p4", 5, "gay-hypothetical"),
+      vote("p2", "p3", "p4", 5, "gay-hypothetical"),
+      vote("p5", "p3", "p4", 4, "gay-hypothetical"),
+    ];
+    const results = computeResults(log, meta);
+    const gay = results.verdicts.find((v) => v.kind === "gaycouple");
+    assert.ok(gay, "a gay-hypothetical verdict should exist");
+    assert.match(gay!.text, /If .* were gay/);
+    assert.doesNotMatch(gay!.text, /\bis gay\b/i);
+    assertNoOrientationLeak(results);
+  });
+
+  it("finds a blind spot from a self-rating that disagrees with the room", () => {
+    const log = [
+      selfRate("p1", "loyalty", 9),
+      peerRate("p2", "p1", "loyalty", 4),
+      peerRate("p3", "p1", "loyalty", 5),
+    ];
+    const results = computeResults(log, meta);
+    const blind = results.verdicts.find((v) => v.kind === "blindspot");
+    assert.ok(blind, "a self-rating gap should produce a blind spot");
+    assert.match(blind!.text, /loyal/);
+    assert.equal(blind!.numbers.self, 9);
+    assert.equal(blind!.numbers.raters, 2);
+  });
+
+  it("does not invent a blind spot when the room agrees", () => {
+    const log = [
+      selfRate("p1", "loyalty", 8),
+      peerRate("p2", "p1", "loyalty", 8),
+      peerRate("p3", "p1", "loyalty", 8),
+    ];
+    const results = computeResults(log, meta);
+    assert.equal(results.verdicts.find((v) => v.kind === "blindspot"), undefined);
+  });
+
+  it("picks a free agent only when nobody claimed anyone", () => {
+    // Three of the five players answer, and between them they claim p2, p3
+    // and p4 — nobody claimed p5.
+    const log = [
+      pick("p1", "p2", "sex-desire"),
+      pick("p1", "p3", "crush"),
+      pick("p2", "p4", "crush"),
+      pick("p3", "p2", "crush"),
+    ];
+    const results = computeResults(log, meta);
+    const free = results.verdicts.find((v) => v.kind === "freeagent");
+    assert.ok(free, "someone nobody picked should be a free agent");
+    assert.ok(!["p2", "p3", "p4"].includes(free!.subjects[0]!));
+  });
+
+  it("does not name a free agent when barely anyone answered", () => {
+    const log = [pick("p1", "p2", "crush")];
+    const results = computeResults(log, meta);
+    assert.equal(results.verdicts.find((v) => v.kind === "freeagent"), undefined);
+  });
+
+  it("picks the body-count champion from the room's picks", () => {
+    const log = [
+      pick("p1", "p3", "body-count"),
+      pick("p2", "p3", "body-count"),
+      pick("p4", "p3", "body-count"),
+    ];
+    const results = computeResults(log, meta);
+    const body = results.verdicts.find((v) => v.kind === "bodycount");
+    assert.ok(body);
+    assert.deepEqual(body!.subjects, ["p3"]);
+  });
+
+  it("never prints a gay claim, whatever the log says", () => {
+    const log = [
+      ...ids.map((id) => pick(id, "p1", "gay-hypothetical")),
+      vote("p2", "p1", "p3", 5, "gay-hypothetical"),
+    ];
+    const results = computeResults(log, meta);
+    assertNoOrientationLeak(results);
+    for (const verdict of results.verdicts) {
+      assert.doesNotMatch(verdict.text, /\bis gay\b/i);
+      assert.doesNotMatch(verdict.text, /\b(is|are) (straight|bi|gay|lesbian)\b/i);
+    }
   });
 });
 
-// ---------- secrets + (i)(j) ----------
-test("secrets: spark on exactly two phones, one-sided on the picker's only, decks capped + ordered", () => {
-  const log = goldenLog1();
-  const meta = meta5("room-g1");
-  const results = computeResults(computeSignals(log, meta), log, meta);
-  const decks = buildSecrets(results, buildNightDigest(log, meta), meta);
+describe("mutualCrushes", () => {
+  it("returns only pairs where BOTH picked the other", () => {
+    const log = [pick("p1", "p2", "crush"), pick("p2", "p1", "crush"), pick("p3", "p4", "crush")];
+    const crushes = mutualCrushes(log);
+    assert.equal(crushes.length, 1);
+    assert.deepEqual([crushes[0]!.a, crushes[0]!.b].sort(), ["p1", "p2"]);
+  });
 
-  const sparkHolders: string[] = [];
-  const allIds: string[] = [];
-  const kindRank = (k: string): number => ["spark", "onesided", "blindspot", "roomnote", "stat"].indexOf(k);
-  for (const [player, cards] of decks) {
-    assert.ok(cards.length <= SECRET_DECK_MAX, `(i) deck cap for ${player}`); // (i)
-    assert.deepEqual(cards.map((c) => kindRank(c.kind)), [...cards.map((c) => kindRank(c.kind))].sort((x, y) => x - y));
-    for (const c of cards) {
-      allIds.push(c.id);
-      assert.ok(c.facts.length >= 1 && c.facts.length <= 4);
-      for (const f of c.facts) assert.ok(f.length <= 120, `fact too long: ${f}`);
-      if (c.kind === "spark") sparkHolders.push(player);
-    }
-  }
-  // (j) no card id appears on more than one phone; the spark PAIR appears on exactly two.
-  assert.equal(new Set(allIds).size, allIds.length);
-  assert.deepEqual(sparkHolders.sort(), ["p1", "p2"]);
-  assert.ok(decks.get("p1")?.find((c) => c.kind === "spark")?.facts.join(" ").includes("Player 2"));
-  assert.ok(decks.get("p2")?.find((c) => c.kind === "spark")?.facts.join(" ").includes("Player 1"));
-
-  // Picks-only evidence may score the pair but cannot create a high-confidence claim/card.
-  assert.ok(![...decks.values()].some((cards) => cards.some((card) => card.kind === "onesided")));
-
-  // Blind spot: only p3 has a gap ≥ 1 in this fixture (loyalty 5 vs 8.25).
-  const blindHolders = [...decks.entries()].filter(([, cs]) => cs.some((c) => c.kind === "blindspot")).map(([p]) => p);
-  assert.deepEqual(blindHolders, ["p3"]);
-  assert.match(decks.get("p3")?.find((c) => c.kind === "blindspot")?.facts[0] ?? "", /loyalty 5 out of 10; the room averaged 8\.3/);
-
-  // Stat: p2 dodged with a verbatim reason in this fixture.
-  const stat = decks.get("p2")?.find((c) => c.kind === "stat");
-  assert.ok(stat?.facts.some((f) => f.includes("my shoes are cursed honestly")));
+  it("returns nothing for a one-sided crush", () => {
+    const log = [pick("p1", "p2", "crush")];
+    assert.equal(mutualCrushes(log).length, 0);
+  });
 });
 
-test("secrets consent gates: spark needs both opt-ins; one-sided needs the picker's", () => {
-  const log = goldenLog1();
-  const noP2 = meta5("room-g1", ["p1", "p3", "p4", "p5"]);
-  const rNoP2 = computeResults(computeSignals(log, noP2), log, noP2);
-  assert.deepEqual(rNoP2.claims.filter((c) => c.type === "spark"), []); // p2 not opted in → no spark claim
-  const decksNoP2 = buildSecrets(rNoP2, buildNightDigest(log, noP2), noP2);
-  assert.ok(![...decksNoP2.values()].flat().some((c) => c.kind === "spark"));
+describe("buildSecrets", () => {
+  it("gives a mutual crush card to EXACTLY the two people who picked each other", () => {
+    const log = [pick("p1", "p2", "crush"), pick("p2", "p1", "crush")];
+    const results = computeResults(log, meta);
+    const decks = buildSecrets(results, log, meta);
 
-  const noP5 = meta5("room-g1", ["p1", "p2", "p3", "p4"]);
-  const rNoP5 = computeResults(computeSignals(log, noP5), log, noP5);
-  assert.ok(rNoP5.claims.some((c) => c.type === "onesided")); // private claim exists as engine truth…
-  const decksNoP5 = buildSecrets(rNoP5, buildNightDigest(log, noP5), noP5);
-  assert.ok(!(decksNoP5.get("p5") ?? []).some((c) => c.kind === "onesided")); // …but no card without consent
-});
+    assert.deepEqual([...decks.keys()].sort(), ["p1", "p2"]);
+    const card = decks.get("p1")![0]!;
+    assert.equal(card.kind, "crush");
+    assert.match(card.facts.join(" "), /You and Player 2 like each other\./);
+  });
 
-test("private material never becomes public: spark + onesided audiences across fixtures", () => {
-  for (const [log, meta] of [
-    [goldenLog1(), meta5("room-g1")],
-    [goldenLog2(), meta5("room-g2")],
-    [jokerLog(), meta5("room-joker")],
-    [randomLog(42), RANDOM_META],
-  ] as const) {
-    const results = computeResults(computeSignals(log, meta), log, meta);
-    for (const c of results.claims) {
-      if (c.type === "spark" || c.type === "onesided") assert.equal(c.audience, "private");
-      if ((c.type === "toxic" || c.type === "rival") && c.confidence === "low") {
-        assert.fail(`low-confidence negative claim emitted: ${c.id}`);
+  it("gives NO card for a one-sided crush — to anyone", () => {
+    const log = [pick("p1", "p2", "crush")];
+    const results = computeResults(log, meta);
+    const decks = buildSecrets(results, log, meta);
+    assert.equal(decks.size, 0, "a one-sided crush must never become a card");
+  });
+
+  it("gives no card at all when there is no data", () => {
+    const results = computeResults([], meta);
+    const decks = buildSecrets(results, [], meta);
+    assert.equal(decks.size, 0);
+  });
+
+  it("makes a blind spot card from a self-rating gap", () => {
+    const log = [
+      selfRate("p1", "honesty", 10),
+      peerRate("p2", "p1", "honesty", 2),
+      peerRate("p3", "p1", "honesty", 3),
+    ];
+    const results = computeResults(log, meta);
+    const decks = buildSecrets(results, log, meta);
+    const card = decks.get("p1")?.[0];
+    assert.ok(card);
+    assert.equal(card!.kind, "blindspot");
+  });
+
+  it("never puts a verdict-derived card in a deck", () => {
+    const log = [
+      ...["p2", "p3", "p4", "p5"].map((id) => pick(id as never, "p1", "would-cheat", "friction")),
+    ];
+    const results = computeResults(log, meta);
+    const decks = buildSecrets(results, log, meta);
+    for (const cards of decks.values()) {
+      for (const card of cards) {
+        assert.ok(["crush", "blindspot", "lookchain"].includes(card.kind));
       }
     }
-  }
+  });
 });
 
-// Regression: the contract's IOS formula divides the two directions by 14;
-// an unanswered direction cannot be treated as another 7/7 vote.
-test("one-direction IOS contributes only its half of the pair score", () => {
-  const meta = meta5("one-direction");
-  const log = [{
-    roomId: meta.roomId, roundId: "ios", playerId: "p1", roundKind: "ios" as const,
-    promptId: "ios", coding: "friendship" as const,
-    value: { kind: "ios" as const, about: "p2", value: 7 }, at: 1, latencyMs: 1,
-  }];
-  approx(signal(computeSignals(log, meta), "p1", "p2").iosMean, 0.5, "one IOS direction");
-});
+describe("the digest", () => {
+  it("reads a look chain back: the choice, the guesses and the reason", () => {
+    const log = [
+      look("p1", "p3", "chain-1"),
+      lookGuess("p2", "p3", "chain-1"),
+      lookGuess("p3", "p3", "chain-1"),
+      lookGuess("p4", "p5", "chain-1"),
+      lookWhy("p1", "Because we share a secret.", "chain-1"),
+    ];
+    const chains = lookChains(log);
+    assert.equal(chains.length, 1, "one chain");
+    const chain = chains[0]!;
+    assert.equal(chain.actor, "p1");
+    assert.equal(chain.target, "p3");
+    assert.equal(chain.guessers, 3, "three people guessed");
+    assert.equal(chain.guessedRight, 2, "two of them were right");
+    assert.equal(chain.reason, "Because we share a secret.");
+  });
 
-test("ship and besties never publish a one-way positive nomination as mutual", () => {
-  const meta = meta5("one-way");
-  const log = [{
-    roomId: meta.roomId, roundId: "pick", playerId: "p1", roundKind: "pick" as const,
-    promptId: "pick", coding: "friendship" as const,
-    value: { kind: "pick" as const, target: "p2" }, at: 1, latencyMs: 1,
-  }];
-  const results = computeResults(computeSignals(log, meta), log, meta);
-  assert.ok(!results.claims.some((c) => c.type === "ship" || c.type === "besties"));
-});
+  it("keeps two chains by the same actor apart", () => {
+    const log = [
+      look("p1", "p3", "chain-1"),
+      lookGuess("p2", "p3", "chain-1"),
+      lookWhy("p1", "The first one.", "chain-1"),
+      look("p1", "p4", "chain-2"),
+      lookGuess("p2", "p3", "chain-2"),
+      lookGuess("p3", "p4", "chain-2"),
+      lookWhy("p1", "The second one.", "chain-2"),
+    ];
+    const chains = lookChains(log);
+    assert.equal(chains.length, 2, "two chains");
+    const first = chains.find((c) => c.roundId === "chain-1")!;
+    const second = chains.find((c) => c.roundId === "chain-2")!;
+    assert.equal(first.target, "p3");
+    assert.equal(first.guessers, 1, "the first chain has one guesser");
+    assert.equal(first.reason, "The first one.");
+    assert.equal(second.target, "p4");
+    assert.equal(second.guessers, 2, "the second chain has two guessers");
+    assert.equal(second.reason, "The second one.");
+  });
 
-test("debrief Jaccard recognizes words in non-Latin scripts", () => {
-  const meta = meta5("unicode");
-  const log = ["p1", "p2"].map((playerId) => ({
-    roomId: meta.roomId, roundId: "debrief", playerId, roundKind: "debrief" as const,
-    promptId: "debrief", coding: "trust" as const,
-    value: { kind: "text" as const, text: "朋友 分享 快乐" }, at: 1, latencyMs: 1,
-  }));
-  approx(signal(computeSignals(log, meta), "p1", "p2").debriefSim, 1, "identical Unicode debriefs");
-});
+  it("gives the actor their own look chain card and nobody else", () => {
+    const log = [
+      look("p1", "p3", "chain-1"),
+      lookGuess("p2", "p3", "chain-1"),
+      lookGuess("p3", "p3", "chain-1"),
+      lookWhy("p1", "Because we share a secret.", "chain-1"),
+    ];
+    const decks = buildSecrets(computeResults(log, meta), log, meta);
+    const actorDeck = decks.get("p1") ?? [];
+    const card = actorDeck.find((c) => c.kind === "lookchain");
+    assert.ok(card, "the actor gets a look chain card");
+    assert.match(card!.facts.join(" "), /looked at/i);
+    assert.match(card!.facts.join(" "), /2 of 2 guessed right/i);
+    // Nobody else is told who X was looking at.
+    assert.equal(decks.get("p2"), undefined, "a guesser gets nothing");
+    assert.equal(decks.get("p3"), undefined, "the target gets nothing");
+  });
 
-test("reveal opt-out suppresses every private card kind", () => {
-  const meta = meta5("room-digest", ["p2"]);
-  const log = digestLog();
-  const results = computeResults(computeSignals(log, meta), log, meta);
-  const decks = buildSecrets(results, buildNightDigest(log, meta), meta);
-  assert.ok([...decks.keys()].every((id) => id === "p2"));
+  it("quotes verbatim and never invents", async () => {
+    const { buildNightDigest } = await import("../src/index.ts");
+    const log = [text("p1", "I once kissed two people at the same party last night")];
+    const digest = buildNightDigest(log, meta);
+    assert.equal(digest.quotes.length, 1);
+    assert.equal(digest.quotes[0]!.text, "I once kissed two people at the same party last night");
+    assert.equal(digest.quotes[0]!.alias, "Wanjiru");
+  });
 });
