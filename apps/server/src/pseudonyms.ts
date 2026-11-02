@@ -33,6 +33,16 @@ export function pseudonymizeText(text: string, players: AliasEntry[]): string {
   return normalized.replace(re, (match) => tokenByAlias.get(match.normalize("NFC").toLowerCase()) ?? match);
 }
 
+/**
+ * A guest's own "Player 2" must survive the round trip: `restoreAliases` must
+ * never bind a token the guest typed to a seat. An invisible ZWSP takes the
+ * literal out of the token grammar (`\bPlayer (\d+)\b` needs the space) while
+ * still rendering exactly as typed.
+ */
+export function escapePseudonymTokens(text: string): string {
+  return text.replace(/\bPlayer (1[01]|[1-9])\b/g, (_match, n: string) => `Player \u200B${n}`);
+}
+
 /** Swap provider pseudonyms back only when an entire Player N token matches. */
 export function restoreAliases(text: string, players: AliasEntry[]): string {
   return text.replace(/\bPlayer (1[01]|[1-9])\b/g, (match, n: string) => players[Number(n) - 1]?.alias ?? match);

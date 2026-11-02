@@ -18,7 +18,7 @@ import { integratedServices } from "./integratedServices.ts";
 import { DECOYS, SPOTLIGHT_IDLE_LINE, liveKindInPhase, livePrompt, liveSeeds, type LiveSeed } from "../../../packages/prompts/src/bank/live/index.ts";
 import { checkBanned, checkHardBlocked } from "../../../packages/prompts/src/filter.ts";
 import { bankForPhase, maxPlaceholderIndex } from "../../../packages/prompts/src/bank/index.ts";
-import { pseudonymizeText as pseudonymizeAliasText, restoreAliases } from "./pseudonyms.ts";
+import { escapePseudonymTokens, pseudonymizeText as pseudonymizeAliasText, restoreAliases } from "./pseudonyms.ts";
 import { accountSubjectKey, type AccountStore, type StoredHypothesis } from "./accounts.ts";
 import {
   assertNoHypothesisLeak, carryOver, emptyDirectorState, planRound, recordSelection, updateHypotheses,
@@ -205,7 +205,9 @@ function pseudonymizeText(text: string, players: Player[]): string {
   return pseudonymizeAliasText(text, players);
 }
 function displayText(text: string, players: Player[]): string {
-  return restoreAliases(text, players);
+  // The ZWSP that protects a guest's typed token is invisible on the way in and
+  // stripped on the way out, so public copy is exactly what the guest typed.
+  return restoreAliases(text, players).replace(/\u200B/g, "");
 }
 /** Strip uncontracted properties before logging or handing an answer to any service. */
 function canonicalValue(value: ResponseValue): ResponseValue {
@@ -221,6 +223,13 @@ function canonicalValue(value: ResponseValue): ResponseValue {
 }
 function validPlaceholders(text: string): boolean {
   return !/[{}]/u.test(text.replace(/\{P(?:1[01]|[1-9])\}/g, ""));
+}
+/** A guest's own words must never be re-bound to a seat by `restoreAliases`. */
+function neutralizeTypedTokens(value: ResponseValue): ResponseValue {
+  if (value.kind === "text") return { ...value, text: escapePseudonymTokens(value.text) };
+  if (value.kind === "shout") return { ...value, word: escapePseudonymTokens(value.word) };
+  if (value.kind === "dare" && value.reason) return { ...value, reason: escapePseudonymTokens(value.reason) };
+  return { ...value };
 }
 function redactValue(value: ResponseValue, players: Player[]): ResponseValue {
   if (value.kind === "text") return { ...value, text: pseudonymizeText(value.text, players) };
@@ -1002,7 +1011,7 @@ export class RoomManager {
     const r = request as { roundId?: unknown; clientUuid?: unknown; value?: unknown };
     if (typeof r.roundId !== "string" || typeof r.clientUuid !== "string" || !r.clientUuid.trim() || r.clientUuid.length > 128) return { ok: false, error: "Invalid submission id." };
     if (!validSubmit(r.value, player.id)) return { ok: false, error: "Invalid answer." };
-    const value = canonicalValue(r.value as ResponseValue);
+    const value = neutralizeTypedTokens(canonicalValue(r.value as ResponseValue));
     const key = `${player.id}\u0000${r.clientUuid}`, fingerprint = JSON.stringify(value);
     const previous = room.seen.get(key);
     if (previous) return previous.roundId === r.roundId && previous.fingerprint === fingerprint ? { ok: true } : { ok: false, error: "Submission id was already used." };
