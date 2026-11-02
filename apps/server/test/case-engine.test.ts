@@ -168,10 +168,10 @@ describe("sign-up", () => {
     assert.equal(result.ok, false);
   });
 
-  it("rejects a player who does not consent to 18+", () => {
+  it("takes a seat without an 18+ tick: the door has no consent gate", () => {
     const { manager, room } = makeNight([]);
     const result = manager.join(room.code, "Wanjiru", adultProfile, false);
-    assert.equal(result.ok, false);
+    assert.equal(result.ok, true);
   });
 
   it("rejects a missing profile field", () => {

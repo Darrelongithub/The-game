@@ -94,12 +94,12 @@ async function main() {
     await setInput(host.querySelector<HTMLInputElement>('#alias')!, 'Wanjiru')
     await setInput(host.querySelector<HTMLInputElement>('#code')!, 'AB2C')
     await setInput(host.querySelector<HTMLInputElement>('#profile-age')!, '30')
-    const tick = host.querySelector<HTMLInputElement>('input[type="checkbox"]')!
-    await act(async () => { tick.click() })
+    // No age/terms tick to click: the sign-up is alias + profile only.
+    assert.equal(host.querySelector('input[type="checkbox"]'), null, 'no consent checkbox at the door')
     await click(submit)
     assert.ok(joined, 'the sign-up was sent')
     assert.equal(joined.alias, 'Wanjiru')
-    assert.equal(joined.consent.age, true)
+    assert.equal(joined.consent.age, undefined, 'no age attestation is sent')
     assert.equal(joined.profile.age, 30)
     assert.equal(joined.profile.sexuality, 'undisclosed')
     assert.equal(joined.profile.attractedTo, 'undisclosed')

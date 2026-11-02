@@ -42,8 +42,12 @@ const expectError = async (client: Client, action: () => void, code: string): Pr
 test("validation, host controls, maximum seats, custom prompts and submit idempotency", async (t) => {
   const { connect, dir } = await setup(t, { botDelayMs: [10000, 10000], roundTimers: { pick: 10000, shout: 10000, minigame: 10000, text: 10000, spotlight: 10000, verdict: 10000, confess: 400 }, verdictDiscussMs: 0, graceMs: 1000, revealHoldMs: 10000, interludeHoldMs: 10000 });
   const host = await connect(), guest = await connect(), extra = await connect();
-  const underage: JoinReply = await new Promise((resolve) => host.emit("create", { alias: "Host", consent: { ...consent, age: false }, profile }, resolve));
-  assert.equal(underage.ok, false);
+  // The door has no age/terms gate any more (the host knows the guest list);
+  // only the per-player private-card opt-in survives, and it defaults to off.
+  const noGate = await connect();
+  const ageGateGone: JoinReply = await new Promise((resolve) => noGate.emit("create", { alias: "Host2", consent: { revealOptIn: true }, profile }, resolve));
+  assert.equal(ageGateGone.ok, true, "no age/terms gate at the door");
+  noGate.disconnect();
   const missingProfile = await new Promise<JoinReply>((resolve) => (host as any).emit("create", { alias: "Host", consent }, resolve));
   assert.equal(missingProfile.ok, false, "creation requires all profile answers");
   assert.equal((await create(host, "x")).ok, false);

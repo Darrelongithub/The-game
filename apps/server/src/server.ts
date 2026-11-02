@@ -184,7 +184,8 @@ export function createGameServer(options: ServerOptions = {}): GameServer {
         }
       }
 
-      const result = rooms.join(code, req.alias, req.profile, Boolean(req.consent?.age));
+      // No age/terms gate: the host vouches for the guest list (consent is ignored).
+      const result = rooms.join(code, req.alias, req.profile);
       if (!result.ok) { reply({ ok: false, error: result.error }); return; }
       const { room: joined, player } = result;
       data.roomCode = joined.code;

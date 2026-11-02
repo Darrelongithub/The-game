@@ -16,7 +16,8 @@ only.
    narrates the finale (`GEMINI_API_KEY`). Everything else — bank, similarity,
    tags, digest, every number — is deterministic code. Lanes are independent
    and optional: no keys at all = a fully playable night on the bank, offline.
-4. **18+ only.** Private friend group, self-hosted by the host.
+4. **Built for adult friend groups.** Self-hosted by the host, who vouches for
+   the guest list: the door has no age or terms gate.
 5. **Pseudonyms only** ("Player 1..N") to ANY provider. Real aliases never leave.
 6. Raw data purged after **48h**; ANY player can delete the room instantly.
 7. Cross-platform web — the "mac couldn't join" rule (§11 checklist).
@@ -32,7 +33,8 @@ only.
   Server authoritative; rounds auto-advance when all required players submit or
   timer + `GRACE_MS` expires. `add_bot` fills a seat with a server bot (alias
   "🤖 Bot N") so the host can test solo.
-- Join = alias (2–14 chars) + consent (age 18+, terms, reveal opt-in).
+- Join = alias (2–14 chars) + profile. No age/terms gate: the host vouches for
+  the guest list, and the `consent` object is accepted and ignored.
 - **Demo rooms (ROUND 4).** The host may create a room with `demo: true`: every
   seat but the host's is puppeted from one laptop so the whole game can be
   tested alone (`demo_add_player`, `demo_set_bot_mode` auto/manual,

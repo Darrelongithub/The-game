@@ -433,7 +433,11 @@ export interface FinaleView {  // BROADCAST-SAFE — public slides only, identic
 }
 
 // ---------- Socket contract ----------
-export interface Consent { age: boolean; terms: boolean; }
+/**
+ * Accepted-but-ignored compatibility fields: the host vouches for their own
+ * guest list, so the door has no age/terms gate. Sending them is harmless.
+ */
+export interface Consent { age?: boolean; terms?: boolean; }
 
 export interface JoinRequest {
     roomCode: RoomCode;

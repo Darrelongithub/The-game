@@ -48,7 +48,6 @@ export function JoinScreen({
 }) {
   const [alias, setAlias] = useState("");
   const [code, setCode] = useState("");
-  const [ageConsent, setAgeConsent] = useState(false);
   const [profile, setProfile] = useState<ProfileAnswers>(EMPTY_PROFILE);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -67,13 +66,14 @@ export function JoinScreen({
     () => Number.isInteger(profile.age) && profile.age >= AGE_MIN && profile.age <= 120,
     [profile.age],
   );
-  const canGo = aliasOk && profileComplete && ageConsent && code.length === 4 && !busy;
+  const canGo = aliasOk && profileComplete && code.length === 4 && !busy;
 
   const go = async () => {
     if (!canGo) return;
     setLocalError(null);
     try { window.sessionStorage.setItem("reveal.alias", alias.trim()); } catch { /* optional */ }
-    const consent: Consent = { age: ageConsent, terms: true };
+    // No age/terms gate: the host vouches for the guest list.
+    const consent: Consent = { terms: true };
     try {
       const reply = await onJoin(code as RoomCode, alias.trim(), consent, profile);
       if (!reply.ok) setLocalError(reply.error ?? "Could not get in.");
@@ -142,11 +142,6 @@ export function JoinScreen({
                   Your answers stay on the server. Nobody sees them, and they are never printed.
                 </p>
               </fieldset>
-
-              <label className="mb-4 flex items-start gap-3 text-xs text-white/65">
-                <input type="checkbox" checked={ageConsent} onChange={(e) => setAgeConsent(e.target.checked)} />
-                I am {AGE_MIN} or older.
-              </label>
 
               <GlowButton type="submit" className="w-full" disabled={!canGo}>
                 {busy ? "Getting you in…" : "Join the room"}
