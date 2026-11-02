@@ -1115,13 +1115,20 @@ export class RoomManager {
       const total = [...counts.values()].reduce((a, b) => a + b, 0);
       const ranked = [...counts].sort((a, b) => b[1] - a[1] || alias(a[0]).localeCompare(alias(b[0])));
       const winner = ranked[0];
+      // A tie is the room splitting, not a decision: naming one side would state
+      // something the votes do not support. Both sides are named, never a winner.
+      const tied = winner ? ranked.filter(([, votes]) => votes === winner[1]) : [];
       const slide: FinaleSlide | undefined = winner ? {
-        beat: "land", flavor: "group", title: alias(winner[0]),
-        body: `${winner[1]} of ${total} said it out loud.`, numbers: { votes: winner[1], of: total, share: winner[1] / total },
+        beat: "land", flavor: "group",
+        title: tied.length > 1 ? tied.map(([id]) => alias(id)).join(" / ") : alias(winner[0]),
+        body: tied.length > 1 ? `${winner[1]} of ${total} each — the room split.` : `${winner[1]} of ${total} said it out loud.`,
+        numbers: { votes: winner[1], of: total, share: winner[1] / total },
       } : undefined;
       const holdMs = this.scale(room, this.options.revealHoldMs ?? VERDICT_REVEAL_MS);
       return { roundId: round.id, kind: "verdict",
-        summary: winner ? `The room decided: ${alias(winner[0])}` : "Nobody voted. The room argued for nothing.",
+        summary: winner
+          ? (tied.length > 1 ? `The room split: ${tied.map(([id]) => alias(id)).join(" / ")}` : `The room decided: ${alias(winner[0])}`)
+          : "Nobody voted. The room argued for nothing.",
         ...(slide ? { slide } : {}), celebrate: round.couple ?? round.prompt.coding === "couple", holdMs };
     }
     const holdMs = this.scale(room, this.options.revealHoldMs ?? REVEAL_HOLD_MS);

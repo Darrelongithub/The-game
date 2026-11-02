@@ -255,7 +255,9 @@ test("verdict: phones down during the debate, votes stay secret until the reveal
   assert.equal(reveal.slide!.flavor, "group");
   const numbers = reveal.slide!.numbers as Record<string, number>;
   assert.ok(numbers.votes >= 1 && numbers.of >= numbers.votes, "anonymous counts only");
-  assert.match(reveal.slide!.body ?? "", /^\d+ of \d+ said it out loud\.$/);
+  // Numbers only, never a voter. A shared top count now says so ("each — the
+  // room split") instead of naming one side as the room's verdict.
+  assert.match(reveal.slide!.body ?? "", /^(\d+ of \d+ said it out loud\.|\d+ of \d+ each — the room split\.)$/);
   assert.equal(typeof reveal.celebrate, "boolean", "couple verdicts celebrate; others do not");
 
   // No voter identity anywhere in the reveal, and no tally leaked before it.

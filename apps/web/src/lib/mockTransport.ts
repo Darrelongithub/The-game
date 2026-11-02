@@ -998,14 +998,19 @@ function buildReveal(
     for (const b of spec?.botAnswers ?? []) if (b.value.kind === "pick") votes.set(b.value.target, (votes.get(b.value.target) ?? 0) + 1);
     if (mine.kind === "pick") votes.set(mine.target, (votes.get(mine.target) ?? 0) + 1);
     const total = [...votes.values()].reduce((a, b) => a + b, 0);
-    const winner = [...votes].sort((a, b) => b[1] - a[1])[0];
+    const ranked = [...votes].sort((a, b) => b[1] - a[1]);
+    const winner = ranked[0];
+    // Same rule as the server: a shared top count is a split, not a decision.
+    const tied = winner ? ranked.filter(([, count]) => count === winner[1]) : [];
     return {
       roundId: round.roundId,
       kind: "verdict",
-      summary: winner ? `The room decided: ${name(winner[0])}` : "Nobody voted. The room argued for nothing.",
+      summary: winner
+        ? (tied.length > 1 ? `The room split: ${tied.map(([id]) => name(id)).join(" / ")}` : `The room decided: ${name(winner[0])}`)
+        : "Nobody voted. The room argued for nothing.",
       celebrate: spec?.coding === "couple",
       holdMs: 8000,
-      ...(winner ? { slide: { beat: "land" as const, flavor: "group" as const, title: name(winner[0]), body: `${winner[1]} of ${total} said it out loud.`, numbers: { votes: winner[1], of: total, share: winner[1] / total } } } : {}),
+      ...(winner ? { slide: { beat: "land" as const, flavor: "group" as const, title: tied.length > 1 ? tied.map(([id]) => name(id)).join(" / ") : name(winner[0]), body: tied.length > 1 ? `${winner[1]} of ${total} each — the room split.` : `${winner[1]} of ${total} said it out loud.`, numbers: { votes: winner[1], of: total, share: winner[1] / total } } } : {}),
     };
   }
   const items = (spec?.botAnswers ?? []).map((b) => ({
