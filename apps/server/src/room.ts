@@ -202,7 +202,8 @@ export class RoomManager {
     code: RoomCode,
     alias: string,
     profile: ProfileAnswers,
-    consentAge: boolean,
+    /** Retained for old callers; the door has no age/terms gate any more. */
+    _consentAge?: boolean,
   ): { ok: true; room: Room; player: Player } | { ok: false; error: string } {
     const room = this.rooms.get(code);
     if (!room) return { ok: false, error: "That room code does not exist." };
@@ -210,7 +211,6 @@ export class RoomManager {
     if (room.phase !== "lobby") return { ok: false, error: "This game has already started." };
     if (!isAlias(alias)) return { ok: false, error: "Pick a name between 2 and 14 characters." };
     if (!isProfileAnswers(profile)) return { ok: false, error: "Please answer every question." };
-    if (!consentAge) return { ok: false, error: "You must be 18 or over to play." };
     if (room.players.size >= MAX_PLAYERS) return { ok: false, error: "This room is full." };
 
     const id = `p${room.players.size + 1}-${Math.floor(this.rand() * 1e6).toString(36)}`;

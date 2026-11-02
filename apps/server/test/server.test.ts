@@ -298,10 +298,12 @@ describe("the wire", () => {
         roomCode: room.code, alias: "Wanjiru", profile: { ...adultProfile, age: 16 }, consent: { age: true },
       });
       assert.equal(young.ok, false, "an underage player does not join");
+      // The door has no age/terms gate any more: the host vouches for the guest
+      // list, so an unticked consent object still takes the seat.
       const noConsent = await ask<{ ok: boolean }>(phone.socket, "join", {
         roomCode: room.code, alias: "Wanjiru", profile: adultProfile, consent: { age: false },
       });
-      assert.equal(noConsent.ok, false, "no 18+ consent, no seat");
+      assert.equal(noConsent.ok, true, "no consent tick, still a seat");
     } finally {
       await close();
     }

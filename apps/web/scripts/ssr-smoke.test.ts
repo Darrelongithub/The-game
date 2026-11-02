@@ -64,7 +64,8 @@ ok("JoinScreen asks for sexuality", joinHtml.includes("Sexuality"));
 ok("JoinScreen asks for attraction", joinHtml.includes("Who are you attracted to?"));
 ok("JoinScreen asks no fifth field (the generic prompt is gone, not moved here)", !joinHtml.includes("What are you here for tonight?"));
 ok("JoinScreen has NO relationship-history question", !joinHtml.includes("partners") && !joinHtml.includes("longest") && !joinHtml.includes("How many"));
-ok("JoinScreen requires the 18+ tick", joinHtml.includes("or older") && joinHtml.includes('type="checkbox"'));
+// The door has no age/terms gate: no 18+ tick, no checkbox.
+ok("JoinScreen has no 18+ tick", !joinHtml.includes("or older") && !joinHtml.includes('type="checkbox"'));
 ok("JoinScreen says the answers stay on the server", joinHtml.includes("never printed"));
 ok("JoinScreen keeps the action disabled without an alias", joinHtml.includes("disabled"));
 

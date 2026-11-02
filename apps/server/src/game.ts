@@ -347,15 +347,15 @@ export function pickOptionsFor(room: Room, playerId: PlayerId): PlayerId[] {
 }
 
 /**
- * The 18+ gate. Age comes from the sign-up profile; consent must be given.
- * This is asserted in code — not just checked in the UI.
+ * The profile gate: a sign-up needs the questionnaire, whose age field is the
+ * game's own input (AGE_MIN..120). There is no consent tick to check — the host
+ * knows their guest list — so `consentAge` is accepted and ignored.
  */
-export function assertAdult(profile: ProfileAnswers | undefined, consentAge: boolean): void {
+export function assertAdult(profile: ProfileAnswers | undefined, _consentAge?: boolean): void {
   if (!profile) throw new Error("sign-up requires a profile");
   if (!Number.isInteger(profile.age) || profile.age < AGE_MIN) {
     throw new Error(`sign-up requires age ${AGE_MIN}+`);
   }
-  if (!consentAge) throw new Error("sign-up requires the 18+ consent tick");
 }
 
 // ---------------------------------------------------------------------------
