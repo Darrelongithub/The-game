@@ -139,6 +139,35 @@ export function choosePhaseCandidate(candidates: readonly Prompt[], desiredKind:
     (preferGenerated ? candidates.find(p => p.source === "grok") : undefined) ??
     candidates.find(p => p.kind === desiredKind) ?? candidates[0];
 }
+/**
+ * DEMO ROOMS — bind a hand-written answer to the seat's OWN assignment.
+ *
+ * A rating round assigns one subject per seat and one trait for the round; an
+ * ios round assigns one subject per seat. `submit` accepts nothing else, and
+ * that per-seat assignment is rendered only on the owning socket — the host's
+ * snapshot carries the HOST's subject, never the puppet's. So a puppet's own
+ * guess is always refused ("Answer must use your assigned subject") and the
+ * beat dies waiting for its timer. The server knows the assignment (the auto
+ * puppet path already uses it), so normalise the value the way `scheduleBot`
+ * answers: the answer stays the host's, only the subject/trait are bound.
+ */
+export function assignDemoValue(
+  round: { kind: RoundKind; trait?: (typeof TRAITS)[number]; targets?: Map<string, string> } | null,
+  seatId: string,
+  value: unknown,
+): unknown {
+  if (!round || !value || typeof value !== "object") return value;
+  const v = value as ResponseValue;
+  if (round.kind === "rating" && v.kind === "rating") {
+    const about = round.targets?.get(seatId);
+    return { ...v, ...(about ? { about } : {}), ...(round.trait ? { trait: round.trait } : {}) };
+  }
+  if (round.kind === "ios" && v.kind === "ios") {
+    const about = round.targets?.get(seatId);
+    return about ? { ...v, about } : value;
+  }
+  return value;
+}
 const HOUR = 60 * 60 * 1000;
 const PAIR_KEY = (a: string, b: string): string => [a, b].sort().join("\u0000");
 const secret = (): string => randomBytes(32).toString("base64url");
@@ -635,7 +664,8 @@ export class RoomManager {
       if (!this.demoOnly(socket, room)) return;
       const target = room.players.find((p) => p.id === input?.playerId && p.puppet);
       if (!target) return this.err(socket, "NOT_A_PUPPET", "Only a demo seat can be answered for.");
-      const result = this.submit(room, target, input, found.player.id);
+      const value = assignDemoValue(room.round, target.id, input?.value);
+      const result = this.submit(room, target, { roundId: input?.roundId, clientUuid: input?.clientUuid, value }, found.player.id);
       if (!result.ok) this.err(socket, "DEMO_SUBMIT", result.error ?? "That answer was not accepted.");
     });
     socket.on("demo_all_ready", () => {
