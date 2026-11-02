@@ -156,8 +156,9 @@ async function main() {
 
   const badAlias = await transport.create("A", { age: true, terms: true, revealOptIn: true }, profile);
   ok("short alias refused", badAlias.ok === false);
-  const noAge = await transport.create("Ada", { age: false, terms: true, revealOptIn: true }, profile);
-  ok("18+ gate enforced server-side too", noAge.ok === false);
+  // The door has no age/terms gate any more; only the private-card opt-in is sent.
+  const noGate = await transport.create("Ada", { revealOptIn: true }, profile);
+  ok("no age/terms gate in the mock either", noGate.ok === true);
 
   const early = await transport.create("Ada", { age: true, terms: true, revealOptIn: true }, profile);
   ok("re-create ok", early.ok === true);
