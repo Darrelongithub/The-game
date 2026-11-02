@@ -53,7 +53,9 @@ const joinHtml = renderToString(
   })
 );
 ok("JoinScreen renders the alias field", joinHtml.includes("Your alias"));
-ok("JoinScreen requires 18+ profile and house-rule consent", joinHtml.includes("18+") && joinHtml.includes("house rules") && joinHtml.includes("type=\"checkbox\""));
+// The door has no age/terms gate: no 18+ attestation and no house-rules box.
+ok("JoinScreen has no age or house-rule consent gate", !joinHtml.includes("18+") && !joinHtml.includes("house rules") && !joinHtml.includes("type=\"checkbox\""));
+ok("JoinScreen asks for the profile the game actually uses", joinHtml.includes("A little about you"));
 ok("JoinScreen renders both tabs", joinHtml.includes("Create a room") && joinHtml.includes("Join a room"));
 ok("JoinScreen keeps the action disabled without an alias", joinHtml.includes("disabled"));
 
