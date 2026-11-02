@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { clsx } from 'clsx'
 
 export function GlowButton({
-  children, onClick, variant = 'primary', disabled, className, type = 'button',
+  children, onClick, variant = 'primary', disabled, className, type = 'button', ...rest
 }: {
   children: React.ReactNode
   onClick?: () => void
@@ -13,7 +13,7 @@ export function GlowButton({
   disabled?: boolean
   className?: string
   type?: 'button' | 'submit'
-}) {
+} & Record<string, unknown>) {
   const [ripple, setRipple] = useState(false)
   const rippleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -30,6 +30,7 @@ export function GlowButton({
 
   return (
     <motion.button
+      {...(rest as object)}
       type={type}
       onClick={handleTap}
       disabled={disabled}

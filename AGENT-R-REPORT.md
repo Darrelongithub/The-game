@@ -1,114 +1,93 @@
-# AGENT R — ROUND 4 report
+# AGENT R — ROUND 5 report
 
-Branch: `arena/35987c29-the-game` · Commits: STEP 1 → STEP 3 + docs + smoke
+Branch: `arena/b866c916-the-game`
+Scope: R21, R22, R23, R24, R26, R27. **R25 skipped** by instruction.
+Base: `483121a` (Round 4 already landed). Merged with `origin/main` `8bb0219` before the merge PR.
 
-The three parts of the vision, in this order of work:
+## Commits (in order)
 
-1. **The engine quietly develops suspicions** — the Director (`packages/engine/src/director.ts`,
-   wired in `apps/server/src/game.ts`) was already landed on this branch from the earlier
-   ROUND 4 pass; it is unchanged here and re-verified (see tests below). Its contract
-   (`Hypothesis`, `HYPOTHESIS_FORM_BAND`, `ROUND_MIX`, `ANTI_TELEGRAPH_MAX`, accounts/priors)
-   was present and is untouched.
-2. **Reveals wait for everyone** — built in this run (ready gate).
-3. **The host can test the whole game alone** — built in this run (demo rooms).
+| Commit | Item | Summary |
+|---|---|---|
+| `e8adc9b` | R21 | Omit pick lines from server round reveals; picks still score/feed digest. |
+| `a50ae8f` | R22 | Bounded, escaped, case-insensitive, idempotent alias replacement/recodes. |
+| `4bf52e9` | R23 | Print every usable LAN IPv4 URL in preference order; never link-local/loopback. |
+| `0384515` | R24 | Persist/reclaim authenticated room seats in localStorage; purge clears session. |
+| `5112635` | R26 | Use authoritative `RoundView.trait`/`about`; remove web bank-guessing shim. |
+| `2f44a54` | R21 test follow-up | Protocol reconnect test accepts intentionally empty pick reveals. |
+| `5f8c225` | R27 | Gate spark announcements on ≥3 independent measured supports; add incidence harness. |
 
-Every number stays in deterministic code. Nothing in this run adds an LLM path: the
-Director picks rounds, the ready gate only gates timing, and demo seats write ordinary
-log records.
+## Files created
 
-## STEP 1 — Contract changes (owner-approved, applied first)
+- `lib/aliases.ts` — shared bounded alias replacement helper (`ALIAS_REPLACE_MIN = 3`).
+- `apps/server/test/r21-reveal.test.ts`, `r22-aliases.test.ts`, `r23-lan.test.ts` — per-fix server regressions.
+- `apps/web/scripts/r24-session.test.ts`, `apps/web/scripts/jsdom.d.ts` — real-server reload/purge regression + JSDOM typing.
+- `apps/web/scripts/r26-authoritative.test.ts` — assigned trait/subject regression.
+- `packages/engine/test/r27-spark.test.ts` — noise/mutual/downgraded-claim/determinism regressions.
+- `scripts/spark-incidence.ts` — reproducible before/after spark measurement (`npm run measure:sparks`).
 
-`packages/shared/src/contracts.ts` (all additive; nothing else changed):
+## Principal files changed
 
-| addition | why |
-|---|---|
-| `REVEAL_READY_GRACE_MS = 20_000` | auto-reveal fallback so one AFK phone never stalls the night |
-| `ClientToServerEvents.ready: () => void` | "I'm ready for the pending reveal" |
-| `RoomView.ready?: PlayerId[]` | who has pressed ready, present **only** while a reveal is pending |
-| `RoomView.demo?: boolean` | demo-room flag (real rooms keep a byte-identical snapshot) |
-| six `demo_*` events | add/remove puppeted seats, auto/manual, answer-as, all-ready, speed |
-| `create` payload `demo?: boolean` | a demo room has to be created somehow (`RoomView.demo` alone cannot) |
-| `LogRecord.impersonatedBy?: PlayerId` | demo metadata; the engine ignores it — parity is the point |
+- Server: `apps/server/src/game.ts` (R21 reveal), `apps/server/src/server.ts` (R23 LAN), `apps/server/src/pseudonyms.ts` (R22).
+- Alias consumers: `packages/prompts/src/provider.ts`, `packages/narrator/src/roster.ts`.
+- Web session/rejoin: `apps/web/src/lib/session.ts`, `socketTransport.ts`, `useRoom.ts`.
+- Web authoritative answers: `apps/web/src/lib/demoAnswer.ts`, `mockTransport.ts`, `apps/web/src/screens/PromptScreen.tsx`; deleted dead `apps/web/src/lib/promptHints.ts`.
+- Engine spark gate: `packages/engine/src/results.ts`, `packages/engine/src/secrets.ts`, `packages/engine/README.md`.
+- Harness wiring: root `package.json`, `scripts/tsconfig.json`, `apps/web/package.json`.
+- Reports/requests: `FIX-REPORT.md`, `NOTES/contract-requests.md`.
 
-`Hypothesis` / `AccountInfo` / the three director tunables were already in the file and are
-unchanged. Notes appended to `NOTES/contract-requests.md`.
+## Contract requests
 
-## STEP 2 — Reveals wait for everyone
+- **R26 only:** `RoundView.about?: PlayerId` and `RoundView.trait?: TraitId` were already present and owner-approved. R26 makes the web consume them authoritatively; `trait` remains `TraitId` per the owner's confirmation. No other shared-contract field changed.
+- Recorded in `NOTES/contract-requests.md` as applied/owner-approved.
+- No new contract request is needed for R21–R24 or R27.
 
-Server (`apps/server/src/game.ts`):
-- `finishRound` now computes the reveal payload (`buildReveal`) and hands it to
-  `beginReady`: stage `ready`, `room.pendingReveal`, `room.ready`, `readyClosesAt`.
-- The reveal fires when every **connected** player has pressed ready, immediately on the
-  last tap — not on the timer. `REVEAL_READY_GRACE_MS` fires it anyway.
-- Bots and auto-puppeted demo seats are always ready (no phone to miss the moment).
-- A player who disconnects stops being waited for (re-evaluated on disconnect); a host
-  `skip_round` releases a pending reveal; heat-down votes work from the ready stage too.
-- `RoomView.ready` is emitted only while pending; `everyoneReady` ignores seats that left.
-- Every broadcast now goes through `assertNoHypothesisLeak` (the interlude broadcast was
-  the one un-guarded emit; it is guarded now).
+## R27 measurement (before → after)
 
-Client:
-- `Transport.ready()` on both transports; `useRoom` exposes `ready`, `awaitingReady`,
-  `youAreReady`.
-- New `components/ReadyScreen.tsx` (design-bible language, `dvh`, 48px targets, a short
-  arming beat) — shows the phones still to look up, never a hint about the round.
-- `PlayScreen` renders it whenever the snapshot carries `ready`; host skip is offered there.
-- `MockTransport` mirrors the same gate so the offline mock still exercises the screen.
+`npm run measure:sparks`; raw logs in `.test-results/r27-before.txt` and `.test-results/r27-after.txt`.
+Per-round = spark secret cards / completed rounds. Per-night = nights with ≥1 spark card / nights.
 
-## STEP 3 — Demo rooms (host tests the whole game on one laptop)
+| Cohort | Policy | Nights | Rounds | Cards before → after | Cards/round before → after | Nights with spark before → after |
+|---|---:|---:|---:|---:|---:|---:|
+| fixtures | noise | 200 | 4400 | 8 → 0 | 0.001818 → 0 | 2.00% → 0% |
+| fixtures | mutual | 10 | 140 | 20 → 20 | 0.142857 → 0.142857 | 100% → 100% |
+| live bots | noise | 30 | 720 | 4 → 0 | 0.005556 → 0 | 6.67% → 0% |
+| live bots | mutual | 10 | 240 | 20 → 20 | 0.083333 → 0.083333 | 100% → 100% |
 
-Server:
-- `create` with `demo: true`; `RoomView.demo`; demo rooms start with 2+ seats instead of 4.
-- `demo_add_player` / `demo_remove_player` (lobby), `demo_set_bot_mode` (auto answers and
-  readies itself, manual waits for the host), `demo_answer_as`, `demo_all_ready`,
-  `demo_speed` (0.1–1.0, applied to timers scheduled after the change).
-- Every control is refused outside a demo room (`DEMO_ONLY`) and by anyone but the host
-  (`HOST_ONLY`); targets must be actual puppeted seats (`NOT_A_PUPPET`).
-- `demo_answer_as` goes through the ordinary `submit` path, so validation, idempotence,
-  latency, decoys and the log are identical to a real phone. The only difference is the
-  `impersonatedBy` metadata that nothing reads.
+The gate reuses `pairSupportCount`, `confidenceFromCount`, `CONFIDENCE_RULES.high.independentSignals` and existing `ENGINE_TUNING.support` bars. No new scoring or numerical tunable was added. `buildSecrets` also refuses spark claims below high confidence.
 
-Client:
-- "Demo room" toggle on the Create tab; the lobby starts at 2 seats in a demo room.
-- New `components/DemoPanel.tsx`: seat list with Auto/Manual, remove, add seat, per-seat
-  "Answer this round for …", "Everyone's ready", night-speed slider. Shown in the lobby and
-  behind a **Demo** button during play. `lib/demoAnswer.ts` builds a legal value per kind.
+## Merge with `origin/main`
 
-## Tests (all run, all passing)
+Merged `origin/main` `8bb0219` into the Round 5 branch before opening the merge
+PR. The merge preserves main's CONFESS ROUNDS, REVEAL_MODE, display finale
+theatre, Host lobby link, and local Ollama generation lane alongside R21–R27.
+The only textual conflict was `apps/web/package.json`; the combined web test
+script runs SSR, regressions, transport, authoritative, and display-theatre
+suites. `r24-session`, `spark-incidence`, and `demo-smoke` were updated to answer
+the new `confess` round kind. Post-merge spark measurement still shows zero noise
+sparks and 100% mutual-fixture spark nights; live mutual bot nights also remained
+100% after the confess-aware mutual policy.
 
-```
-npm run typecheck                 → 0 errors (server, web, engine, narrator, prompts)
-apps/server: npx tsx --test …      → 57 tests, 57 pass, 0 fail
-  new: test/ready-gate.test.ts     → 4 tests (waits, drops-out, grace, solo-host)
-  new: test/demo-mode.test.ts      → 5 tests (full solo night, parity, manual/auto,
-                                     demo-only/host-only, speed + all-ready)
-npm run test:components           → ALL 151 CHECKS PASSED ✅
-  (+12 ROUND 4 checks: ready screen ×8, demo console ×12 → 151 total)
-npm run build                     → static export OK
-npm run smoke:demo (real server)  → DEMO SMOKE OK — 39 round events, 21 reveals,
-                                     42 pending-ready snapshots, 8 finale slides
-npm run smoke (4 external bots)   → the whole night completes; finales identical across
-                                     sockets; stops only at the pre-existing
-                                     "SMOKE_ORACLE is required" check (no oracle file).
-```
+## Tests run / output
 
-Parity is asserted twice: the engine test compares `computeSignals`, `computeResults`
-claims, the digest and the secret decks with the same records, once with `impersonatedBy`
-and once with it stripped — deep-equal. The demo night also asserts no internal marker
-(`hypothes|suspect|coverage|priors|director|openedAt|impersonatedBy|puppet`) appears in any
-emit, in any room-log line, or in the finale.
+- `npm run typecheck`: passed (server, web, engine, narrator, prompts, scripts).
+- `npm run selfcheck`: **43/43** post-merge.
+- `npm test --workspace apps/server`: **88/88** post-merge (`.test-results/merge-server-suite.txt`).
+- `npm test --workspace packages/engine`: **60/60** post-merge (`.test-results/merge-engine-suite.txt`).
+- `npm test --workspace packages/prompts`: **117/117** post-merge.
+- `npm test --workspace packages/narrator`: **81/81** post-merge.
+- `npm run test --workspace apps/web`: passed post-merge — SSR, UI/socket/mock/privacy/confess regressions, transport **4/4**, authoritative **2/2**, display-theatre suites.
+- `npm run test:components`: **151/151** post-merge.
+- `npm run test:mock --workspace apps/web`: **56/56**.
+- `npm run build`: static export passed.
+- `npm run bundle:check`: player **145.4 KiB gzip / 150 KiB**, display **116.8 KiB / 120 KiB** post-merge.
+- `SMOKE_FAST=1 npm run smoke:verified`: passed post-merge (smoke room `WTW9`, 5 players, keys disabled).
+- `npm run measure:sparks`: post-merge output in `.test-results/merge-spark-incidence.txt`.
+- Per-fix before/after logs are retained under `.test-results/r21-*`, `r22-*`, `r23-*`, `r24-*`, `r26-*`, `r27-*`; post-merge logs under `.test-results/merge-*`.
 
-## Known gaps / notes
+## Known gaps
 
-- `demo_speed` applies to timers scheduled after the change; a round already in flight keeps
-  its closing time (changing it would steal time from players).
-- Demo seats are added/removed in the lobby only (same rule as `add_bot`); modes, answers,
-  all-ready and speed work at any time.
-- `demo_answer_as` uses a deterministic, plausible value per round kind (the host can also
-  flip the seat to auto). There is no per-seat free-text editor in the panel.
-- The ready gate covers reveals (the "moment"); interludes and the finale are not gated —
-  the finale is broadcast-safe and replayed on reconnect.
-- The mock transport's demo mode is a one-seat approximation; the real gate and console are
-  the socket paths.
-- `readyGraceMs` is a test seam like the existing `roundTimers`/`graceMs`; production always
-  uses `REVEAL_READY_GRACE_MS`.
+- **Release disposition remains NO-GO / REQUIRES HUMAN:** no real Android/iPhone device matrix was run in this checkout.
+- The live spark cohort is observational (server-chosen room id/live seeds); the seeded fixture cohort is the byte-reproducible before/after evidence.
+- Live server rating/IOS subjects are non-self, so `traitAgreement` is rarely a measured support in live bot nights. The spark gate is deliberately conservative: mutual picks alone no longer announce a spark.
+- The retained standalone server fallback services remain a test/last-resort seam; the production host uses the integrated production engine measured above.
+- R24 reload stability was proven with shortened test timers (`spotlight: 200`, `graceMs: 50`); production timers are unchanged. An idle spotlight subject still closes on the existing timer path.

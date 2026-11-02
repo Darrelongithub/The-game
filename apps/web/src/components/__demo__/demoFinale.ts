@@ -15,21 +15,18 @@ export const demoFinale: FinaleView = {
     {
       beat: 'tease',
       flavor: 'claim',
-      claimId: 'ship-demo',
       title: 'Player 2 × Player 5',
       body: 'Same drink ordered. Same pick. Twice in a row.',
     },
     {
       beat: 'escalate',
       flavor: 'claim',
-      claimId: 'ship-demo',
       title: 'Player 2 × Player 5',
       body: 'Three matching picks and a debrief in sync. The math is blushing.',
     },
     {
       beat: 'land',
       flavor: 'claim',
-      claimId: 'ship-demo',
       title: 'Player 2 × Player 5',
       body: 'SHIP: the room has spoken — you two are a package deal.',
     },
@@ -59,7 +56,6 @@ export const demoFinale: FinaleView = {
     {
       beat: 'land',
       flavor: 'group',
-      claimId: 'toxic-demo',
       title: 'Player 7',
       body: 'The room keeps saying it about Player 7.',
       numbers: { votes: 5, of: 8, share: 63 },
@@ -72,9 +68,8 @@ export const demoFinale: FinaleView = {
     },
   ],
   summary: {
-    ship: 'Player 2 × Player 5',
-    besties: 'Player 2 & Player 5',
-    toxic: 'Player 7',
-    rivals: 'Player 1 vs Player 6',
+    couple: 'Player 2 × Player 5',
+    core: 'Player 2 & Player 5',
+    hates: 'Player 7',
   },
 }

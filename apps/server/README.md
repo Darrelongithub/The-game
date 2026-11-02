@@ -38,8 +38,11 @@ injectable test seam; each room has its own prompt provider. Lobby preparation
 runs in the background and `forPhase()` returns already-available prompts.
 Transient reveal, interlude and finale events are re-emitted on reconnect.
 
-With no `XAI_API_KEY` or `GEMINI_API_KEY`, bank prompts and deterministic local
-copy make the game playable without network calls. With keys, each room shares a
+With no `GEMINI_API_KEY`, bank prompts and deterministic local copy make the
+game playable without cloud calls. Generation independently tries a local Ollama
+(`GEN_BASE`, default `http://127.0.0.1:11434`; `GEN_MODEL`, default
+`dolphin-mistral`) without a key. Provider failure leaves bank prompts available.
+See the root `RUNBOOK.md` for laptop setup. Each room shares a
 physical HTTP-attempt budget across prompt generation and narration; retries
 count and deleting a room aborts pending calls. Narration receives pseudonymous,
 public-only material, never secret decks or private debriefs. Provider output is

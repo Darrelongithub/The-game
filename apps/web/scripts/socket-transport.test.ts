@@ -1,7 +1,10 @@
+// apps/web/scripts/socket-transport.test.ts
+//   npx -y tsx --tsconfig scripts/tsconfig.test.json --test scripts/socket-transport.test.ts
+//
+// The browser transport against the REAL game server: a phone joins, the
+// laptop binds with its token, an answer goes out, and a reloaded tab
+// reclaims its seat.
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import { createGameServer } from '../../server/src/server.ts';
 import { SocketTransport } from '../src/lib/socketTransport';
@@ -14,9 +17,15 @@ const waitFor = async (condition: () => boolean, label: string) => {
   }
 };
 
-test('socket transport coalesces resume, detaches visibility listener, and reports rejected dare passes', { timeout: 10000 }, async t => {
-  const dir = mkdtempSync(join(tmpdir(), 'reveal-transport-'));
-  const server = createGameServer({ dataDir: dir });
+const PROFILE = {
+  age: 28,
+  gender: 'woman' as const,
+  sexuality: 'straight' as const,
+  attractedTo: 'women' as const,
+};
+
+test('the transport joins, binds the host, and resumes', { timeout: 20000 }, async t => {
+  const server = createGameServer({});
   const port = await server.listen(0, '127.0.0.1', false);
   const oldUrl = process.env.NEXT_PUBLIC_SERVER_URL;
   process.env.NEXT_PUBLIC_SERVER_URL = `http://127.0.0.1:${port}`;
@@ -24,26 +33,53 @@ test('socket transport coalesces resume, detaches visibility listener, and repor
   const fakeWindow = { sessionStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) } };
   const fakeDocument = Object.assign(new EventTarget(), { visibilityState: 'visible' });
   Object.assign(globalThis, { window: fakeWindow, document: fakeDocument });
-  let joins = 0;
-  server.io.on('connection', socket => socket.onAny(event => { if (event === 'join') joins++; }));
+
   const transport = new SocketTransport();
   const errors: string[] = [];
-  transport.setHandlers({ onError: error => errors.push(error.code) });
-  t.after(async () => {
-    transport.disconnect(); await server.close(); rmSync(dir, { recursive: true, force: true });
-    delete (globalThis as any).window; delete (globalThis as any).document;
-    if (oldUrl === undefined) delete process.env.NEXT_PUBLIC_SERVER_URL; else process.env.NEXT_PUBLIC_SERVER_URL = oldUrl;
+  const states: unknown[] = [];
+  transport.setHandlers({
+    onError: error => errors.push(error.code),
+    onState: view => states.push(view),
   });
-  const created = await transport.create('Host', { age: true, terms: true, revealOptIn: true }, { age: 28, relationship: "single", partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: "vibes" });
-  assert.ok(created.ok && created.secret);
-  transport.resume(); transport.resume(); fakeDocument.dispatchEvent(new Event('visibilitychange'));
-  await waitFor(() => joins === 1 && !!JSON.parse(storage.get('reveal.session') ?? '{}').secret && JSON.parse(storage.get('reveal.session') ?? '{}').secret !== created.secret, 'rotated resume credential');
-  await new Promise(resolve => setTimeout(resolve, 40));
-  assert.equal(joins, 1); assert.deepEqual(errors, []);
-  const rejected = await transport.darePass({ roundId: 'not-a-live-round', reason: 'Not right now.' });
-  assert.equal(rejected.ok, false, 'the acknowledged submit must not claim a rejected pass succeeded');
-  assert.equal((await transport.darePass({ roundId: 'x', reason: '  ' })).ok, false);
-  transport.disconnect(); fakeDocument.dispatchEvent(new Event('visibilitychange'));
-  await new Promise(resolve => setTimeout(resolve, 40));
-  assert.equal(joins, 1, 'unmounted transport must not rejoin');
+  t.after(async () => {
+    transport.disconnect();
+    await server.close();
+    delete (globalThis as any).window;
+    delete (globalThis as any).document;
+    if (oldUrl === undefined) delete process.env.NEXT_PUBLIC_SERVER_URL;
+    else process.env.NEXT_PUBLIC_SERVER_URL = oldUrl;
+  });
+
+  // ---- the laptop binds with its token — no code to type ----
+  const room = server.rooms.nightRoom!;
+  const bound = await transport.hostJoin(room.hostToken);
+  assert.equal(bound.ok, true, 'the host token binds the room');
+
+  // ---- a phone joins with the code from the QR ----
+  const joined = await transport.join({
+    roomCode: room.code,
+    alias: 'Wanjiru',
+    consent: { age: true, terms: true },
+    profile: PROFILE,
+  });
+  assert.ok(joined.ok && joined.you && joined.secret, 'the phone joins');
+  assert.ok(storage.get('reveal.session'), 'the seat is remembered for a reload');
+
+  // ---- the join is refused for an underage player ----
+  const refused = await transport.join({
+    roomCode: room.code,
+    alias: 'Kid',
+    consent: { age: true, terms: true },
+    profile: { ...PROFILE, age: 16 },
+  });
+  assert.equal(refused.ok, false, '18+ is enforced on the server');
+
+  // ---- a reloaded tab reclaims its seat ----
+  const before = states.length;
+  transport.resume();
+  await waitFor(() => states.length > before, 'the resumed snapshot');
+  assert.deepEqual(errors, [], 'a resume does not error');
+  assert.equal(server.rooms.nightRoom!.players.size, 1, 'a reload does not take a second seat');
+
+  transport.disconnect();
 });

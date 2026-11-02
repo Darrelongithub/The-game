@@ -1,4 +1,5 @@
 import { pseudonym } from "../../../packages/shared/src/contracts.ts";
+import { replaceAliasTokens } from "../../../lib/aliases.ts";
 
 export interface AliasEntry { alias: string; id: string; }
 
@@ -7,43 +8,14 @@ export function aliasTable(players: AliasEntry[]): { alias: string; token: strin
   return players.map((p, i) => ({ alias: p.alias.normalize("NFC"), token: pseudonym(i) }));
 }
 
-/**
- * Replace whole alias tokens only. Unicode letters/digits/underscore count as word characters.
- *
- * ONE pass over ONE alternation. Replacing aliases one at a time let a later
- * alias match a token an earlier alias had just written: a guest who picked a
- * gamertag shaped like a pseudonym ("Player 3") hijacked another guest's token,
- * so a mention of Samantha came back out of `restoreAliases` as "Player 3" —
- * the wrong name, in public finale copy. A single pass can never rescan its
- * own output.
- */
+/** Whole-word, escaped, case-insensitive replacement in one pass. The shared
+ * ALIAS_REPLACE_MIN policy also protects short names from accidental recoding. */
 export function pseudonymizeText(text: string, players: AliasEntry[]): string {
-  const normalized = text.normalize("NFC");
-  const table = aliasTable(players)
-    .filter((entry) => entry.alias.length > 0)
-    .sort((a, b) => b.alias.length - a.alias.length || a.token.localeCompare(b.token));
-  if (table.length === 0) return normalized;
-  const tokenByAlias = new Map<string, string>();
-  for (const entry of table) {
-    const key = entry.alias.toLowerCase();
-    if (!tokenByAlias.has(key)) tokenByAlias.set(key, entry.token);
-  }
-  const alternation = table.map((entry) => entry.alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-  const re = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${alternation})(?![\\p{L}\\p{N}_])`, "giu");
-  return normalized.replace(re, (match) => tokenByAlias.get(match.normalize("NFC").toLowerCase()) ?? match);
+  return replaceAliasTokens(text, aliasTable(players).map(({ alias, token }) => ({ alias, replacement: token })));
 }
 
-/**
- * A guest's own "Player 2" must survive the round trip: `restoreAliases` must
- * never bind a token the guest typed to a seat. An invisible ZWSP takes the
- * literal out of the token grammar (`\bPlayer (\d+)\b` needs the space) while
- * still rendering exactly as typed.
- */
-export function escapePseudonymTokens(text: string): string {
-  return text.replace(/\bPlayer (1[01]|[1-9])\b/g, (_match, n: string) => `Player \u200B${n}`);
-}
-
-/** Swap provider pseudonyms back only when an entire Player N token matches. */
+/** One callback-based pass: aliases containing `$&` stay literal, and a newly
+ * restored alias is never consumed by a later Player N replacement. */
 export function restoreAliases(text: string, players: AliasEntry[]): string {
-  return text.replace(/\bPlayer (1[01]|[1-9])\b/g, (match, n: string) => players[Number(n) - 1]?.alias ?? match);
+  return text.replace(/\bPlayer (1[01]|[1-9])\b/gi, (match, n: string) => players[Number(n) - 1]?.alias ?? match);
 }

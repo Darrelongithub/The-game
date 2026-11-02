@@ -16,11 +16,9 @@ import { usePrefersReducedMotion } from './feedback'
 import { sfx } from './sound'
 
 const KIND_LABEL: Record<SecretCard['kind'], string> = {
-  spark: 'SPARK',
-  onesided: 'ONE-SIDED',
+  crush: 'MUTUAL CRUSH',
   blindspot: 'BLIND SPOT',
-  roomnote: 'ROOM NOTE',
-  stat: 'STAT',
+  lookchain: 'LOOK CHAIN',
 }
 
 function CardFace({ card, index, total }: { card: SecretCard; index: number; total: number }) {

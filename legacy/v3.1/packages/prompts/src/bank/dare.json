@@ -1,0 +1,176 @@
+[
+  {
+    "id": "dd1",
+    "phase": "dare",
+    "kind": "dare",
+    "text": "Let {P1} post one story from your gallery. They pick; you get one veto.",
+    "measures": [
+      "trust compliance"
+    ],
+    "coding": "trust",
+    "asksTarget": true
+  },
+  {
+    "id": "dd2",
+    "phase": "dare",
+    "kind": "dare",
+    "text": "Compliment {P2} three times, no repeats. The room grades sincerity out loud.",
+    "measures": [
+      "affection compliance"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "dd3",
+    "phase": "dare",
+    "kind": "dare",
+    "text": "Do your best impression of {P3} until someone laughs.",
+    "measures": [
+      "affectionate roast",
+      "verbatim material"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "dd4",
+    "phase": "dare",
+    "kind": "dare",
+    "text": "Read the last 3 messages between you and {P4} out loud.",
+    "measures": [
+      "dyadic transparency"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "dd5",
+    "phase": "dare",
+    "kind": "pair_dare",
+    "text": "You two: five minutes alone. Everyone else guesses what you talked about.",
+    "measures": [
+      "debrief similarity"
+    ],
+    "coding": "couple",
+    "asksTarget": false
+  },
+  {
+    "id": "dd6",
+    "phase": "dare",
+    "kind": "dare",
+    "text": "30-second toast to {P5}. Mean it.",
+    "measures": [
+      "sincerity under pressure"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "dd7",
+    "phase": "dare",
+    "kind": "dare",
+    "text": "Show the last photo you took of yourself \u2014 {P6} captions it out loud.",
+    "measures": [
+      "directed roast-lite"
+    ],
+    "coding": "status",
+    "asksTarget": true
+  },
+  {
+    "id": "dd8",
+    "phase": "dare",
+    "kind": "dare",
+    "text": "Say the nicest and the meanest TRUE thing about {P7} \u2014 to their face.",
+    "measures": [
+      "honesty to face",
+      "tags both ways"
+    ],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "dd9",
+    "phase": "dare",
+    "kind": "debrief",
+    "text": "Separately: what did you two actually talk about?",
+    "measures": [
+      "pair debrief",
+      "debrief similarity"
+    ],
+    "coding": "couple",
+    "asksTarget": false
+  },
+  {
+    "id": "dd10",
+    "phase": "dare",
+    "kind": "dare",
+    "text": "Rank everyone here by who would win an argument with you, and defend it out loud.",
+    "measures": [
+      "status ranking",
+      "defended live"
+    ],
+    "coding": "status",
+    "asksTarget": false
+  },
+  {
+    "id": "dd11",
+    "phase": "dare",
+    "kind": "dare",
+    "text": "Call {P2} by a nickname you've never used out loud. They must keep a straight face.",
+    "measures": [
+      "affection compliance",
+      "directed tease"
+    ],
+    "coding": "friendship",
+    "asksTarget": true
+  },
+  {
+    "id": "dd12",
+    "phase": "dare",
+    "kind": "dare",
+    "text": "Let {P4} choose your profile picture for 24 hours. No veto this time.",
+    "measures": [
+      "trust compliance",
+      "status ranking"
+    ],
+    "coding": "trust",
+    "asksTarget": true
+  },
+  {
+    "id": "dd13",
+    "phase": "dare",
+    "kind": "pair_dare",
+    "text": "You two: three minutes. Pick the one thing you'd never tell this room.",
+    "measures": [
+      "debrief similarity",
+      "secrecy signal"
+    ],
+    "coding": "couple",
+    "asksTarget": false
+  },
+  {
+    "id": "dd14",
+    "phase": "dare",
+    "kind": "dare",
+    "text": "Let {P3} read the last thing you typed and deleted. Out loud.",
+    "measures": [
+      "dyadic transparency",
+      "directed trust"
+    ],
+    "coding": "trust",
+    "asksTarget": true
+  },
+  {
+    "id": "dd15",
+    "phase": "dare",
+    "kind": "dare",
+    "text": "Give everyone here a two-word nickname, to their faces. No edits.",
+    "measures": [
+      "status ranking",
+      "room-wide read"
+    ],
+    "coding": "status",
+    "asksTarget": false
+  }
+]

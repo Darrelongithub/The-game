@@ -2,21 +2,20 @@
 //
 // Two implementations behind NEXT_PUBLIC_TRANSPORT:
 //   "socket" (DEFAULT) — the shipped build talks to the real same-origin server.
-//   "mock"             — an in-memory scripted 4-player game, full phase flow,
-//                        for developing screens with no server running.
+//   "mock"             — an in-memory scripted night, for developing screens
+//                        with no server running.
 //
 // The UI only ever sees this interface, the frozen contracts, and nothing else.
+//
+// v3.2 shape: the room is created AT STARTUP on the server. A phone joins with
+// the four-character code that rides in the QR; the laptop binds to tonight's
+// room with a token and never holds a player seat.
 import type {
-  Consent,
-  ProfileAnswers,
-  DarePassRequest,
+  BeatView,
   FinaleView,
-  InterludeView,
   JoinReply,
   JoinRequest,
-  PlayerId,
   ResponseValue,
-  RevealView,
   RoomCode,
   RoomView,
   RoundView,
@@ -27,12 +26,13 @@ import type {
 export interface TransportHandlers {
   /** full snapshot — server authoritative, always replaces local state */
   onState?: (view: RoomView) => void;
+  /** ONE question, for this phone only */
   onRound?: (view: RoundView) => void;
-  onReveal?: (view: RevealView) => void;
-  onInterlude?: (view: InterludeView) => void;
-  /** broadcast-safe public slides only — identical on every phone */
+  /** the 1–2s "locked in" beat between cases */
+  onBeat?: (beat: BeatView) => void;
+  /** broadcast-safe public slides only — identical on every laptop */
   onFinale?: (view: FinaleView) => void;
-  /** PRIVATE — this phone only, never broadcast (spec §7) */
+  /** PRIVATE — this phone only, never broadcast */
   onSecrets?: (deck: SecretDeckView) => void;
   onDeleted?: () => void;
   onError?: (e: { code: string; message: string }) => void;
@@ -43,28 +43,23 @@ export interface TransportHandlers {
 export interface Transport {
   readonly mode: "socket" | "mock";
   setHandlers(handlers: TransportHandlers): void;
-  create(alias: string, consent: Consent, profile: ProfileAnswers, options?: { demo?: boolean }): Promise<JoinReply & { code?: RoomCode }>;
+  /** A phone joins tonight's room with the code from the QR. */
   join(req: JoinRequest): Promise<JoinReply>;
+  /** The laptop binds to tonight's room with its token — no code to type. */
+  hostJoin(token: string): Promise<{ ok: boolean; error?: string }>;
   submit(req: SubmitRequest): Promise<{ ok: boolean; error?: string }>;
-  darePass(req: DarePassRequest): Promise<{ ok: boolean; error?: string }> | void;
-  /** "I'm ready for the pending reveal" — the reveal waits for every phone
-   *  (spec ROUND 4), so this is what releases the moment. */
+  /** The lobby tick: "I'm in". */
+  lobbyReady(ready: boolean): void;
+  /** "Ready for the results" — the ONE ready gate, at the end of the night. */
   ready(): void;
-  /** DEMO ROOMS ONLY (host): puppeted seats, all played from this laptop. */
-  demoAddPlayer(alias: string): Promise<{ ok: boolean; playerId?: PlayerId }>;
-  demoRemovePlayer(playerId: PlayerId): void;
-  demoSetBotMode(playerId: PlayerId, mode: "auto" | "manual"): void;
-  demoAnswerAs(p: { playerId: PlayerId; roundId: string; clientUuid: string; value: ResponseValue }): void;
-  demoAllReady(): void;
-  demoSpeed(scale: number): void;
+  /** host laptop only */
   start(): void;
+  forceResults(): void;
   addBot(): void;
   skipRound(): void;
-  customPrompts(lines: string[]): void;
-  voteHeatDown(): void;
+  /** anyone */
   deleteRoom(): void;
-  /** re-join with the stored secret (+ full snapshot). Called on boot and on
-   *  every visibilitychange — spec §1/§11.11. */
+  /** re-join with the stored secret (+ full snapshot). */
   resume(): void;
   /** Forget the tab's seat and detach its socket without deleting the room. */
   forgetSession(): void;
@@ -87,11 +82,12 @@ export async function createTransport(handlers: TransportHandlers = {}): Promise
   return t;
 }
 
-/** Helper: what the local player is being asked to answer right now. */
-export function roundTargetsMe(round: RoundView | null, you: PlayerId | null): boolean {
-  if (!round || !you) return false;
-  if (!round.onlyPlayers || round.onlyPlayers.length === 0) return true;
-  return round.onlyPlayers.includes(you);
+/** A short, stable id for a submit (the server ignores it, the log keeps it). */
+export function makeClientUuid(): string {
+  const c = globalThis.crypto;
+  if (c && "randomUUID" in c) return c.randomUUID();
+  return `u-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
 }
 
+export type { ResponseValue, SubmitRequest };
 export type { Transport as TransportApi };

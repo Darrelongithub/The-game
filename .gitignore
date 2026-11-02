@@ -8,3 +8,5 @@ data/
 *.log
 .DS_Store
 *.tsbuildinfo
+
+.test-results/
