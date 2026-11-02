@@ -448,7 +448,11 @@ export class RoomManager {
     });
     socket.on("join", (input, reply) => {
       const ack: (r: JoinReply) => void = typeof reply === "function" ? reply : () => {};
-      if (!input || !isRoomCode(input.roomCode) || !validAlias(input.alias) || !validConsent(input.consent) || (!input.resume && (input as { demo?: unknown }).demo !== true && !validProfile(input.profile))) return ack({ ok: false, error: "Invalid room code, alias, profile, or consent." });
+      // A joining seat always carries the 18+ profile: `JoinRequest` has no
+      // `demo` field, and a profile-less seat persisted as `profile: undefined`
+      // makes `restore()` discard the whole room (it revalidates every player),
+      // so one such join would erase the night on the next restart.
+      if (!input || !isRoomCode(input.roomCode) || !validAlias(input.alias) || !validConsent(input.consent) || (!input.resume && !validProfile(input.profile))) return ack({ ok: false, error: "Invalid room code, alias, profile, or consent." });
       const room = this.liveRoom(input.roomCode);
       if (!room || room.stage === "deleted") return ack({ ok: false, error: "Room not found." });
       if (socket.data.playerId && (socket.data.roomCode !== room.code || socket.data.playerId !== input.resume?.playerId)) return ack({ ok: false, error: "Already joined a room." });
