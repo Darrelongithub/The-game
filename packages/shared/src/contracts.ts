@@ -298,14 +298,19 @@ export interface AccountInfo { username: string; createdAt: number; nightsPlayed
 // pinHash (scrypt), recoveryCodeHash, token seeds
 
 // ---------- Socket contract ----------
-export interface Consent { age: boolean; terms: boolean; revealOptIn: boolean; }
+/**
+ * `revealOptIn` is the only field the game acts on: it decides whether a player
+ * may be named in a spark claim. `age`/`terms` are accepted-but-ignored legacy
+ * fields — the host knows their guest list and the door has no age gate.
+ */
+export interface Consent { revealOptIn: boolean; age?: boolean; terms?: boolean; }
 
 export type JoinRole = "player" | "display";
 
 export interface JoinRequest {
     roomCode: RoomCode;
     alias: string;               // 2–14 chars
-    consent: Consent;            // age must be true (18+)
+    consent: Consent;            // revealOptIn only; no age gate
     resume?: { playerId: PlayerId; secret: string };
     role?: JoinRole;
     profile?: ProfileAnswers;

@@ -43,8 +43,6 @@ export function JoinScreen({
   const [alias, setAlias] = useState("");
   const [code, setCode] = useState("");
   const [revealOptIn, setRevealOptIn] = useState(true);
-  const [ageConsent, setAgeConsent] = useState(false);
-  const [termsConsent, setTermsConsent] = useState(false);
   const [profile, setProfile] = useState<ProfileAnswers>({ age: 0, relationship: "single", partnersToDate: 0, longestMonths: 0, crushingHere: false, tonight: "vibes" });
   const [showPrivacyOptions, setShowPrivacyOptions] = useState(false);
   // ROUND 4: a demo room lets one host play every seat on one laptop.
@@ -65,15 +63,15 @@ export function JoinScreen({
 
   const aliasOk = isAlias(alias);
   const profileComplete = Number.isInteger(profile.age) && profile.age >= AGE_MIN && profile.age <= 120 && Number.isInteger(profile.partnersToDate) && profile.partnersToDate >= 0 && profile.partnersToDate <= 200 && Number.isInteger(profile.longestMonths) && profile.longestMonths >= 0 && profile.longestMonths <= 1200;
-  const canGo = aliasOk && profileComplete && ageConsent && termsConsent && (tab === "create" || code.length === ROOM_CODE_LENGTH) && !busy;
+  const canGo = aliasOk && profileComplete && (tab === "create" || code.length === ROOM_CODE_LENGTH) && !busy;
 
   const go = async () => {
     if (!canGo) return;
     setLocalError(null);
     try { window.sessionStorage.setItem("reveal.alias", alias.trim()); } catch { /* optional */ }
-    // Preserve the server's required consent contract and the per-player
-    // private-card opt-out without adding extra entry steps.
-    const consent: Consent = { age: ageConsent, terms: termsConsent, revealOptIn };
+    // No age/terms gate: the host knows the guest list. The only consent sent
+    // is the per-player private-card opt-in, which the game actually uses.
+    const consent: Consent = { revealOptIn };
     try {
       const reply = tab === "create"
         ? await onCreate(alias.trim(), consent, profile, demoRoom ? { demo: true } : undefined)
@@ -129,7 +127,7 @@ export function JoinScreen({
               </>}
 
               <fieldset className="mb-4 space-y-3 rounded-2xl border border-white/10 p-4">
-                <legend className="px-2 text-sm font-semibold">A little about you · 18+</legend>
+                <legend className="px-2 text-sm font-semibold">A little about you</legend>
                 {PROFILE_QUESTIONS.map(q => <div key={q.field}>
                   <label className="mb-1 block text-xs text-white/65" htmlFor={`profile-${q.field}`}>{q.label}</label>
                   {q.kind === "number" && <input id={`profile-${q.field}`} className="field" type="number" min={q.field === "age" ? AGE_MIN : 0} max={q.field === "age" ? 120 : q.field === "partnersToDate" ? 200 : 1200} value={profile[q.field as "age" | "partnersToDate" | "longestMonths"] || ""} onChange={e => setProfile(p => ({ ...p, [q.field]: Number(e.target.value) }))} />}
@@ -137,12 +135,7 @@ export function JoinScreen({
                   {q.field === "tonight" && <select id="profile-tonight" className="field" value={profile.tonight} onChange={e => setProfile(p => ({ ...p, tonight: e.target.value as ProfileAnswers["tonight"] }))}>{["chaos", "vibes", "feelings", "mission"].map(v => <option className="text-black" key={v}>{v}</option>)}</select>}
                   {q.field === "crushingHere" && <button id="profile-crushingHere" type="button" aria-pressed={profile.crushingHere} onClick={() => setProfile(p => ({ ...p, crushingHere: !p.crushingHere }))} className="min-h-[40px] rounded-xl border border-white/20 px-3">{profile.crushingHere ? "Yes" : "No"} · stays secret</button>}
                 </div>)}
-                {profile.age > 0 && profile.age < AGE_MIN && <p role="alert" className="text-sm text-alert">This game is 18+ only.</p>}
               </fieldset>
-              <div className="mb-4 space-y-2">
-                <label className="flex items-start gap-3 text-xs text-white/65"><input type="checkbox" checked={ageConsent} onChange={e => setAgeConsent(e.target.checked)} /> I am {AGE_MIN} or older.</label>
-                <label className="flex items-start gap-3 text-xs text-white/65"><input type="checkbox" checked={termsConsent} onChange={e => setTermsConsent(e.target.checked)} /> I agree to the house rules.</label>
-              </div>
               {tab === "create" && (
                 <button
                   type="button"

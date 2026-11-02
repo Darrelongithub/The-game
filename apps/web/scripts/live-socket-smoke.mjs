@@ -13,6 +13,7 @@ const log = (...a) => console.log(...a);
 let fails = 0;
 const ok = (n, c, extra='') => { if (c) log('PASS', n); else { fails++; log('FAIL', n, extra); } };
 
+const profile = { age: 28, relationship: 'single', partnersToDate: 2, longestMonths: 8, crushingHere: false, tonight: 'vibes' };
 const s = io(URL, { transports: ['polling', 'websocket'], timeout: 8000 });
 const rounds = [];
 let lastState = null;
@@ -29,12 +30,17 @@ const waitFor = async (fn, ms = 8000) => {
 await new Promise((res, rej) => { s.on('connect', res); s.on('connect_error', rej); setTimeout(rej, 8000); });
 ok('socket connects (polling-first)', s.connected);
 
-const created = await new Promise((res) => s.emit('create', { alias: 'Ada', consent: { age: true, terms: true, revealOptIn: true } }, res));
+const created = await new Promise((res) => s.emit('create', { alias: 'Ada', consent: { revealOptIn: true }, profile }, res));
 ok('create → ok + room code', created.ok === true && typeof created.code === 'string' && created.code.length === 4, JSON.stringify(created).slice(0,140));
 ok('create → secret + snapshot', Boolean(created.secret) && created.state?.phase === 'lobby');
 
-const refused = await new Promise((res) => s.emit('create', { alias: 'X', consent: { age: false, terms: true, revealOptIn: true } }, res));
-ok('18+ gate enforced by the server', refused.ok === false);
+// The door has no age/terms gate: the host vouches for the guest list, so a
+// seat is taken with an alias + profile and no consent fields at all.
+const openDoor = io(URL, { transports: ['polling', 'websocket'], timeout: 8000 });
+await new Promise((res, rej) => { openDoor.on('connect', res); openDoor.on('connect_error', rej); setTimeout(rej, 8000); });
+const noGate = await new Promise((res) => openDoor.emit('create', { alias: 'X', profile }, res));
+ok('no age/terms gate at the door', noGate.ok === true, JSON.stringify(noGate).slice(0, 140));
+openDoor.disconnect();
 
 for (let i = 0; i < 3; i++) s.emit('add_bot');
 const four = await waitFor(() => lastState?.players?.length >= 4 ? lastState : null);

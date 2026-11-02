@@ -232,8 +232,6 @@ export class MockTransport implements Transport {
   // ---------------------------------------------------------------- join
   async create(alias: string, consent: Consent, profile: ProfileAnswers, options?: { demo?: boolean }): Promise<JoinReply & { code?: RoomCode }> {
     if (!isAlias(alias)) return { ok: false, error: "Alias must be 2–14 characters." };
-    if (!consent.age) return { ok: false, error: "18+ only. This room is adults." };
-    if (!consent.terms) return { ok: false, error: "You have to accept the rules." };
 
     this.you = "p1";
     this.alias = alias.trim();
@@ -263,7 +261,6 @@ export class MockTransport implements Transport {
     if (!req.resume && !req.profile) return { ok: false, error: "Complete your adult profile." };
     if (req.resume) return this.resumeReply(req.resume.playerId, req.resume.secret);
     if (!isAlias(req.alias)) return { ok: false, error: "Alias must be 2–14 characters." };
-    if (!req.consent.age) return { ok: false, error: "18+ only. This room is adults." };
 
     if (this.players.length >= 2) return this.resumeReply(this.you, MOCK_SECRET);
 

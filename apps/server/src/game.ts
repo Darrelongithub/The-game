@@ -183,8 +183,11 @@ function resumeProof(value: string): { token: string; nonce?: string } | null {
   const match = /^rr1\.([A-Za-z0-9_-]{43})\.([a-f0-9]{32})$/.exec(value);
   return match ? { token: match[1]!, nonce: match[2]! } : null;
 }
-const validConsent = (v: unknown): v is Consent => !!v && typeof v === "object" &&
-  (v as Consent).age === true && (v as Consent).terms === true && typeof (v as Consent).revealOptIn === "boolean";
+// The door has no age/terms gate: the host knows their guest list. The only
+// consent the game acts on is the per-player private-card opt-in, so an absent
+// or partial object simply means "not opted in".
+const validConsent = (v: unknown): v is Consent => !!v && typeof v === "object" && typeof (v as Consent).revealOptIn === "boolean";
+const consentOf = (v: unknown): Consent => ({ revealOptIn: !!v && typeof v === "object" && (v as Consent).revealOptIn === true });
 const validProfile = (v: unknown): v is ProfileAnswers => {
   if (!v || typeof v !== "object") return false;
   const p = v as ProfileAnswers;
@@ -460,11 +463,11 @@ export class RoomManager {
     socket.on("create", (input, reply) => {
       const ack = typeof reply === "function" ? reply : () => {};
       if (socket.data.playerId) return ack({ ok: false, error: "Already joined a room." });
-      if (!input || !validAlias(input.alias) || !validConsent(input.consent) || (!validProfile(input.profile) && input.demo !== true)) return ack({ ok: false, error: "Enter a valid alias, complete the 18+ profile, and accept the required consent." });
+      if (!input || !validAlias(input.alias) || (!validProfile(input.profile) && input.demo !== true)) return ack({ ok: false, error: "Enter a valid alias and complete the profile." });
       const code = this.code(), now = this.now(), id = randomBytes(16).toString("hex");
       const file = join(this.options.dataDir, `${now}-${id}.jsonl`);
       try { writeFileSync(file, "", { flag: "wx", mode: 0o600 }); } catch { return ack({ ok: false, error: "Unable to create room storage." }); }
-      const player: Player = { id: "p1", alias: input.alias.trim(), consent: { ...input.consent }, profile: validProfile(input.profile) ? input.profile : neutralProfile, secret: secret(), isBot: false, connected: true, socketId: socket.id };
+      const player: Player = { id: "p1", alias: input.alias.trim(), consent: consentOf(input.consent), profile: validProfile(input.profile) ? input.profile : neutralProfile, secret: secret(), isBot: false, connected: true, socketId: socket.id };
       let provider: PromptProvider;
       try { provider = this.services.createPromptProvider({ roomId: id }); } catch { provider = new BankPromptProvider(); }
       const demo = (input as { demo?: unknown }).demo === true;
@@ -481,7 +484,7 @@ export class RoomManager {
       // `demo` field, and a profile-less seat persisted as `profile: undefined`
       // makes `restore()` discard the whole room (it revalidates every player),
       // so one such join would erase the night on the next restart.
-      if (!input || !isRoomCode(input.roomCode) || !validAlias(input.alias) || !validConsent(input.consent) || (!input.resume && !validProfile(input.profile))) return ack({ ok: false, error: "Invalid room code, alias, profile, or consent." });
+      if (!input || !isRoomCode(input.roomCode) || !validAlias(input.alias) || (!input.resume && !validProfile(input.profile))) return ack({ ok: false, error: "Invalid room code, alias, or profile." });
       const room = this.liveRoom(input.roomCode);
       if (!room || room.stage === "deleted") return ack({ ok: false, error: "Room not found." });
       if (socket.data.playerId && (socket.data.roomCode !== room.code || socket.data.playerId !== input.resume?.playerId)) return ack({ ok: false, error: "Already joined a room." });
@@ -518,7 +521,7 @@ export class RoomManager {
         if (room.stage !== "lobby") return ack({ ok: false, error: "The game has already started." });
         if (room.players.length >= MAX_PLAYERS) return ack({ ok: false, error: "Room is full." });
         if (room.players.some((p) => p.alias.toLocaleLowerCase() === input.alias.trim().toLocaleLowerCase())) return ack({ ok: false, error: "That alias is already in use." });
-        player = { id: `p${room.nextPlayer++}`, alias: input.alias.trim(), consent: { ...input.consent }, profile: input.profile!, secret: secret(), isBot: false, connected: true, socketId: socket.id };
+        player = { id: `p${room.nextPlayer++}`, alias: input.alias.trim(), consent: consentOf(input.consent), profile: input.profile!, secret: secret(), isBot: false, connected: true, socketId: socket.id };
         room.players.push(player);
       }
       room.lastActivity = this.now(); socket.data = { roomCode: room.code, playerId: player.id }; void socket.join(room.code);

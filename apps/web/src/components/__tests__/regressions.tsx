@@ -57,11 +57,11 @@ async function main() {
   const round: RoundView = { roundId: 'r1', index: 1, phase: 'warmup', kind: 'pick', promptText: 'Pick someone here', closesAt: Date.now() + 60_000, youSubmitted: false }
   const view: RoomView = { code: 'AB2C', phase: 'warmup', hostId: 'p1', players, round, seq: 1 }
 
-  await check('entry requires age/profile consent and preserves the private-card opt-out', async (root, host) => {
+  await check('entry needs only alias + profile and preserves the private-card opt-out', async (root, host) => {
     let sent: any
     await render(root, <JoinScreen hasSession={false} busy={false} error={null} onCreate={async (_alias, consent) => { sent = consent; return { ok: true } }} onJoin={async () => ({ ok: true })} />)
-    assert.equal(host.querySelectorAll('input[type="checkbox"]').length, 2)
-    assert.match(host.textContent ?? '', /18\+|house rules/i)
+    assert.equal(host.querySelectorAll('input[type="checkbox"]').length, 0, 'no age/terms checkboxes at the door')
+    assert.doesNotMatch(host.textContent ?? '', /18\+|house rules/i)
     const input = host.querySelector<HTMLInputElement>('#alias')!
     const setter = Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, 'value')!.set!
     await act(async () => { setter.call(input, 'Guest'); input.dispatchEvent(new w.Event('input', { bubbles: true })) })
@@ -69,7 +69,7 @@ async function main() {
     assert.equal(button(host, 'Create room').disabled, false)
     await click(button(host, 'Privacy options'))
     await click(button(host, 'Private cards: on'))
-    await click(button(host, 'Create room')); assert.deepEqual(sent, { age: true, terms: true, revealOptIn: false })
+    await click(button(host, 'Create room')); assert.deepEqual(sent, { revealOptIn: false })
   })
 
   await check('invite links prefill join and formatted codes can be pasted', async (root, host) => {

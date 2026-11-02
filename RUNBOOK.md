@@ -1,6 +1,8 @@
 # Runbook
 
-This is a private 18+ game. Everyone must consent. Commands below run from the
+This is a private 18+ game for the host's own friend group: the door has no age
+or terms gate, and the only consent the app tracks is the private-card opt-in.
+Commands below run from the
 repository root, with Node 20+ and npm installed. The web and server workspaces
 must have been integrated first; the build kit alone is not a running game.
 
