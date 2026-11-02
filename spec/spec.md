@@ -33,8 +33,8 @@ only.
   Server authoritative; rounds auto-advance when all required players submit or
   timer + `GRACE_MS` expires. `add_bot` fills a seat with a server bot (alias
   "🤖 Bot N") so the host can test solo.
-- Join = alias (2–14 chars) + profile + reveal opt-in. No age/terms gate;
-  `consent.revealOptIn` is the only consent field the game acts on.
+- Join = alias (2–14 chars) + profile. No age/terms gate: the host vouches for
+  the guest list, and the `consent` object is accepted and ignored.
 - **Demo rooms (ROUND 4).** The host may create a room with `demo: true`: every
   seat but the host's is puppeted from one laptop so the whole game can be
   tested alone (`demo_add_player`, `demo_set_bot_mode` auto/manual,
