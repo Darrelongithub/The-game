@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -H 0.0.0.0 -p 5173",
-    "dev:mock": "NEXT_PUBLIC_TRANSPORT=mock next dev -H 0.0.0.0 -p 5173",
+    "dev:mock": "node scripts/dev-mock.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

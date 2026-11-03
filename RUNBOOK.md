@@ -19,6 +19,48 @@ that does not work, check the firewall, WiFi client isolation and that `HOST`
 is not restricted to localhost. Stop the host with Ctrl+C. The command builds
 `apps/web/out/` and serves it from the game server's origin on port 3001.
 
+### Windows: let the phones through the firewall
+
+Windows asks once whether Node may accept connections. Answer **Allow**, and
+tick **Private networks** (not Public). If the prompt was dismissed, or the
+phones time out, do this once in an **Administrator PowerShell**:
+
+```powershell
+# The Wi-Fi must be a Private network before the rule is useful.
+Get-NetConnectionProfile
+Set-NetConnectionProfile -Name "<your Wi-Fi name>" -NetworkCategory Private
+
+# Open the game port (3001 by default) for private networks only.
+New-NetFirewallRule -DisplayName "Reveal Game 3001" -Direction Inbound `
+  -Protocol TCP -LocalPort 3001 -Action Allow -Profile Private
+```
+
+Then find the laptop's LAN IPv4 address (the same one the banner prints):
+
+```powershell
+ipconfig
+# Look for "IPv4 Address" under the Wi-Fi adapter, e.g. 192.168.1.24
+```
+
+Open `http://<that-ipv4>:3001` on a phone. If the banner only shows
+`localhost`, the adapter is still Public or the port is blocked.
+
+**Phone hotspot:** turn on the phone's hotspot, connect the laptop to it, then
+run `npm run host` again. Phones must join that same hotspot. Windows often
+labels a new hotspot as Public — repeat the `Set-NetConnectionProfile` line for
+it. Mobile hotspots sometimes isolate clients; if the laptop is reachable from
+one phone but not another, check the hotspot's "client isolation" setting.
+
+**Several adapters (VPN, VirtualBox, WSL, Docker):** the banner prints every
+usable LAN address, ranking `192.168.*` first, then `10.*`. The QR uses the
+first. Use the address on the adapter that is actually on the same network as
+the phones; ignore `172.*` VPN/WSL bridges unless that is your LAN.
+
+### Developing on Windows
+
+`npm run dev` and `npm run dev:mock` work in PowerShell and cmd; the mock
+command sets its environment variable in Node instead of POSIX shell syntax.
+
 No `.env` is required. With neither API key set, the finished game uses the
 bank and templates without internet after installation. Prompt generation also
 tries local Ollama, with no key required. Optional settings:
