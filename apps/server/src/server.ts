@@ -75,7 +75,7 @@ export function bootBanner(port: number, host: string, interfaces = networkInter
   const local = `http://localhost:${port}`;
   const ips = lanAddresses(interfaces);
   const selected = selectLanAddress(interfaces);
-  const base = `http://${selected ?? ips[0] ?? `localhost:${port}`}:${port}`;
+  const base = selected || ips[0] ? `http://${selected ?? ips[0]}:${port}` : `http://localhost:${port}`;
 
   console.log(`\nReveal Game listening on ${host}:${port}`);
   console.log(`Local: ${local}`);
@@ -184,8 +184,23 @@ export function createGameServer(options: ServerOptions = {}): GameServer {
         }
       }
 
+      // The join was accepted but its ack was lost: hand back the same seat.
+      // This works after Start too, when a brand-new join is refused.
+      if (req.joinId) {
+        const existing = rooms.reclaimJoin(code, req.joinId);
+        if (existing) {
+          data.roomCode = room.code;
+          data.playerId = existing.id;
+          socket.join(room.code);
+          rooms.attachSocket(room.code, asSocketLike(socket));
+          reply({ ok: true, you: existing.id, secret: existing.secret, state: undefined });
+          rooms.broadcastState(room);
+          return;
+        }
+      }
+
       // No age/terms gate: the host vouches for the guest list (consent is ignored).
-      const result = rooms.join(code, req.alias, req.profile);
+      const result = rooms.join(code, req.alias, req.profile, undefined, req.joinId);
       if (!result.ok) { reply({ ok: false, error: result.error }); return; }
       const { room: joined, player } = result;
       data.roomCode = joined.code;

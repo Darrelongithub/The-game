@@ -108,6 +108,8 @@ export class RoomManager {
   private readonly setTimer: (fn: () => void, ms: number) => unknown;
   private readonly clearTimer: (handle: unknown) => void;
   private readonly providers = new Map<RoomCode, PromptProvider>();
+  /** Join idempotency: a retried join with the same key reclaims its seat. */
+  private readonly joinSeats = new Map<string, PlayerId>();
   private readonly timers = new Map<string, unknown>();
   /** The sockets currently in each room. */
   private readonly sockets = new Map<RoomCode, Set<SocketLike>>();
@@ -206,6 +208,7 @@ export class RoomManager {
     profile: ProfileAnswers,
     /** Retained for old callers; the door has no age/terms gate any more. */
     _consentAge?: boolean,
+    joinId?: string,
   ): { ok: true; room: Room; player: Player } | { ok: false; error: string } {
     const room = this.rooms.get(code);
     if (!room) return { ok: false, error: "That room code does not exist." };
@@ -229,8 +232,23 @@ export class RoomManager {
     };
     room.players.set(id, player);
     room.order.push(id);
+    if (joinId) this.joinSeats.set(`${room.code}:${joinId}`, id);
     this.broadcastState(room);
     return { ok: true, room, player };
+  }
+
+  /**
+   * A join whose acknowledgement was lost. The seat already exists, so the
+   * retry gets the SAME player and secret — even after Start, when a fresh
+   * join would be turned away.
+   */
+  reclaimJoin(code: RoomCode, joinId: string): Player | undefined {
+    const room = this.rooms.get(code);
+    const playerId = this.joinSeats.get(`${code}:${joinId}`);
+    const player = playerId ? room?.players.get(playerId) : undefined;
+    if (!room || !player) return undefined;
+    player.connected = true;
+    return player;
   }
 
   /** A player reclaims their seat after a disconnect. */

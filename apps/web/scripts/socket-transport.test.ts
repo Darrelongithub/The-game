@@ -61,6 +61,7 @@ test('the transport joins, binds the host, and resumes', { timeout: 20000 }, asy
     alias: 'Wanjiru',
     consent: { age: true, terms: true },
     profile: PROFILE,
+    joinId: 'lost-ack-token',
   });
   assert.ok(joined.ok && joined.you && joined.secret, 'the phone joins');
   assert.ok(storage.get('reveal.session'), 'the seat is remembered for a reload');
@@ -68,6 +69,18 @@ test('the transport joins, binds the host, and resumes', { timeout: 20000 }, asy
   assert.deepEqual(remembered.consent, { age: true, terms: true }, 'the stored seat keeps the consent');
   assert.deepEqual(remembered.profile, PROFILE, 'the stored seat keeps the profile');
   assert.deepEqual((transport as unknown as { lastJoin: { profile: unknown } }).lastJoin.profile, PROFILE);
+
+  // ---- a retried join with the same id is the same seat, not a second one ----
+  const retried = await transport.join({
+    roomCode: room.code,
+    alias: 'Wanjiru',
+    consent: { age: true, terms: true },
+    profile: PROFILE,
+    joinId: 'lost-ack-token',
+  });
+  assert.equal(retried.ok, true, 'the lost-ack retry is accepted');
+  assert.equal(retried.you, joined.you, 'the retry gets the same player');
+  assert.equal(server.rooms.nightRoom!.players.size, 1, 'the retry did not take a second seat');
 
   // ---- the join is refused for an underage player ----
   const refused = await transport.join({

@@ -445,6 +445,8 @@ export interface JoinRequest {
     consent: Consent;            // age must be true (18+)
     profile: ProfileAnswers;
     resume?: { playerId: PlayerId; secret: string };
+    /** Idempotency key: a lost ack can be retried without taking a second seat. */
+    joinId?: string;
 }
 
 export interface JoinReply {

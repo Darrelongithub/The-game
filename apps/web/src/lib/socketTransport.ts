@@ -28,6 +28,12 @@ type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 const ACK_TIMEOUT_MS = 12_000;
 
+function newJoinId(): string {
+  const cryptoApi = typeof globalThis.crypto !== "undefined" ? globalThis.crypto : undefined;
+  if (cryptoApi && typeof cryptoApi.randomUUID === "function") return cryptoApi.randomUUID();
+  return `j-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export class SocketTransport implements Transport {
   readonly mode = "socket" as const;
 
@@ -48,6 +54,8 @@ export class SocketTransport implements Transport {
   private boundVisibility = false;
   private everConnected = false;
   private resumeAttempt = 0;
+  /** Retried joins reuse this key so a lost ack does not take a second seat. */
+  private joinId = newJoinId();
   private readonly onVisibility = () => {
     if (document.visibilityState !== "visible" || !this.socket) return;
     if (!this.socket.connected) {
@@ -195,14 +203,16 @@ export class SocketTransport implements Transport {
   // ----------------------------------------------------------------- API
   async join(req: JoinRequest): Promise<JoinReply> {
     const socket = await this.socketReady();
+    const request: JoinRequest = { ...req, joinId: req.joinId ?? this.joinId };
     const reply = await new Promise<JoinReply>((resolve) => {
-      socket.timeout(this.ackTimeoutMs).emit("join", req, (error, r) => {
+      socket.timeout(this.ackTimeoutMs).emit("join", request, (error, r) => {
         if (error) {
           this.abandonUnacknowledgedJoin(socket);
           resolve({ ok: false, error: "The server did not answer. Please try again." });
         } else resolve(r && typeof r.ok === "boolean" ? r : { ok: false, error: "Invalid server reply." });
       });
     });
+    if (reply.ok) this.joinId = newJoinId();
     this.remember(reply, req.alias, req.roomCode, req.consent, req.profile);
     return reply;
   }
