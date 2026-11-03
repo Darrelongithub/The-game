@@ -178,4 +178,48 @@ describe("pair rotation", () => {
     assert.equal(firstRepeatWithUnseen, "", trace.join("\n"));
     assert.equal(seenPairs.size, 15, `six players should meet all 15 pairs:\n${trace.join("\n")}`);
   });
+
+  it("gives all eleven players a question in every paired case and covers all 55 pairs", async () => {
+    const { clock, manager, room } = makeNight(11);
+    await manager.start(room.code);
+    const seenPairs = new Set<string>();
+    const seenPrompts = new Set<string>();
+    const problems: string[] = [];
+    const trace: string[] = [];
+    const inspected = new Set<string>();
+    let guard = 0;
+    while (room.phase === "play" && guard++ < 400) {
+      const current = room.current!;
+      if (!inspected.has(current.id) && isOrdinary(current)) {
+        inspected.add(current.id);
+        const cast = new Map<PlayerId, number>();
+        for (const segment of current.segments) {
+          for (const playerId of segment.players) cast.set(playerId, (cast.get(playerId) ?? 0) + 1);
+          if (seenPrompts.has(segment.prompt.id)) problems.push(`${current.id}: prompt ${segment.prompt.id} reused`);
+          seenPrompts.add(segment.prompt.id);
+        }
+        for (const playerId of room.order) {
+          if (!cast.has(playerId)) problems.push(`${current.id}: ${room.players.get(playerId)?.alias} got no question`);
+          else if (cast.get(playerId)! > 1) problems.push(`${current.id}: ${room.players.get(playerId)?.alias} got two questions`);
+        }
+        const pairCount = current.segments.filter((s) => s.players.length === 2).length;
+        if (pairCount !== 5) problems.push(`${current.id}: ${pairCount} pairs instead of 5`);
+        for (const segment of current.segments) {
+          if (segment.players.length !== 2) continue;
+          const [a, b] = segment.players as [PlayerId, PlayerId];
+          seenPairs.add([a, b].sort().join("+"));
+        }
+        trace.push(`${current.id}: ${pairCount} pairs, cast ${cast.size}/11`);
+      }
+      const stage = current.stage ?? 0;
+      for (const segment of current.segments) {
+        if ((segment.stage ?? 0) !== stage) continue;
+        for (const playerId of segment.players) manager.submit(room.code, playerId, answerFor(segment, room, playerId));
+      }
+      clock.advance(2_000);
+    }
+    assert.deepEqual(problems, [], `eleven-player night problems:\n${trace.join("\n")}`);
+    assert.equal(inspected.size, 12, `expected twelve ordinary cases, saw ${inspected.size}`);
+    assert.equal(seenPairs.size, 55, "eleven players should meet all 55 pairs");
+  });
 });

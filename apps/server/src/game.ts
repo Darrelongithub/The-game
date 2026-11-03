@@ -529,15 +529,17 @@ export function buildCase(input: BuildCaseInput): Case {
   const otherAliases = observers.map((id) => aliasOf(id));
 
   /**
-   * A tiny queue over the provider. When a role runs dry it asks again, so a
-   * pair is never left without a question.
+   * A tiny one-at-a-time queue over the provider. Drawing exactly what is used
+   * matters: an over-drawn queue marks prompts as spent and throws the rest
+   * away with the case, which used to empty the bank before the last case of
+   * an 11-player night (and leave its pairs without questions).
    */
-  const makeQueue = (role: PromptRole, size: number) => {
+  const makeQueue = (role: PromptRole) => {
     let items: Prompt[] = [];
     let refills = 0;
     return (): Prompt | undefined => {
-      if (items.length === 0 && refills < 4) {
-        items = draw(role, size);
+      while (items.length === 0 && refills < 12) {
+        items = draw(role, 1);
         refills += 1;
       }
       return items.shift();
@@ -545,7 +547,7 @@ export function buildCase(input: BuildCaseInput): Case {
   };
 
   // ---- the subject's own real question ----
-  const nextSubject = makeQueue("subject", 1);
+  const nextSubject = makeQueue("subject");
   const subjectPrompt = nextSubject();
   if (subjectPrompt) {
     segments.push({
@@ -567,8 +569,8 @@ export function buildCase(input: BuildCaseInput): Case {
 
   // ---- one DIFFERENT question per observer pair ----
   const pairCount = pairs.length;
-  const nextObserver = makeQueue("observer_subject", pairCount);
-  const nextPairPrompt = makeQueue("observer_pair", 1);
+  const nextObserver = makeQueue("observer_subject");
+  const nextPairPrompt = makeQueue("observer_pair");
   for (let i = 0; i < pairCount; i++) {
     const pair = pairs[i]!;
     // Alternate between "about the subject" and "about another pair" so the
@@ -619,7 +621,7 @@ export function buildCase(input: BuildCaseInput): Case {
 
   // ---- the odd one out gets a solo spicy prompt ----
   if (leftover) {
-    const nextSolo = makeQueue("solo", 1);
+    const nextSolo = makeQueue("solo");
     const soloPrompt = nextSolo();
     if (soloPrompt) {
       segments.push({
