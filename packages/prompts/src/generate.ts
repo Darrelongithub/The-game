@@ -56,6 +56,8 @@ export interface GenerateBatchInput {
     now?: () => number;
     safetyCapMs?: number;
     log?: (line: string) => void;
+    /** Called as batches land so the loading screen can count them. */
+    onProgress?: (ready: number) => void;
 }
 
 export interface GenerateBatchReport {
@@ -129,6 +131,7 @@ export async function generateNight(input: GenerateBatchInput): Promise<Generate
         now: input.now,
         safetyCapMs: input.safetyCapMs ?? GEN_SAFETY_CAP_MS,
         log: input.log,
+        ...(input.onProgress ? { onProgress: input.onProgress } : {}),
     });
 
     // Build the playable set: Ollama's accepted prompts, plus every bank

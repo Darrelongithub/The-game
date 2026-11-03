@@ -16,6 +16,7 @@
 //     everyone is ready (or the host forces it), the reveal plays and each
 //     phone gets its own secret deck.
 import {
+  GEN_TARGET_PROMPTS,
   MAX_PLAYERS,
   MIN_PLAYERS,
   READY_GATE_GRACE_MS,
@@ -288,7 +289,7 @@ export class RoomManager {
 
     room.phase = "generating";
     room.totalCases = totalCasesFor(room.order.length);
-    room.generation = { done: 0, total: 40 };
+    room.generation = { done: 0, total: GEN_TARGET_PROMPTS };
     this.broadcastState(room);
 
     // The provider owns the bank + anything Ollama wrote.
@@ -301,14 +302,39 @@ export class RoomManager {
     });
     this.providers.set(room.code, provider);
 
+    // The loader counts batches while the model works. Without this the phone
+    // sat on a hardcoded 0/40 until generation resolved.
+    let polling = true;
+    let pollTimer: unknown;
+    const poll = (): void => {
+      if (!polling) return;
+      const progress = provider.generationProgress?.();
+      if (progress) {
+        const total = progress.total > 0 ? progress.total : GEN_TARGET_PROMPTS;
+        const shown = room.generation ?? { done: 0, total: GEN_TARGET_PROMPTS };
+        if (progress.done !== shown.done || total !== shown.total) {
+          room.generation = { done: progress.done, total };
+          this.broadcastState(room);
+        }
+      }
+      pollTimer = this.setTimer(poll, 250);
+    };
+    pollTimer = this.setTimer(poll, 250);
+
     let prompts: Awaited<ReturnType<NonNullable<PromptProvider["generate"]>>> = [];
     try {
       prompts = (await provider.generate?.()) ?? [];
     } catch {
       prompts = [];
+    } finally {
+      polling = false;
+      this.clearTimer(pollTimer);
     }
     room.pool = prompts;
-    room.generation = { done: prompts.length, total: 40 };
+    const finalProgress = provider.generationProgress?.();
+    room.generation = finalProgress
+      ? { done: finalProgress.done, total: finalProgress.total > 0 ? finalProgress.total : GEN_TARGET_PROMPTS }
+      : { done: prompts.length, total: GEN_TARGET_PROMPTS };
     this.broadcastState(room);
 
     // Build the night's cases.

@@ -263,6 +263,24 @@ describe("the generation run", () => {
     assert.equal(report.target, GEN_TARGET_PROMPTS);
   });
 
+  it("reports the running accepted count after every batch", async () => {
+    const counts: number[] = [];
+    const report = await generateNight({
+      playerCount: 5,
+      seed: 12,
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({ choices: [{ message: { content: "Who in this room would you take home tonight?" } }] }),
+      }),
+      onProgress: (accepted) => counts.push(accepted),
+    });
+    assert.ok(counts.length > 0, "progress must be reported while generating");
+    assert.deepEqual([...counts].sort((a, b) => a - b), counts, "progress never goes backwards");
+    assert.equal(counts[counts.length - 1], report.accepted, "the last count is the run's total");
+  });
+
   it("prints a per-batch report with the reasons", async () => {
     const lines: string[] = [];
     await generateNight({

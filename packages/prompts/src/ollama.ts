@@ -443,6 +443,8 @@ export async function generateNightWithOllama(
     now?: () => number;
     safetyCapMs?: number;
     log?: (line: string) => void;
+    /** Called after every batch with the running accepted count. */
+    onProgress?: (accepted: number) => void;
   },
 ): Promise<OllamaRunReport> {
   const now = opts.now ?? (() => Date.now());
@@ -544,6 +546,7 @@ export async function generateNightWithOllama(
 
     accepted += acceptedHere;
     batches.push({ band, asked, accepted: acceptedHere, dropped: asked - acceptedHere, reasons, prompts });
+    opts.onProgress?.(accepted);
     opts.log?.(
       `Ollama: asked ${asked}, accepted ${acceptedHere}, dropped ${asked - acceptedHere} (${formatReasons(reasons)})`,
     );

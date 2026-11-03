@@ -14,7 +14,7 @@ import {
     type RoundKind,
 } from "../../shared/src/contracts.ts";
 import { BANK, loadBank, metricOf, promptTypeKey, seededShuffle, selectFromBank } from "./bank/index.ts";
-import { generateNight, type GenerateBatchReport } from "./generate.ts";
+import { GEN_TARGET_PROMPTS, generateNight, type GenerateBatchReport } from "./generate.ts";
 
 /**
  * How many of the night's opening prompts come from the spicy tier.
@@ -91,7 +91,7 @@ export class PromptProvider {
      * Ollama's accepted rephrases first, the bank behind them.
      */
     async generate(): Promise<Prompt[]> {
-        this.stateValue = { running: true, ready: 0, target: 0, done: false };
+        this.stateValue = { running: true, ready: 0, target: GEN_TARGET_PROMPTS, done: false };
         if (this.opts.offline) {
             this.pool = loadBank();
             this.stateValue = { running: false, ready: this.pool.length, target: this.pool.length, done: true };
@@ -105,6 +105,9 @@ export class PromptProvider {
             config: this.opts.config,
             fetchImpl: this.opts.fetchImpl,
             log: this.opts.log,
+            onProgress: (ready) => {
+                this.stateValue = { ...this.stateValue, ready };
+            },
         });
         this.report = report;
         this.pool = report.prompts;
