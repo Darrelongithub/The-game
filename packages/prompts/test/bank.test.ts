@@ -73,6 +73,14 @@ describe("the bank", () => {
     }
   });
 
+  it("never asks the room to name a gay person or to narrate coming out", () => {
+    for (const p of BANK) {
+      assert.doesNotMatch(p.text, /\bwho(?:'s| is| was)\s+gay\b/i, `prompt ${p.id} asks who is gay`);
+      assert.doesNotMatch(p.text, /\bsomeone gay\b/i, `prompt ${p.id} asks the room to find a gay person`);
+      assert.doesNotMatch(p.text, /\bcame out\b|\bcloset\b|\bout as\b/i, `prompt ${p.id} narrates coming out`);
+    }
+  });
+
   it("gives every prompt a role, a kind and at least one measure", () => {
     for (const p of BANK) {
       assert.ok(p.role, `prompt ${p.id} has no role`);

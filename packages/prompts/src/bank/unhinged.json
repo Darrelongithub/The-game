@@ -90,9 +90,9 @@
     "band": "spicy",
     "role": "group",
     "kind": "pair_vote",
-    "text": "Hypothetically speaking, if {P1} and {P2} came out as gay, would they be a good couple?",
+    "text": "Hypothetically speaking, could {P1} and {P2} survive a week as a couple?",
     "measures": [
-      "metric:gay-hypothetical"
+      "metric:couple-fit"
     ],
     "coding": "couple",
     "asksTarget": true
@@ -114,11 +114,11 @@
     "band": "spicy",
     "role": "group",
     "kind": "pick",
-    "text": "If there were someone gay in this room, who would it be?",
+    "text": "Whose search history in this room would end them the fastest? Name them.",
     "measures": [
-      "metric:gay-hypothetical"
+      "metric:weirdest"
     ],
-    "coding": "couple",
+    "coding": "tease",
     "asksTarget": true
   },
   {
