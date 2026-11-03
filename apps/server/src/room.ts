@@ -48,6 +48,7 @@ import {
   lookChainsFor,
   makeRoomCode,
   makeToken,
+  planPairings,
   roomView,
   roomViewFor,
   shipVotesFor,
@@ -357,6 +358,12 @@ export class RoomManager {
       }
     }
 
+    // One round-robin pairing plan for every ordinary case, so a pair never
+    // meets twice while an unused pair is still waiting its turn.
+    const ordinaryCount = shapes.filter((shape) => shape === "case").length;
+    const pairings = planPairings(room.order, ordinaryCount);
+    let ordinaryIndex = 0;
+
     for (let i = 0; i < shapes.length; i++) {
       const shape = shapes[i]!;
       const index = i;
@@ -394,7 +401,9 @@ export class RoomManager {
           draw: (role, count, opts) => this.drawPrompts(room, role, count, opts),
           aliasOf: (id) => this.aliasOf(room, id),
           now,
+          ...(pairings[ordinaryIndex] ? { pairing: pairings[ordinaryIndex]! } : {}),
         });
+        ordinaryIndex += 1;
       }
       if (built) cases.push(built);
     }

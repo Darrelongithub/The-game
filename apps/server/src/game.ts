@@ -250,6 +250,135 @@ export function allPairs(ids: readonly PlayerId[]): [PlayerId, PlayerId][] {
 /** A stable key for a pair. */
 export const pairKey = (a: PlayerId, b: PlayerId): string => (a < b ? `${a}|${b}` : `${b}|${a}`);
 
+/**
+ * The pairing plan for one ordinary case: who is the subject, which observer
+ * pairs ask about them, and who is the odd one out (if anybody).
+ */
+export interface PairingRound {
+  subjectId: PlayerId;
+  pairs: [PlayerId, PlayerId][];
+  leftover?: PlayerId;
+}
+
+/** Dummy seats that let a round-robin schedule carry a subject and a leftover. */
+const BYE = "\u0000bye";
+const BYE_B = "\u0000bye-b";
+
+/**
+ * The circle method over an EVEN number of seats: seat 0 stays put, the rest
+ * rotate one place each round, and seat i is paired with seat n-1-i. Every
+ * pair of seats meets exactly once across n-1 rounds.
+ */
+function circleRounds(seats: readonly string[]): { pairs: [string, string][] }[] {
+  const ring = [...seats];
+  const rounds: { pairs: [string, string][] }[] = [];
+  for (let r = 0; r < ring.length - 1; r++) {
+    const pairs: [string, string][] = [];
+    for (let i = 0; i < ring.length / 2; i++) pairs.push([ring[i]!, ring[ring.length - 1 - i]!]);
+    rounds.push({ pairs });
+    const anchor = ring[0]!;
+    const rest = ring.slice(1);
+    rest.unshift(rest.pop()!);
+    ring.splice(0, ring.length, anchor, ...rest);
+  }
+  return rounds;
+}
+
+/**
+ * Plan every ordinary case's pairings so that **no two players are paired
+ * twice while there is still an unused pair in the room**.
+ *
+ * A circle-method round-robin decides the pairs; the case subject is chosen
+ * from the round's dummy seat(s), so the observers are exactly the players the
+ * matching leaves. Odd rooms need one dummy and walk every pair in n rounds.
+ * Even rooms need two: every round but one leaves two real players on the
+ * dummy seats (subject + solo leftover) and pairs everybody else, so the cycle
+ * covers all but one pair; the first spare case schedules that last pair.
+ *
+ * A room of 10 is the arithmetic exception: 11 ordinary cases × 4 pairs = 44
+ * slots for 45 pairs, so one pair cannot meet at all. The planner still never
+ * repeats a pair inside those rounds.
+ */
+export function planPairings(order: readonly PlayerId[], caseCount: number): PairingRound[] {
+  if (order.length < 2 || caseCount <= 0) return [];
+  const even = order.length % 2 === 0;
+  const seats = even ? [...order, BYE, BYE_B] : [...order, BYE];
+  const rounds = circleRounds(seats);
+  const used = new Set<string>();
+  const planned: PairingRound[] = [];
+  const isDummy = (id: string): boolean => id === BYE || id === BYE_B;
+  const realPairs = (round: { pairs: [string, string][] }): [PlayerId, PlayerId][] =>
+    round.pairs
+      .filter(([a, b]) => !isDummy(a) && !isDummy(b))
+      .map(([a, b]) => [a as PlayerId, b as PlayerId]);
+
+  const remainingPairs = (): [PlayerId, PlayerId][] =>
+    allPairs(order).filter(([a, b]) => !used.has(pairKey(a, b)));
+
+  for (let index = 0; index < Math.min(caseCount, rounds.length); index++) {
+    const round = rounds[index]!;
+    const byePairA = round.pairs.find((pair) => pair.includes(BYE));
+    const byePairB = round.pairs.find((pair) => pair.includes(BYE_B));
+    let subject: PlayerId;
+    let leftover: PlayerId | undefined;
+    let pairs: [PlayerId, PlayerId][];
+
+    if (!even) {
+      // One dummy: its real partner is the subject; everybody else pairs up.
+      subject = byePairA!.find((id) => id !== BYE) as PlayerId;
+      pairs = realPairs(round);
+    } else if (byePairA && byePairB && byePairA === byePairB) {
+      // The dummies meet: every real player is paired. Drop the subject's pair
+      // and their partner becomes the solo leftover.
+      subject = order[index % order.length]!;
+      const subjectPair = round.pairs.find((pair) => pair.includes(subject));
+      leftover = subjectPair?.find((id) => id !== subject) as PlayerId | undefined;
+      pairs = realPairs(round).filter(([a, b]) => a !== subject && b !== subject);
+    } else {
+      // Each dummy sits with a real player: one is the subject, the other is
+      // the solo leftover, and every remaining real player pairs up.
+      const dummyA = byePairA!.find((id) => !isDummy(id)) as PlayerId;
+      const dummyB = byePairB!.find((id) => !isDummy(id)) as PlayerId;
+      subject = (index % 2 === 0 ? dummyA : dummyB);
+      leftover = subject === dummyA ? dummyB : dummyA;
+      pairs = realPairs(round);
+    }
+
+    for (const [a, b] of pairs) used.add(pairKey(a, b));
+    planned.push({ subjectId: subject, pairs, ...(leftover ? { leftover } : {}) });
+  }
+
+  // The cycle is done. Use any pair that never met (even rooms miss one), then
+  // fill the case from unused pairs; only when none are left do we repeat.
+  for (let index = rounds.length; index < caseCount; index++) {
+    const open = remainingPairs();
+    const forbidden = new Set<PlayerId>();
+    for (const [a, b] of open) { forbidden.add(a); forbidden.add(b); }
+    let subject = order[index % order.length]!;
+    for (let step = 0; step < order.length; step++) {
+      const candidate = order[(index + step) % order.length]!;
+      if (!forbidden.has(candidate)) { subject = candidate; break; }
+    }
+    const observers = new Set(observersFor(order, subject));
+    const slots = Math.floor((order.length - 1) / 2);
+    const pairs: [PlayerId, PlayerId][] = [];
+    const placed = new Set<PlayerId>();
+    while (pairs.length < slots) {
+      const next =
+        open.find(([a, b]) => observers.has(a) && observers.has(b) && !placed.has(a) && !placed.has(b) && !used.has(pairKey(a, b))) ??
+        allPairs(order).find(([a, b]) => observers.has(a) && observers.has(b) && !placed.has(a) && !placed.has(b));
+      if (!next) break;
+      pairs.push(next);
+      placed.add(next[0]);
+      placed.add(next[1]);
+      used.add(pairKey(next[0], next[1]));
+    }
+    const leftover = observersFor(order, subject).find((id) => !placed.has(id));
+    planned.push({ subjectId: subject, pairs, ...(leftover ? { leftover } : {}) });
+  }
+  return planned;
+}
+
 /** The trait a rating prompt asks about, if any. */
 export function traitOf(prompt: Prompt): TraitId | undefined {
   for (const m of prompt.measures) {
@@ -372,6 +501,11 @@ export interface BuildCaseInput {
   draw: DrawFn;
   aliasOf: (id: PlayerId) => string;
   now: number;
+  /**
+   * The precomputed round-robin pairing for this case. When absent the case
+   * falls back to the plain rotation (used by direct/unit callers).
+   */
+  pairing?: PairingRound;
 }
 
 /**
@@ -381,9 +515,11 @@ export interface BuildCaseInput {
 export function buildCase(input: BuildCaseInput): Case {
   const { room, index, draw, aliasOf, now } = input;
   const players = room.order;
-  const subjectId = players[index % players.length]!;
+  const subjectId = input.pairing?.subjectId ?? players[index % players.length]!;
   const observers = observersFor(players, subjectId);
-  const { pairs, leftover } = pairUp(observers, index);
+  const { pairs, leftover } = input.pairing
+    ? { pairs: input.pairing.pairs as PlayerId[][], leftover: input.pairing.leftover }
+    : pairUp(observers, index);
 
   const segments: Segment[] = [];
   const required = new Set<PlayerId>();
