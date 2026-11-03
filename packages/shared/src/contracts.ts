@@ -509,8 +509,8 @@ export const PROVIDERS = {
     },
     gemini: {
         baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-        tagModel: "gemini-2.5-flash",
-        analyzeModel: "gemini-2.5-flash",
+        tagModel: "gemini-3.5-flash-lite",
+        analyzeModel: "gemini-3.5-flash-lite",
     },
 } as const;
 

@@ -21,8 +21,10 @@ import {
   parseOllamaText,
   rephraseSystemPrompt,
   rephraseUserPrompt,
+  resolveGeminiModel,
   restoreNames,
   validateGenerated,
+  Provider,
 } from "../src/index.ts";
 import { generateNight } from "../src/generate.ts";
 
@@ -310,5 +312,26 @@ describe("the generation run", () => {
   it("asks the model to keep every placeholder", () => {
     const user = rephraseUserPrompt(["Who in this room has a crush on {P1}?"]);
     assert.match(user, /\{P1\}/);
+  });
+});
+
+
+describe("the model ids", () => {
+  it("defaults to the safe Gemini model when GEMINI_MODEL is empty", () => {
+    assert.equal(resolveGeminiModel(), "gemini-3.5-flash-lite");
+    assert.equal(resolveGeminiModel("   "), "gemini-3.5-flash-lite");
+  });
+
+  it("lets .env choose the model for the analysis lane", () => {
+    const provider = new Provider({ env: { GEMINI_API_KEY: "key", GEMINI_MODEL: "gemini-3.5-flash-lite" } });
+    assert.equal(provider.modelFor("gemini", "analyze"), "gemini-3.5-flash-lite");
+    const overridden = new Provider({ env: { GEMINI_API_KEY: "key", GEMINI_MODEL: "gemini-overridden" } });
+    assert.equal(overridden.modelFor("gemini", "analyze"), "gemini-overridden");
+  });
+
+  it("carries none of the retired ids", () => {
+    for (const retired of ["grok-4-1-fast", "gemini-3.1-pro-preview"]) {
+      assert.notEqual(resolveGeminiModel(), retired);
+    }
   });
 });
