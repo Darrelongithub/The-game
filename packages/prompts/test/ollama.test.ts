@@ -324,9 +324,9 @@ describe("the model ids", () => {
 
   it("lets .env choose the model for the analysis lane", () => {
     const provider = new Provider({ env: { GEMINI_API_KEY: "key", GEMINI_MODEL: "gemini-3.5-flash-lite" } });
-    assert.equal(provider.modelFor("gemini", "analyze"), "gemini-3.5-flash-lite");
+    assert.equal(provider.modelFor("gemini", "reveal"), "gemini-3.5-flash-lite");
     const overridden = new Provider({ env: { GEMINI_API_KEY: "key", GEMINI_MODEL: "gemini-overridden" } });
-    assert.equal(overridden.modelFor("gemini", "analyze"), "gemini-overridden");
+    assert.equal(overridden.modelFor("gemini", "reveal"), "gemini-overridden");
   });
 
   it("carries none of the retired ids", () => {
