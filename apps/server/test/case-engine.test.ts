@@ -413,6 +413,8 @@ describe("the end of the night", () => {
     // Wanjiru and Dee pick each other — a MUTUAL crush.
     const wanjiru = room.order[0]!;
     const dee = room.order[1]!;
+    const kofi = room.order[2]!;
+    const zuri = room.order[3]!;
     room.log.push({
       roomId: room.code, roundId: "crush-1", playerId: wanjiru, roundKind: "pick",
       promptId: "crush-1", coding: "tease", value: { kind: "pick", target: dee },
@@ -421,6 +423,12 @@ describe("the end of the night", () => {
     room.log.push({
       roomId: room.code, roundId: "crush-2", playerId: dee, roundKind: "pick",
       promptId: "crush-2", coding: "tease", value: { kind: "pick", target: wanjiru },
+      at: clock.now(), latencyMs: 100, metric: "crush",
+    });
+    // Kofi picks Zuri, and Zuri never picks back: one-sided, no card, no hint.
+    room.log.push({
+      roomId: room.code, roundId: "crush-3", playerId: kofi, roundKind: "pick",
+      promptId: "crush-3", coding: "tease", value: { kind: "pick", target: zuri },
       at: clock.now(), latencyMs: 100, metric: "crush",
     });
 
@@ -449,6 +457,14 @@ describe("the end of the night", () => {
         );
       }
     }
+    for (const id of [kofi, zuri]) {
+      const alias = room.players.get(id)!.alias;
+      const socket = sockets.get(alias);
+      assert.ok(socket, `${alias} has a phone`);
+      const cards = socket!.last<SecretDeckView>("secrets")?.cards ?? [];
+      assert.equal(cards.some((card) => card.kind === "crush"), false, `${alias} must not get a one-sided crush card or hint`);
+    }
+    assert.equal(sockets.size, 4, "four phones, two cards");
   });
 
   it("never sends a secret deck to a phone with no data", async () => {
