@@ -64,6 +64,10 @@ test('the transport joins, binds the host, and resumes', { timeout: 20000 }, asy
   });
   assert.ok(joined.ok && joined.you && joined.secret, 'the phone joins');
   assert.ok(storage.get('reveal.session'), 'the seat is remembered for a reload');
+  const remembered = JSON.parse(storage.get('reveal.session')!);
+  assert.deepEqual(remembered.consent, { age: true, terms: true }, 'the stored seat keeps the consent');
+  assert.deepEqual(remembered.profile, PROFILE, 'the stored seat keeps the profile');
+  assert.deepEqual((transport as unknown as { lastJoin: { profile: unknown } }).lastJoin.profile, PROFILE);
 
   // ---- the join is refused for an underage player ----
   const refused = await transport.join({
@@ -80,6 +84,11 @@ test('the transport joins, binds the host, and resumes', { timeout: 20000 }, asy
   await waitFor(() => states.length > before, 'the resumed snapshot');
   assert.deepEqual(errors, [], 'a resume does not error');
   assert.equal(server.rooms.nightRoom!.players.size, 1, 'a reload does not take a second seat');
+  assert.deepEqual(
+    (transport as unknown as { lastJoin: { profile: unknown } }).lastJoin.profile,
+    PROFILE,
+    'a resume sends the original profile, not a stub',
+  );
 
   transport.disconnect();
 });

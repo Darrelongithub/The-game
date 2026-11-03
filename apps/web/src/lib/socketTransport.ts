@@ -12,9 +12,11 @@
 import { io, type Socket } from "socket.io-client";
 import type {
   ClientToServerEvents,
+  Consent,
   JoinReply,
   JoinRequest,
   PlayerId,
+  ProfileAnswers,
   RoomCode,
   ServerToClientEvents,
   SubmitRequest,
@@ -32,7 +34,14 @@ export class SocketTransport implements Transport {
   private socket: GameSocket | null = null;
   private handlers: TransportHandlers = {};
   private lastSeq = -1;
-  private lastJoin: { code: RoomCode; alias: string; playerId: PlayerId; secret: string } | null = null;
+  private lastJoin: {
+    code: RoomCode;
+    alias: string;
+    playerId: PlayerId;
+    secret: string;
+    consent: Consent;
+    profile: ProfileAnswers;
+  } | null = null;
   private hostToken: string | null = null;
   private resuming = false;
   private resumeWanted = false;
@@ -57,6 +66,13 @@ export class SocketTransport implements Transport {
         alias: stored.alias ?? "",
         playerId: stored.you,
         secret: stored.secret,
+        consent: stored.consent ?? { age: true, terms: true },
+        profile: stored.profile ?? {
+          age: 18,
+          gender: "undisclosed",
+          sexuality: "undisclosed",
+          attractedTo: "undisclosed",
+        },
       };
       this.resumeWanted = true;
     }
@@ -187,7 +203,7 @@ export class SocketTransport implements Transport {
         } else resolve(r && typeof r.ok === "boolean" ? r : { ok: false, error: "Invalid server reply." });
       });
     });
-    this.remember(reply, req.alias, req.roomCode);
+    this.remember(reply, req.alias, req.roomCode, req.consent, req.profile);
     return reply;
   }
 
@@ -203,12 +219,12 @@ export class SocketTransport implements Transport {
     return reply;
   }
 
-  private remember(reply: JoinReply, alias: string, code: RoomCode): void {
+  private remember(reply: JoinReply, alias: string, code: RoomCode, consent: Consent, profile: ProfileAnswers): void {
     if (!reply?.ok || !reply.you || !reply.secret) return;
-    this.lastJoin = { code, alias, playerId: reply.you, secret: reply.secret };
+    this.lastJoin = { code, alias, playerId: reply.you, secret: reply.secret, consent, profile };
     this.resumeWanted = false;
     if (reply.state?.seq !== undefined) this.lastSeq = reply.state.seq;
-    saveSession({ code, you: reply.you, secret: reply.secret, alias });
+    saveSession({ code, you: reply.you, secret: reply.secret, alias, consent, profile });
   }
 
   async submit(req: SubmitRequest): Promise<{ ok: boolean; error?: string }> {
@@ -263,13 +279,8 @@ export class SocketTransport implements Transport {
       {
         roomCode: this.lastJoin.code,
         alias: this.lastJoin.alias || "Player",
-        consent: { age: true, terms: true },
-        profile: {
-          age: 18,
-          gender: "undisclosed",
-          sexuality: "undisclosed",
-          attractedTo: "undisclosed",
-        },
+        consent: this.lastJoin.consent,
+        profile: this.lastJoin.profile,
         resume: { playerId: this.lastJoin.playerId, secret: this.lastJoin.secret },
       },
       (error, reply) => {

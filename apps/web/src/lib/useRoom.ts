@@ -185,7 +185,7 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
       setCode(roomCode);
       setIsHost(false);
       if (reply.state) setView(reply.state);
-      if (reply.secret) saveSession({ code: roomCode, you: reply.you, secret: reply.secret, alias });
+      if (reply.secret) saveSession({ code: roomCode, you: reply.you, secret: reply.secret, alias, consent, profile });
       setHasSession(true);
     } else if (reply.error) {
       setError(reply.error);
