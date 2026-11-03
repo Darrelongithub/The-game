@@ -55,6 +55,7 @@ export {
   findBannedPhrase,
   findIllegalNumber,
   findIllegalPlayerReference,
+  findOrientationClaim,
   looksLikeRefusal,
   playerTokensIn,
   validateBody,

@@ -62,6 +62,18 @@ const PLAYER_TOKEN = /\bplayer\s+\d+\b/gi;
 const PLAYER_MENTION = /\bplayer\s+([^\s,.;:!?)\]}"'…—–-]+)/gi;
 const DIGITS = /\d+(?:[.,]\d+)?/g;
 const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+
+/**
+ * The room may be asked a HYPOTHETICAL about a pair ("if they were gay
+ * they'd make a good couple"), but narration may never state, imply or
+ * narrate anybody's orientation. This mirrors the engine's own claim on
+ * `orientationLeak`, and it deliberately allows the `were gay` hypothetical
+ * the bank asks while rejecting "Player 1 is gay" and coming-out copy.
+ */
+const ORIENTATION_CLAIM =
+  /\b(?:is|was|be|been|sounds|seems|looks|turned out)\s+(?:actually\s+|really\s+|secretly\s+|finally\s+|clearly\s+)?(?:gay|lesbian|bi|bisexual|queer|straight|hetero|homosexual|asexual|pansexual)\b/i;
+const COMING_OUT = /\bcame out\b|\b(?:out|in) the closet\b|\bcloseted\b|\bout as\b/i;
+const GAY_LABEL = /\b(?:the|a|that|this)\s+gay\s+(?:one|person|guy|girl|man|woman)\b|\bwho(?:'s| is| was)\s+gay\b/i;
 const WHITESPACE = /\s+/;
 
 const REFUSALS: readonly string[] = [
@@ -104,6 +116,19 @@ export function playerTokensIn(texts: readonly string[]): Set<string> {
 export function findBannedPhrase(text: string): string | undefined {
   const haystack = text.toLowerCase();
   return BANNED_PHRASES.find((phrase) => haystack.includes(phrase));
+}
+
+/** True when narration claims or labels somebody's orientation. */
+export function findOrientationClaim(text: string): string | undefined {
+  for (const [label, pattern] of [
+    ["orientation-claim", ORIENTATION_CLAIM],
+    ["coming-out", COMING_OUT],
+    ["gay-label", GAY_LABEL],
+  ] as const) {
+    const match = text.match(pattern);
+    if (match) return `${label}:${match[0].trim()}`;
+  }
+  return undefined;
 }
 
 /** First digit token that is not whitelisted (undefined = clean). */
@@ -180,6 +205,9 @@ export function validateCopy(raw: unknown, limits: CopyLimits): CopyCheck {
 
   const banned = findBannedPhrase(text);
   if (banned) return { ok: false, reason: `banned-phrase:${banned}` };
+
+  const orientation = findOrientationClaim(text);
+  if (orientation) return { ok: false, reason: orientation };
 
   const illegalNumber = findIllegalNumber(text, limits.numbers);
   if (illegalNumber) return { ok: false, reason: `invented-number:${illegalNumber}` };

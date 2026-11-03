@@ -10,9 +10,17 @@ import {
   derivePseudonyms,
   narrateNight,
   summaryFor,
+  validateBody,
   writeFinale,
 } from "../src/index.ts";
 import type { NightDigest, Results, SecretCard } from "../../shared/src/contracts.ts";
+
+const cleanLimits = {
+  numbers: new Set<string>(),
+  players: new Set<string>(["Player 1", "Player 2"]),
+  maxPlayer: 4,
+  aliases: ["Wanjiru", "Dee", "Kofi", "Zuri"],
+};
 
 const meta = {
   roomId: "TEST",
@@ -206,5 +214,28 @@ describe("narrateNight", () => {
   it("builds and writes in one call", async () => {
     const out = await narrateNight(results, digest, new Map(), { roster: meta.players });
     assert.ok(out.slides.length > 0);
+  });
+});
+
+
+describe("orientation guard", () => {
+  it("lets the room's own hypothetical through", () => {
+    const check = validateBody("If Player 1 and Player 2 were gay they'd make a good couple.", cleanLimits);
+    assert.equal(check.ok, true, check.ok ? "" : check.reason);
+  });
+
+  it("rejects an orientation claim about a player", () => {
+    for (const text of [
+      "Player 1 is gay.",
+      "Player 2 was secretly bisexual all along.",
+      "Player 1 sounds straight.",
+      "Player 2 came out last summer.",
+      "Only the gay one would do that.",
+      "Who is gay in this room?",
+    ]) {
+      const check = validateBody(text, cleanLimits);
+      assert.equal(check.ok, false, text);
+      if (!check.ok) assert.match(check.reason, /orientation-claim|coming-out|gay-label/);
+    }
   });
 });
