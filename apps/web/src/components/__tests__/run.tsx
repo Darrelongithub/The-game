@@ -739,7 +739,13 @@ async function main() {
     await unmount()
 
     // the text answer
-    const textRound = { ...pickRound, kind: 'text' as const, promptText: 'What is the most fake thing about you?', note: 'Your answer stays between you and the results.' }
+    const textRound = {
+      ...pickRound,
+      kind: 'text' as const,
+      promptText: 'What is the most fake thing about you?',
+      note: 'Your answer stays between you and the results.',
+      waitingFor: ['p2', 'p3'],
+    }
     const sentText: any[] = []
     const el2 = await mount(
       <QuestionScreen
@@ -762,6 +768,15 @@ async function main() {
     ok('the text answer is sent', sentText.length === 1 && sentText[0].kind === 'text')
     await tick(30)
     ok('the answer locks in', !!q('[data-testid="locked-in"]'))
+    ok('the waiting screen names who is still to answer', !!q('[data-testid="waiting-screen"]') && text(el2).includes('Waiting for Wanjiru and Dee'))
+    await unmount()
+
+    // The list shrinks as the room answers — one name left, then everyone in.
+    const oneLeft = { ...textRound, youSubmitted: true, sent: true, waitingFor: ['p3'] }
+    const elWaiting = await mount(
+      <QuestionScreen round={oneLeft as any} view={room as any} you={'p1'} onSubmit={async () => true} />,
+    )
+    ok('the waiting list shrinks to the last player', text(elWaiting).includes('Waiting for Dee') && !text(elWaiting).includes('Wanjiru'))
     await unmount()
 
     // a dare: you did it, or you did not — and then you say why. No pass row.

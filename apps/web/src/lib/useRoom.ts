@@ -103,6 +103,13 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
         setRound(next);
         setBeat(null);
       },
+      onWaiting: (next) => {
+        setRound((current) => (
+          current && current.roundId === next.roundId && current.segmentId === next.segmentId
+            ? { ...current, waitingFor: next.waitingFor }
+            : current
+        ));
+      },
       onBeat: (next) => {
         setBeat(next);
       },
@@ -207,10 +214,13 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
     if (!t || !round) return { ok: false, error: "No question right now." };
     const req: SubmitRequest = { roundId: round.roundId, clientUuid: clientUuid(), value };
     const res = await t.submit(req);
-    if (res.ok) setRound((r) => (r && r.roundId === round.roundId ? { ...r, youSubmitted: true } : r));
-    else setError(res.error ?? "That answer didn't send.");
+    if (res.ok) {
+      setRound((r) => (r && r.roundId === round.roundId
+        ? { ...r, youSubmitted: true, waitingFor: (r.waitingFor ?? []).filter((id) => id !== you) }
+        : r));
+    } else setError(res.error ?? "That answer didn't send.");
     return res;
-  }, [round]);
+  }, [round, you]);
 
   const setLobbyReady = useCallback((isReady: boolean) => transportRef.current?.lobbyReady(isReady), []);
   const ready = useCallback(() => transportRef.current?.ready(), []);

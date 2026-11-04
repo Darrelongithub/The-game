@@ -21,6 +21,7 @@ import type {
   RoundView,
   SecretDeckView,
   SubmitRequest,
+  WaitingView,
 } from "@shared/contracts.ts";
 
 export interface TransportHandlers {
@@ -28,6 +29,8 @@ export interface TransportHandlers {
   onState?: (view: RoomView) => void;
   /** ONE question, for this phone only */
   onRound?: (view: RoundView) => void;
+  /** Small per-answer update: who still owes an answer. */
+  onWaiting?: (view: WaitingView) => void;
   /** the 1–2s "locked in" beat between cases */
   onBeat?: (beat: BeatView) => void;
   /** broadcast-safe public slides only — identical on every laptop */

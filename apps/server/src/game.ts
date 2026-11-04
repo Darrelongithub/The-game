@@ -995,6 +995,7 @@ export function caseViewFor(room: Room, playerId: PlayerId, now: number): RoundV
       stage: staged ? stage + 1 : undefined,
       subjectId: current.subjectId,
       submitted: [],
+      waitingFor: [],
     };
   }
 
@@ -1015,6 +1016,7 @@ export function caseViewFor(room: Room, playerId: PlayerId, now: number): RoundV
     aboutSelf: segment.aboutSelf,
     subjectId: segment.subjectId,
     submitted: [...segment.answered],
+    waitingFor: segment.players.filter((id) => !segment.answered.has(id)),
     stage: staged ? stage + 1 : undefined,
     chainActor: staged ? current.subjectId : undefined,
     hidden: segment.hidden,

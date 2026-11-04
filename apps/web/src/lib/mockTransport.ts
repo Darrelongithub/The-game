@@ -140,6 +140,7 @@ export class MockTransport implements Transport {
       trait: q.kind === "rating" ? "chaos" : undefined,
       aboutSelf: q.kind === "rating",
       submitted: [],
+      waitingFor: this.players.filter((p) => p.id !== this.you).map((p) => p.id),
     };
     this.push();
     this.handlers.onRound?.(round);

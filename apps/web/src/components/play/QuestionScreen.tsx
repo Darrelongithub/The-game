@@ -63,6 +63,8 @@ export function QuestionScreen({
   }, [view.players, view.pickOptions, you]);
 
   const answered = round.youSubmitted || sent;
+  const waitingNames = (round.waitingFor ?? []).filter((id) => id !== you).map(aliasOf);
+  const waitingKnown = round.waitingFor !== undefined;
 
   const send = async (value: ResponseValue): Promise<void> => {
     setBusy(true);
@@ -300,9 +302,7 @@ export function QuestionScreen({
         {/* the answer controls */}
         <div className="mt-2 w-full max-w-md" data-testid="answer-controls">
           {answered ? (
-            <p className="text-center text-sm text-lime-accent" data-testid="locked-in">
-              Locked in.
-            </p>
+            <WaitingPanel names={waitingNames} known={waitingKnown} />
           ) : (
             controls
           )}
@@ -311,4 +311,51 @@ export function QuestionScreen({
       </motion.div>
     </main>
   );
+}
+
+/** After you answer: who the room is still waiting for, by name. */
+function WaitingPanel({ names, known }: { names: string[]; known: boolean }) {
+  const waiting = known && names.length > 0;
+  const label = !known
+    ? "Waiting for the room…"
+    : names.length === 0
+      ? "Everyone's in."
+      : `Waiting for ${formatNames(names)}`;
+
+  return (
+    <div
+      className="glass-card flex flex-col items-center gap-3 px-5 py-6 text-center"
+      data-testid="waiting-screen"
+      aria-live="polite"
+    >
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-lime-accent" data-testid="locked-in">
+        Locked in.
+      </p>
+      <p className="font-display text-2xl leading-tight text-white" data-testid="waiting-label">
+        {label}
+      </p>
+      <p className="text-sm text-white/45">
+        {waiting ? "They answer on their own phone." : "The next question is coming."}
+      </p>
+      {waiting && (
+        <div className="mt-1 flex gap-1.5" aria-hidden="true">
+          {[0, 1, 2].map((dot) => (
+            <motion.span
+              key={dot}
+              className="h-1.5 w-1.5 rounded-full bg-lime-accent"
+              animate={{ opacity: [0.25, 1, 0.25] }}
+              transition={{ duration: 1.1, repeat: Infinity, delay: dot * 0.15, ease: "easeInOut" }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  if (names.length <= 4) return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
 }

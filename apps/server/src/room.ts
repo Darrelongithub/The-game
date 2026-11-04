@@ -538,6 +538,13 @@ export class RoomManager {
     // `youSubmitted`). Fanning the full room out to every socket on every
     // answer was pure render work for the other ten players.
     this.emitStateTo(room, playerId);
+    // The waiting screens need the shrinking list, not a full room snapshot.
+    this.broadcastWaiting(
+      room,
+      current.id,
+      segment.id,
+      segment.players.filter((id) => !segment.answered.has(id)),
+    );
     this.maybeCloseCase(room, current);
     return { ok: true };
   }
@@ -745,6 +752,15 @@ export class RoomManager {
   /** A single player's answered state — every tab that seat owns. */
   private emitStateTo(room: Room, playerId: PlayerId): void {
     this.broadcastState(room, playerId);
+  }
+
+  /**
+   * The waiting screen's small update: who still owes an answer. This is a
+   * few player ids, not a room snapshot, so it is safe to send per answer.
+   */
+  private broadcastWaiting(room: Room, roundId: string, segmentId: string, waitingFor: PlayerId[]): void {
+    const payload = { roundId, segmentId, waitingFor };
+    for (const socket of this.socketsFor(room)) socket.emit("waiting", payload);
   }
 
   /** Emit the case to every socket — each player gets their own question. */

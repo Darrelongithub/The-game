@@ -348,6 +348,8 @@ export interface RoundView {
      * phone shows the line and waits.
      */
     passive?: boolean | undefined;
+    /** Who in this question still owes an answer (the waiting screen). */
+    waitingFor?: PlayerId[] | undefined;
     /** Whose look it is, on a look chain. */
     chainActor?: PlayerId | undefined;
     /**
@@ -475,9 +477,18 @@ export type ClientToServerEvents = {
     delete_room: () => void;                             // host laptop only
 };
 
+/** A tiny per-answer update: who is still to answer the open segment. */
+export interface WaitingView {
+    roundId: string;
+    segmentId: string;
+    waitingFor: PlayerId[];
+}
+
 export type ServerToClientEvents = {
     state: (p: RoomView) => void;
     round: (p: RoundView) => void;
+    /** Small payload after every answer — no full room snapshot. */
+    waiting: (p: WaitingView) => void;
     beat: (p: BeatView) => void;
     finale: (p: FinaleView) => void;          // broadcast-safe: public slides only
     secrets: (p: SecretDeckView) => void;     // ONLY the owning player's socket — NEVER broadcast

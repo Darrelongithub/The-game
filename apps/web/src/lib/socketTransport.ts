@@ -150,6 +150,7 @@ export class SocketTransport implements Transport {
     });
 
     socket.on("round", (view) => this.handlers.onRound?.(view));
+    socket.on("waiting", (view) => this.handlers.onWaiting?.(view));
     socket.on("beat", (beat) => this.handlers.onBeat?.(beat));
     socket.on("finale", (view) => this.handlers.onFinale?.(view));
     socket.on("secrets", (deck) => this.handlers.onSecrets?.(deck));

@@ -483,6 +483,40 @@ describe("the end of the night", () => {
   });
 });
 
+describe("the waiting screen", () => {
+  it("sends the shrinking list of who still owes an answer", async () => {
+    const { manager, room, sockets } = makeNight();
+    await manager.start(room.code);
+    const current = room.current!;
+    const segment = current.segments.find((s) => s.players.length >= 2);
+    assert.ok(segment, "the open case asks more than one person");
+    const [first, second] = segment.players;
+    const firstSocket = [...sockets.values()].find((socket) => socket.playerId === first)!;
+
+    const reply = manager.submit(room.code, first!, answerFor(segment!, room, first!));
+    assert.equal(reply.ok, true, reply.error);
+
+    const waiting = firstSocket.last<{ roundId: string; segmentId: string; waitingFor: PlayerId[] }>("waiting");
+    assert.ok(waiting, "an answer sends a waiting update");
+    assert.equal(waiting!.roundId, current.id);
+    assert.equal(waiting!.segmentId, segment!.id);
+    assert.ok(!waiting!.waitingFor.includes(first!), "the phone that just answered is not on its own list");
+    assert.ok(waiting!.waitingFor.includes(second!), "the other player is on the list");
+    assert.deepEqual(
+      firstSocket.last<RoomView>("state")!.round!.waitingFor,
+      waiting!.waitingFor,
+      "the answered snapshot carries the same list",
+    );
+
+    assert.equal(manager.submit(room.code, second!, answerFor(segment!, room, second!)).ok, true);
+    assert.deepEqual(
+      firstSocket.last<{ waitingFor: PlayerId[] }>("waiting")!.waitingFor,
+      [],
+      "the last answer clears the waiting screen",
+    );
+  });
+});
+
 describe("the look chain", () => {
   it("runs six chains tonight, in act → guess → why", async () => {
     const { manager, room } = makeNight();
