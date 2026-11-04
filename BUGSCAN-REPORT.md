@@ -122,3 +122,21 @@ All three ran against the live server with a closed `GEN_BASE` (Ollama off), no 
 **GO** for a friends' game night, after a two-minute pre-flight on the actual host laptop: run `npm run host`, open the PLAYER link on one real phone on the same Wi-Fi/hotspot, join the lobby, and only then invite the room (keep Ollama optional; the bank carries the night).
 
 **Single biggest risk:** real-device networking on the Windows host — firewall profile, Private vs Public Wi-Fi, hotspot client isolation and multiple adapters. It is the one mandatory path that could not be exercised here; everything downstream of a phone reaching the server is covered by the three simulated nights and 300+ tests.
+
+---
+
+## 8. Performance pass (`8d472fd`)
+
+Scope: the owner's "everything is a bit slow" — latency after Start, inter-case work, per-answer fan-out, and stale v3.1 code.
+
+| Change | Before | After |
+|---|---|---|
+| A phone submits an answer | Server rebuilt and emitted a full room snapshot to **every** socket, every answer | The seat that answered gets one snapshot; other phones get nothing until the next case. Covered by `case-engine.test.ts` (actor +1, watcher +0) |
+| Ollama is down / unreachable | All four bands attempted; each waits out its own network failure (worst case ~4× the cap) | The first `network` / `disabled` / `timeout` band ends the run; the bank carries the night. Covered by `ollama.test.ts` (`batches.length === 1`) |
+| `npm run smoke` (5 phones, offline) | 4 Ollama batches, 40 prompts asked | 1 batch, 15 prompts asked; night unchanged (31–32 events/phone, finale on every phone) |
+| Guest phone | `delete_room` accepted from any seated player | Host-only at the socket; the phone's "Delete this room" button is gone. Two socket tests: guest delete refused, host delete works |
+| Dead `add_bot` path | Socket event, manager method, transport/hook/mocks | Removed end to end (no UI ever called it in v3.2) |
+
+Gate after the pass: typecheck clean · packages **107/107** · server **66/66** · components **137/137** · selfcheck **86/86** · `smoke:verified` PASS · bundle player **145.4 KiB** / laptop **167.6 KiB**.
+
+Not changed on purpose: the 1.5 s "locked in" beat, the 180 s generation cap, polling-first mobile transport, and the one-at-a-time Ollama bands (the local model serialises calls anyway; the cap already bounds the wait).
