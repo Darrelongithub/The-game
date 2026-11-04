@@ -95,6 +95,10 @@ class IntegratedPromptProvider implements PromptProvider {
       seed: context.seed,
       aliases: this.aliases,
       log: this.log,
+      // Without these the facade never reaches Ollama: generation silently
+      // fell back to "unavailable:disabled" on every production night.
+      config: this.provider.ollama,
+      fetchImpl: this.network.fetch as FetchLike,
     });
   }
 
