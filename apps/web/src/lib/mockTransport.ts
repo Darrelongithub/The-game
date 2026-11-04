@@ -185,12 +185,6 @@ export class MockTransport implements Transport {
     this.push();
   }
 
-  addBot(): void {
-    if (this.players.length >= 10) return;
-    this.players.push({ id: `p${this.players.length + 1}-bot`, alias: `Bot ${this.players.length}`, ready: true });
-    this.push();
-  }
-
   skipRound(): void {
     this.questionIndex += 1;
     if (this.questionIndex >= QUESTIONS.length) {

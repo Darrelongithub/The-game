@@ -257,7 +257,6 @@ export class SocketTransport implements Transport {
 
   start(): void { this.socket?.emit("start"); }
   forceResults(): void { this.socket?.emit("force_results"); }
-  addBot(): void { this.socket?.emit("add_bot"); }
   skipRound(): void { this.socket?.emit("skip_round"); }
   deleteRoom(): void { this.socket?.emit("delete_room"); }
 

@@ -471,9 +471,8 @@ export type ClientToServerEvents = {
     ready: () => void;
     start: () => void;                                   // host laptop only
     force_results: () => void;                           // host laptop only — skip the ready gate
-    add_bot: () => void;                                 // host laptop only (fill seats / solo test)
     skip_round: () => void;                              // host laptop only
-    delete_room: () => void;                             // ANY player
+    delete_room: () => void;                             // host laptop only
 };
 
 export type ServerToClientEvents = {

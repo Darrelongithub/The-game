@@ -271,12 +271,6 @@ export function createGameServer(options: ServerOptions = {}): GameServer {
       rooms.forceResults(code);
     });
 
-    socket.on("add_bot", () => {
-      const code = data.roomCode;
-      if (!code || !data.isHost) return;
-      rooms.addBot(code);
-    });
-
     socket.on("skip_round", () => {
       const code = data.roomCode;
       if (!code || !data.isHost) return;
@@ -285,7 +279,8 @@ export function createGameServer(options: ServerOptions = {}): GameServer {
 
     socket.on("delete_room", () => {
       const code = data.roomCode;
-      if (!code) return;
+      // A guest's phone must never be able to end the night for the room.
+      if (!code || !data.isHost) return;
       rooms.deleteRoom(code);
     });
 

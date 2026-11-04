@@ -498,6 +498,12 @@ export async function generateNightWithOllama(
       opts.log?.(
         `Ollama: asked ${asked}, accepted 0, dropped ${asked} (unavailable:${result.reason ?? "unknown"})`,
       );
+      // A dead or unreachable model fails the same way for every band. Stop
+      // here instead of spending the cap four times over: the bank already
+      // carries the night.
+      if (result.reason === "network" || result.reason === "disabled" || result.reason === "timeout") {
+        break;
+      }
       continue;
     }
 

@@ -245,6 +245,7 @@ describe("the generation run", () => {
     assert.equal(report.accepted, 0);
     assert.equal(report.offline, true);
     assert.ok(lines.some((l) => l.startsWith("Ollama: asked ")), "the terminal must report per batch");
+    assert.equal(report.batches.length, 1, "an unreachable model is asked once, not once per band");
   });
 
   it("uses the model's lines when they pass, and the bank for the rest", async () => {

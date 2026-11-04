@@ -50,7 +50,6 @@ export interface UseRoom {
   youAreReady: boolean;
   start: () => void;
   forceResults: () => void;
-  addBot: () => void;
   skipRound: () => void;
   deleteRoom: () => void;
   submit: (value: ResponseValue) => Promise<{ ok: boolean; error?: string }>;
@@ -217,7 +216,6 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
   const ready = useCallback(() => transportRef.current?.ready(), []);
   const start = useCallback(() => transportRef.current?.start(), []);
   const forceResults = useCallback(() => transportRef.current?.forceResults(), []);
-  const addBot = useCallback(() => transportRef.current?.addBot(), []);
   const skipRound = useCallback(() => transportRef.current?.skipRound(), []);
   const deleteRoom = useCallback(() => transportRef.current?.deleteRoom(), []);
   const retry = useCallback(() => transportRef.current?.resume(), []);
@@ -252,7 +250,6 @@ export function useRoom(factory: typeof createTransport = createTransport): UseR
     youAreReady,
     start,
     forceResults,
-    addBot,
     skipRound,
     deleteRoom,
     submit,

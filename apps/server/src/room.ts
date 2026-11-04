@@ -262,27 +262,6 @@ export class RoomManager {
     return player;
   }
 
-  /** A bot takes a seat (host only) — for filling a room during testing. */
-  addBot(code: RoomCode): Player | undefined {
-    const room = this.rooms.get(code);
-    if (!room || room.players.size >= MAX_PLAYERS) return undefined;
-    const index = room.players.size + 1;
-    const player: Player = {
-      id: `p${index}-bot`,
-      alias: `Bot ${index}`,
-      secret: makeToken(this.rand),
-      connected: true,
-      isBot: true,
-      ready: true,
-      finalReady: false,
-      joinedAt: this.now(),
-    };
-    room.players.set(player.id, player);
-    room.order.push(player.id);
-    this.broadcastState(room);
-    return player;
-  }
-
   /** Mark a player ready in the lobby. */
   setReady(code: RoomCode, playerId: PlayerId, ready: boolean): void {
     const room = this.rooms.get(code);
@@ -555,7 +534,10 @@ export class RoomManager {
 
     segment.answered.add(playerId);
     logAnswer(room, playerId, segment, value, this.now(), this.now() - current.startedAt);
-    this.broadcastState(room);
+    // Only the phones that just answered need a fresh snapshot (to flip
+    // `youSubmitted`). Fanning the full room out to every socket on every
+    // answer was pure render work for the other ten players.
+    this.emitStateTo(room, playerId);
     this.maybeCloseCase(room, current);
     return { ok: true };
   }
@@ -743,17 +725,26 @@ export class RoomManager {
     };
   }
 
-  /** Emit the room state to every socket in the room. */
-  broadcastState(room: Room): void {
+  /**
+   * Emit the room state to every socket in the room, or to one player when
+   * `onlyPlayerId` is given (every tab that seat owns).
+   */
+  broadcastState(room: Room, onlyPlayerId?: PlayerId): void {
     room.seq += 1;
     const now = this.now();
     for (const socket of this.socketsFor(room)) {
+      if (onlyPlayerId && socket.playerId !== onlyPlayerId) continue;
       // The host laptop has no player seat — it gets the room view only.
       const view = socket.playerId
         ? roomViewFor(room, socket.playerId, now)
         : roomView(room, now);
       socket.emit("state", view);
     }
+  }
+
+  /** A single player's answered state — every tab that seat owns. */
+  private emitStateTo(room: Room, playerId: PlayerId): void {
+    this.broadcastState(room, playerId);
   }
 
   /** Emit the case to every socket — each player gets their own question. */

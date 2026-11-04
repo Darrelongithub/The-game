@@ -13,12 +13,10 @@ export function LobbyScreen({
   view,
   you,
   onReady,
-  onDelete,
 }: {
   view: RoomView;
   you: PlayerId | null;
   onReady: (ready: boolean) => void;
-  onDelete: () => void;
 }) {
   const readyIds = new Set(view.lobbyReady ?? []);
   const youAreReady = Boolean(you && readyIds.has(you));
@@ -76,13 +74,6 @@ export function LobbyScreen({
           Your phone answers the questions. The laptop never does.
         </p>
 
-        <button
-          type="button"
-          onClick={onDelete}
-          className="min-h-[44px] text-xs text-white/35 underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-accent"
-        >
-          Delete this room
-        </button>
       </motion.div>
     </main>
   );

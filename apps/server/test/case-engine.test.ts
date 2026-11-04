@@ -533,8 +533,14 @@ describe("the look chain", () => {
 
     // The actor picks, hidden. The room never learns who.
     const target = room.order.find((id) => id !== actor)!;
+    const watcher = [...sockets.values()].find((socket) => socket.playerId !== actor)!;
+    const watcherStatesBefore = watcher.payloads("state").length;
+    const actorSocket = [...sockets.values()].find((socket) => socket.playerId === actor)!;
+    const actorStatesBefore = actorSocket.payloads("state").length;
     const pick = manager.submit(room.code, actor, { kind: "pick", target });
     assert.equal(pick.ok, true, pick.error);
+    assert.equal(actorSocket.payloads("state").length, actorStatesBefore + 1, "the actor gets their answered snapshot");
+    assert.equal(watcher.payloads("state").length, watcherStatesBefore, "a watcher is not spammed with a full snapshot per answer");
     const targetAlias = room.players.get(target)!.alias;
     for (const socket of sockets.values()) {
       const round = JSON.stringify(socket.last<RoomView>("state")?.round);

@@ -55,7 +55,6 @@ export interface Transport {
   /** host laptop only */
   start(): void;
   forceResults(): void;
-  addBot(): void;
   skipRound(): void;
   /** anyone */
   deleteRoom(): void;

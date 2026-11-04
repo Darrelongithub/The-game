@@ -295,6 +295,39 @@ describe("the wire", () => {
     }
   });
 
+  it("does not let a guest's phone delete the room", async () => {
+    const { server, room, connect, close } = await bootServer();
+    try {
+      const phone = connect();
+      await waitUntil(() => phone.socket.connected);
+      const joined = await ask<{ ok: boolean }>(phone.socket, "join", {
+        roomCode: room.code, alias: "Wanjiru", profile: adultProfile, consent: { age: true },
+      });
+      assert.equal(joined.ok, true);
+      phone.socket.emit("delete_room");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(server.rooms.nightRoom?.code, room.code, "the room survives a guest delete");
+      assert.equal(phone.last("deleted"), undefined, "no deleted event reaches the guest");
+    } finally {
+      await close();
+    }
+  });
+
+  it("lets the host delete the room", async () => {
+    const { server, room, connect, close } = await bootServer();
+    try {
+      const host = connect();
+      await waitUntil(() => host.socket.connected);
+      const bound = await ask<{ ok: boolean }>(host.socket, "host_join", { token: room.hostToken });
+      assert.equal(bound.ok, true);
+      host.socket.emit("delete_room");
+      await waitUntil(() => host.all("deleted").length > 0);
+      assert.equal(server.rooms.nightRoom, undefined, "the host can end the night");
+    } finally {
+      await close();
+    }
+  });
+
   it("refuses a join with a bad code and an underage player", async () => {
     const { room, connect, close } = await bootServer();
     try {

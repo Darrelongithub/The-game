@@ -62,7 +62,6 @@ export function RoomApp() {
               view={view!}
               you={room.you}
               onReady={() => room.setLobbyReady(!room.youAreLobbyReady)}
-              onDelete={room.deleteRoom}
             />
           </motion.div>
         ) : view!.phase === "closed" ? (
