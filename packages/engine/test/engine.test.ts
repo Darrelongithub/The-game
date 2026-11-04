@@ -242,29 +242,42 @@ describe("computeResults", () => {
     );
   });
 
-  it("shows the room's gay guess as a guess, naming the pick", () => {
+  it("shows the room's actual answer, with the count", () => {
     const log = [
       pick("p1", "p2", "gay-hypothetical"),
       pick("p3", "p2", "gay-hypothetical"),
       pick("p4", "p2", "gay-hypothetical"),
+      pick("p5", "p1", "gay-hypothetical"),
     ];
     const results = computeResults(log, meta);
     const guess = results.verdicts.find((v) => v.kind === "gayguess");
-    assert.ok(guess, "the room's guess should reach the reveal");
+    assert.ok(guess, "the room's answer should reach the reveal");
     assert.deepEqual(guess!.subjects, ["p2"]);
-    assert.match(
+    assert.equal(
       guess!.text,
-      /^The room's guess: Player 2 — 75% of the others picked them\. The rest are lying — they'd still let Player 2 ruin them\.$/,
+      "The room's answer: Player 2 — 3 of 4 people named them (75%).",
     );
+    assert.doesNotMatch(guess!.text, /lying|ruin|fuck|hit it/i, "no editorial, only the count");
     assert.doesNotMatch(guess!.text, /\bis gay\b/i);
   });
 
-  it("gets harder when the room fully agrees", () => {
-    const log = ids.map((id) => pick(id, "p2", "gay-hypothetical"));
+  it("shows the count when everyone named the same person", () => {
+    const log = ids.filter((id) => id !== "p2").map((id) => pick(id, "p2", "gay-hypothetical"));
     const results = computeResults(log, meta);
     const guess = results.verdicts.find((v) => v.kind === "gayguess");
     assert.ok(guess);
-    assert.match(guess!.text, /100% of the others picked them\. Nobody hesitated\. They'd all let Player 2 fuck them senseless\.$/);
+    assert.equal(guess!.text, "The room's answer: Player 2 — 4 of 4 people named them (100%).");
+  });
+
+  it("does not pick a winner when the room is split", () => {
+    const log = [
+      pick("p1", "p2", "gay-hypothetical"),
+      pick("p3", "p2", "gay-hypothetical"),
+      pick("p4", "p3", "gay-hypothetical"),
+      pick("p5", "p3", "gay-hypothetical"),
+    ];
+    const results = computeResults(log, meta);
+    assert.equal(results.verdicts.find((v) => v.kind === "gayguess"), undefined);
   });
 
   it("does not make a free agent out of a gay-guess pick", () => {

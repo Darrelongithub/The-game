@@ -243,7 +243,7 @@ export type VerdictKind =
   | "sex"          // "C and E should just have sex."
   | "percent"      // "30% of people here want to have sex with X."
   | "gaycouple"    // "If X and Y were gay they'd be a good couple."
-  | "gayguess"     // "The room's guess: X — 60% of the others picked them."
+  | "gayguess"     // "The room's answer: X — 4 of 6 people named them (67%)."
   | "bodycount"    // "The room thinks X has the highest body count."
   | "bestinbed"    // "The room thinks X is the best in bed here."
   | "besties"      // "X and Y are inseparable."

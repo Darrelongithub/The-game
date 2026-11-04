@@ -416,38 +416,44 @@ export function computeResults(
         }
     }
 
-    // ---------------- GAY GUESS: the room's pick, framed as a guess only ----
+    // ---------------- GAY PICK: the room's actual answer, never our guess ---
     // Source: "If there were someone gay in this room, who would it be?"
-    // The owner asked for the pick to be shown, but it stays a GUESS: the
-    // text never says anyone is gay, only who the room picked and how many.
+    // The slide shows only what the room answered: who was named and how many
+    // people named them. No invented desire, no editorial, no tie-break guess.
     {
         const tally = pickTally(log, "gay-hypothetical");
+        const voters = new Set<PlayerId>();
+        for (const pickers of tally.values()) {
+            for (const id of pickers) voters.add(id);
+        }
         let best: { target: PlayerId; pickers: Set<PlayerId> } | undefined;
+        let tied = false;
         for (const [target, rawPickers] of tally) {
             const pickers = new Set([...rawPickers].filter((id) => id !== target));
             if (pickers.size < ENGINE_TUNING.percentMinVoters) continue;
-            if (!best || pickers.size > best.pickers.size) best = { target, pickers };
+            if (!best || pickers.size > best.pickers.size) {
+                best = { target, pickers };
+                tied = false;
+            } else if (pickers.size === best.pickers.size) {
+                tied = true;
+            }
         }
-        if (best) {
-            const others = Math.max(1, playerCount - 1);
-            const share = best.pickers.size / others;
+        if (best && !tied && voters.size > 0) {
+            const share = best.pickers.size / voters.size;
             if (share >= ENGINE_TUNING.percentMinShare) {
                 const name = pseudoOf(meta, best.target);
                 const strength = clamp01(share);
-                const tone = toneFor(strength);
-                const text =
-                    tone === "filthy"
-                        ? `The room's guess: ${name} — ${pct(share)} of the others picked them. Nobody hesitated. They'd all let ${name} fuck them senseless.`
-                        : tone === "spicy"
-                          ? `The room's guess: ${name} — ${pct(share)} of the others picked them. The rest are lying — they'd still let ${name} ruin them.`
-                          : `The room's guess: ${name} — ${pct(share)} of the others picked them. The rest are lying — they'd still let ${name} hit it.`;
                 push({
                     id: vid("gayguess", best.target),
                     kind: "gayguess",
                     subjects: [best.target],
-                    tone,
-                    text,
-                    numbers: { voters: best.pickers.size, eligible: others, share: Number(share.toFixed(3)) },
+                    tone: toneFor(strength),
+                    text: `The room's answer: ${name} — ${best.pickers.size} of ${voters.size} people named them (${pct(share)}).`,
+                    numbers: {
+                        voters: best.pickers.size,
+                        answered: voters.size,
+                        share: Number(share.toFixed(3)),
+                    },
                     strength,
                 });
             }
