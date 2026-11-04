@@ -147,6 +147,35 @@ describe("the finale the room actually sees", () => {
     );
   });
 
+  it("drops an orientation claim from the analyst and keeps the engine copy", async () => {
+    const services = testServices({
+      analyse: async (payload) => ({
+        slides: ((payload.slides as { i: number }[] | undefined) ?? []).map((slide) => ({
+          i: slide.i,
+          title: "THE ROOM IS GAY",
+          body: "Player 1 is gay and definitely came out tonight.",
+        })),
+        secretCards: [],
+      }),
+    });
+    const provider = services.createPromptProvider({
+      roomId: "R4",
+      playerCount: ROSTER.players.length,
+      seed: 2,
+      aliases: ROSTER.players.map((p) => p.alias),
+    });
+    const results = services.computeResults(NIGHT_LOG, ROSTER);
+    const digest = services.buildNightDigest(NIGHT_LOG, ROSTER);
+    const skeleton = services.buildSkeleton(results, digest, ROSTER);
+    const out = await services.writeFinale(skeleton, new Map(), results, digest, ROSTER, provider);
+    assert.deepEqual(
+      out.slides.map((slide) => [slide.title, slide.body]),
+      skeleton.map((slide) => [slide.title, slide.body]),
+      "an orientation claim never replaces the engine's own copy",
+    );
+    assert.ok(!/\bis gay\b|\bcame out\b/i.test(JSON.stringify(out)), "no orientation claim reaches a screen");
+  });
+
   it("hands the share card the slides' own headline lines", async () => {
     const services = testServices();
     const results = services.computeResults(NIGHT_LOG, ROSTER);
