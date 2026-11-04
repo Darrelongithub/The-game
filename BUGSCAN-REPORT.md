@@ -27,7 +27,7 @@ override the contracts.
 | Foundation selfcheck | 87 / 87 PASS |
 | `npm audit` (prod and dev) | 0 vulnerabilities |
 | Bundle | player 145.4 KiB gzip / 150 cap; laptop 167.6 KiB gzip — both under the 250 KiB no-chase line |
-| Build | Next 15.5.28 static export, `/` 148 kB first-load, `/host` 171 kB |
+| Build | Next 15.5.28 static export, `/` 149 kB first-load, `/host` 171 kB |
 
 ---
 
@@ -85,7 +85,7 @@ override the contracts.
 
 ## 5. STEP 3 — simulated nights (final code)
 
-All three ran against `npm run start` (the server side of `npm run host`) with a closed `GEN_BASE` (Ollama off), no API keys, real Socket.IO clients from `scripts/bots.ts`, and the acceptance checks in that script.
+All three ran against the live server with a closed `GEN_BASE` (Ollama off), no API keys, real Socket.IO clients from `scripts/bots.ts`, and the acceptance checks in that script.
 
 | Players | Duration | Round events / phone | Result | Terminal |
 |---|---|---|---|---|
@@ -94,6 +94,8 @@ All three ran against `npm run start` (the server side of `npm run host`) with a
 | 11 | 40.5 s | 39 | `SMOKE PASSED ✅` — all 55 pairs met | same; no errors |
 
 “Round events” counts every stage of a look chain and every case, not just the 12 cases.
+
+`npm run host` itself was also run end to end: it built the web export (Next compiled in 4.8 s) and then booted the server, printing the PLAYER link + QR, the HOST link and the room code.
 
 **Slow-model run:** fake Ollama at `GEN_BASE` with a 60 000 ms delay and `GEN_TIMEOUT_MS=65000`. Observed: `0.0s generating 0/40`, `60.1s generating 1/40`, `180.1s play`, first question at `180.1s`. The 180 s safety cap ended generation and the bank carried the night. The probe stopped after the first question, so this was **not** a full slow-model night.
 
