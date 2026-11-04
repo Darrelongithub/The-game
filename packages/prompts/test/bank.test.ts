@@ -73,11 +73,20 @@ describe("the bank", () => {
     }
   });
 
-  it("never asks the room to name a gay person or to narrate coming out", () => {
+  it("carries the brief's hypothetical gay prompts, always as a hypothetical", () => {
+    const texts = BANK.map((p) => p.text.toLowerCase());
+    assert.ok(
+      texts.some((text) => text.includes("if there were someone gay in this room, who would it be?")),
+      "the brief's single-pick hypothetical is missing",
+    );
+    assert.ok(
+      texts.some((text) => /if \{p1\} and \{p2\} were gay, would they make a good couple\?/i.test(text)),
+      "the brief's pair hypothetical is missing",
+    );
     for (const p of BANK) {
-      assert.doesNotMatch(p.text, /\bwho(?:'s| is| was)\s+gay\b/i, `prompt ${p.id} asks who is gay`);
-      assert.doesNotMatch(p.text, /\bsomeone gay\b/i, `prompt ${p.id} asks the room to find a gay person`);
-      assert.doesNotMatch(p.text, /\bcame out\b|\bcloset\b|\bout as\b/i, `prompt ${p.id} narrates coming out`);
+      if (!/gay/i.test(p.text)) continue;
+      assert.match(p.text, /^(if|hypothetically speaking, if)\b/i, `prompt ${p.id} must stay hypothetical`);
+      assert.doesNotMatch(p.text, /\b(?:is|was|are|were)\s+gay\b(?!,)/i, `prompt ${p.id} must not claim anyone is gay`);
     }
   });
 

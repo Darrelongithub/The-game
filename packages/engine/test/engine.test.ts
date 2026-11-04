@@ -225,6 +225,32 @@ describe("computeResults", () => {
     assert.deepEqual(body!.subjects, ["p3"]);
   });
 
+  it("feeds a gay-hypothetical pair vote to the hypothetical verdict only", () => {
+    const log = [
+      vote("p2", "p1", "p3", 5, "gay-hypothetical"),
+      vote("p4", "p1", "p3", 5, "gay-hypothetical"),
+      vote("p5", "p1", "p3", 5, "gay-hypothetical"),
+    ];
+    const results = computeResults(log, meta);
+    const gay = results.verdicts.filter((v) => v.kind === "gaycouple");
+    assert.equal(gay.length, 1, "the hypothetical gets its own verdict");
+    assert.match(gay[0]!.text, /If .+ and .+ were gay they'd be a good couple/);
+    assert.equal(
+      results.verdicts.some((v) => v.kind === "couple" || v.kind === "sex"),
+      false,
+      "the same pair must not reappear as an ordinary couple/sex verdict",
+    );
+  });
+
+  it("never names the target of a gay-guess pick", () => {
+    const log = ids.map((id) => pick(id, "p2", "gay-hypothetical"));
+    const results = computeResults(log, meta);
+    for (const verdict of results.verdicts) {
+      assert.ok(!verdict.text.includes("Player 2"), `a gay-guess pick leaked into: ${verdict.text}`);
+      assert.ok(!verdict.subjects.includes("p2"), `a gay-guess pick target is a subject: ${verdict.id}`);
+    }
+  });
+
   it("never prints a gay claim, whatever the log says", () => {
     const log = [
       ...ids.map((id) => pick(id, "p1", "gay-hypothetical")),

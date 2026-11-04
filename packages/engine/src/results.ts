@@ -161,7 +161,14 @@ interface PairTally {
 function tallyPairVotes(log: readonly LogRecord[], metric?: MetricKey): Map<string, PairTally> {
     const out = new Map<string, PairTally>();
     for (const v of pairVotes(log)) {
-        if (metric && v.metric !== metric) continue;
+        if (metric) {
+            if (v.metric !== metric) continue;
+        } else if (v.metric === "gay-hypothetical") {
+            // A gay-hypothetical vote may only feed the `gaycouple` verdict,
+            // which keeps the "if ... were gay" framing. Reusing it for an
+            // ordinary couple/never verdict would name the pair without it.
+            continue;
+        }
         const key = pairKey(v.pair[0], v.pair[1]);
         let t = out.get(key);
         if (!t) {
