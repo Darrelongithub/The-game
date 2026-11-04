@@ -14,6 +14,7 @@ import { describe, it } from "node:test";
 import { io as ioClient, type Socket } from "socket.io-client";
 import { bootBanner, createGameServer } from "../src/server.ts";
 import type {
+  FinaleView,
   RoundView,
   RoomView,
   SecretDeckView,
@@ -280,6 +281,15 @@ describe("the wire", () => {
       for (const phone of phones) {
         assert.equal(phone.all<SecretDeckView>("secrets").length, 0, "no card, no deck");
       }
+
+      // The host link still opens the results after the night: a fresh laptop
+      // socket binds with the same token and is replayed the reveal.
+      const lateHost = connect();
+      await waitUntil(() => lateHost.socket.connected);
+      const lateReply = await ask<{ ok: boolean }>(lateHost.socket, "host_join", { token: room.hostToken });
+      assert.equal(lateReply.ok, true, "the late host link binds");
+      await waitUntil(() => lateHost.all<FinaleView>("finale").length > 0);
+      assert.ok(lateHost.last<FinaleView>("finale")!.slides.length > 0, "the late host sees the reveal");
     } finally {
       await close();
     }

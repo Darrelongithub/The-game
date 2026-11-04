@@ -161,6 +161,15 @@ export function createGameServer(options: ServerOptions = {}): GameServer {
     };
   };
 
+  /** A late host or reloaded phone still gets the night's reveal. */
+  const replayReveal = (socket: SocketLike, code: string, playerId?: string): void => {
+    const finale = rooms.finaleOf(code);
+    if (finale) socket.emit("finale", finale);
+    if (!playerId) return;
+    const cards = rooms.secretsFor(code, playerId);
+    if (cards && cards.length > 0) socket.emit("secrets", { cards: cards.slice(0, 6) });
+  };
+
   io.on("connection", (socket) => {
     const data = socket.data;
 
@@ -179,6 +188,7 @@ export function createGameServer(options: ServerOptions = {}): GameServer {
           socket.join(room.code);
           rooms.attachSocket(room.code, asSocketLike(socket));
           reply({ ok: true, you: player.id, secret: player.secret, state: undefined });
+          replayReveal(asSocketLike(socket), room.code, player.id);
           rooms.broadcastState(room);
           return;
         }
@@ -194,6 +204,7 @@ export function createGameServer(options: ServerOptions = {}): GameServer {
           socket.join(room.code);
           rooms.attachSocket(room.code, asSocketLike(socket));
           reply({ ok: true, you: existing.id, secret: existing.secret, state: undefined });
+          replayReveal(asSocketLike(socket), room.code, existing.id);
           rooms.broadcastState(room);
           return;
         }
@@ -208,6 +219,7 @@ export function createGameServer(options: ServerOptions = {}): GameServer {
       socket.join(joined.code);
       rooms.attachSocket(joined.code, asSocketLike(socket));
       reply({ ok: true, you: player.id, secret: player.secret, state: undefined });
+      replayReveal(asSocketLike(socket), joined.code, player.id);
       rooms.broadcastState(joined);
     });
 
@@ -220,6 +232,8 @@ export function createGameServer(options: ServerOptions = {}): GameServer {
       socket.join(room.code);
       rooms.attachSocket(room.code, asSocketLike(socket));
       reply({ ok: true, state: undefined });
+      // Open the host link after the night: show the results, not a dead screen.
+      replayReveal(asSocketLike(socket), room.code);
       rooms.broadcastState(room);
     });
 

@@ -23,6 +23,7 @@ import {
   ROUND_TIMERS_MS,
   type ClientToServerEvents,
   type FinaleSlide,
+  type FinaleView,
   type LogRecord,
   type NightDigest,
   type PlayerId,
@@ -693,6 +694,11 @@ export class RoomManager {
     const publicSlides = applyAliasesToSlides(slides, roster);
     const aliasedDecks = applyAliasesToDecks(finalDecks, roster);
 
+    // Keep the last reveal so a host laptop or phone that reloads after the
+    // night still gets the results instead of an empty results screen.
+    room.finale = { slides: publicSlides, summary };
+    room.finalDecks = aliasedDecks;
+
     this.broadcastFinale(room, { slides: publicSlides, summary });
 
     // The secret decks go to ONE socket each.
@@ -776,6 +782,16 @@ export class RoomManager {
     for (const socket of this.socketsFor(room)) {
       if (socket.playerId === playerId) socket.emit(event, payload);
     }
+  }
+
+  /** The room's last reveal, for a host that opens the link late. */
+  finaleOf(code: RoomCode): FinaleView | undefined {
+    return this.rooms.get(code)?.finale;
+  }
+
+  /** This player's private deck from the reveal, for a phone that reloads. */
+  secretsFor(code: RoomCode, playerId: PlayerId): SecretCard[] | undefined {
+    return this.rooms.get(code)?.finalDecks?.get(playerId);
   }
 
   /** Every socket currently in the room. */

@@ -31,6 +31,8 @@ import {
   ROUND_TIMERS_MS,
   SHIP_VOTE_CASES,
   type Band,
+  type FinaleSlide,
+  type FinaleView,
   type LogRecord,
   type PlayerId,
   type ProfileAnswers,
@@ -41,6 +43,7 @@ import {
   type RoomView,
   type RoundKind,
   type RoundView,
+  type SecretCard,
   type TraitId,
 } from "../../../packages/shared/src/contracts.ts";
 import { validSubmit } from "../../../packages/shared/src/validate.ts";
@@ -159,6 +162,10 @@ export interface Room {
   finalReady: Set<PlayerId>;
   /** The reveal has been shown. */
   revealed: boolean;
+  /** The last public reveal, replayed to a host or phone that connects late. */
+  finale?: FinaleView;
+  /** Private decks from the reveal, keyed by player, replayed to that phone. */
+  finalDecks?: Map<PlayerId, SecretCard[]>;
   /** Total cases tonight. */
   totalCases: number;
   /** Generation progress for the loading screen. */
