@@ -64,6 +64,23 @@ export function selectLanAddress(interfaces = networkInterfaces()): string | und
 }
 
 /**
+ * The URLs a phone can actually open, for the laptop's QR code. A host page
+ * opened on localhost must not encode localhost: the phone is another device.
+ */
+export function joinUrlsFor(
+  requestHost: string | undefined,
+  interfaces = networkInterfaces(),
+  protocol = "http",
+): string[] {
+  const host = (Array.isArray(requestHost) ? requestHost[0] : requestHost ?? "").split(",")[0]!.trim();
+  const port = host.includes(":") ? host.slice(host.lastIndexOf(":") + 1) : "";
+  const suffix = port && /^\d+$/.test(port) ? `:${port}` : "";
+  const best = selectLanAddress(interfaces);
+  const ordered = [...new Set([...(best ? [best] : []), ...lanAddresses(interfaces)])];
+  return ordered.map((ip) => `${protocol}://${ip}${suffix}`);
+}
+
+/**
  * The boot banner.
  *
  * `npm run host` prints TWO links:
@@ -117,6 +134,12 @@ export function createGameServer(options: ServerOptions = {}): GameServer {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.static(webDir, { extensions: ["html"], index: "index.html" }));
+  // The host page asks for these when it was opened on localhost, so its QR
+  // points at an address a phone on the same Wi-Fi can actually reach.
+  app.get("/api/network", (req, res) => {
+    const protocol = req.protocol === "https" ? "https" : "http";
+    res.json({ urls: joinUrlsFor(req.headers.host, undefined, protocol) });
+  });
   app.get("*", (req, res) => {
     if (/\.[a-z\d]+$/i.test(req.path)) { res.status(404).type("text/plain").send("Not found."); return; }
     const index = resolve(webDir, "index.html");

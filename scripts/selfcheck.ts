@@ -204,7 +204,7 @@ ok("the engine rejects an orientation claim", orientationLeakCaught);
 
 // ------------------------------------------------------------- look chains
 ok("the look chain has its own metrics", METRIC.lookchain === "lookchain" && METRIC.lookchainGuess === "lookchain-guess");
-ok("eight chain flavours", LOOK_CHAIN_VARIANTS.length === 8);
+ok("twelve chain flavours", LOOK_CHAIN_VARIANTS.length === 12);
 ok("every chain flavour is a full act → guess → why", LOOK_CHAIN_VARIANTS.every((v) => v.announce && v.act && v.guess && v.why));
 ok("the chain copy never repeats", new Set(LOOK_CHAIN_VARIANTS.map((v) => v.act)).size === LOOK_CHAIN_VARIANTS.length);
 ok("every chain line is its own", new Set(LOOK_CHAIN_VARIANTS.flatMap((v) => [v.act, v.why])).size === LOOK_CHAIN_VARIANTS.length * 2);

@@ -40,26 +40,6 @@
     "asksTarget": true
   },
   {
-    "id": "dr-05",
-    "band": "dare",
-    "role": "dare",
-    "kind": "dare",
-    "text": "{P1}, let the room pick your profile picture for the next hour.",
-    "measures": ["flavour:dare"],
-    "coding": "tease",
-    "asksTarget": true
-  },
-  {
-    "id": "dr-06",
-    "band": "dare",
-    "role": "dare",
-    "kind": "dare",
-    "text": "{P1}, compliment the person who annoys you most in this room. Genuinely.",
-    "measures": ["flavour:dare"],
-    "coding": "friendship",
-    "asksTarget": true
-  },
-  {
     "id": "dr-07",
     "band": "dare",
     "role": "dare",
@@ -75,16 +55,6 @@
     "role": "dare",
     "kind": "dare",
     "text": "{P1}, hand your phone to someone in this room and let them post one thing from it.",
-    "measures": ["flavour:dare"],
-    "coding": "tease",
-    "asksTarget": true
-  },
-  {
-    "id": "dr-09",
-    "band": "dare",
-    "role": "dare",
-    "kind": "dare",
-    "text": "{P1}, do your best impression of someone in this room.",
     "measures": ["flavour:dare"],
     "coding": "tease",
     "asksTarget": true
@@ -130,16 +100,6 @@
     "asksTarget": true
   },
   {
-    "id": "dr-14",
-    "band": "dare",
-    "role": "dare",
-    "kind": "dare",
-    "text": "{P1}, for the next ten minutes you have to speak in a fake accent of someone's choice.",
-    "measures": ["flavour:dare"],
-    "coding": "tease",
-    "asksTarget": true
-  },
-  {
     "id": "dr-15",
     "band": "dare",
     "role": "dare",
@@ -147,16 +107,6 @@
     "text": "{P1}, send a text to your most recent ex right now. Just one word. Let them stew.",
     "measures": ["flavour:dare"],
     "coding": "friction",
-    "asksTarget": true
-  },
-  {
-    "id": "dr-16",
-    "band": "dare",
-    "role": "dare",
-    "kind": "dare",
-    "text": "{P1}, tell the room the worst date you have ever been on. Leave nothing out.",
-    "measures": ["flavour:dare"],
-    "coding": "tease",
     "asksTarget": true
   },
   {
@@ -220,16 +170,6 @@
     "asksTarget": true
   },
   {
-    "id": "dr-23",
-    "band": "dare",
-    "role": "dare",
-    "kind": "dare",
-    "text": "{P1}, show everyone your music taste. Play one song. No skipping.",
-    "measures": ["flavour:dare"],
-    "coding": "tease",
-    "asksTarget": true
-  },
-  {
     "id": "dr-24",
     "band": "dare",
     "role": "dare",
@@ -277,6 +217,126 @@
     "text": "{P1}, let the room pick who you are doing for the rest of the night.",
     "measures": ["flavour:dare"],
     "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-29",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, name the last person you thought about while you were in bed. First name only.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-30",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, tell the room your body count. Exact number, no rounding.",
+    "measures": ["flavour:dare"],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-31",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, describe your type in three words, then point at whoever here fits it best.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-32",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, read the last sext you sent. Out loud. All of it.",
+    "measures": ["flavour:dare"],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-33",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, tell the room the wildest place you have ever hooked up.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-34",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, rank the people here by how likely you would be to hook up with them. Out loud.",
+    "measures": ["flavour:dare"],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-35",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, say who here you have thought about naked. Say the name.",
+    "measures": ["flavour:dare"],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-36",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, show the room your most recent dating app match.",
+    "measures": ["flavour:dare"],
+    "coding": "tease",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-37",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, tell the room your go-to move in bed. Demonstrate it on a pillow.",
+    "measures": ["flavour:dare"],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-38",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, admit the biggest lie you have told to get someone into bed.",
+    "measures": ["flavour:dare"],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-39",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, say what you would do to the person to your right if you had ten minutes and no consequences.",
+    "measures": ["flavour:dare"],
+    "coding": "friction",
+    "asksTarget": true
+  },
+  {
+    "id": "dr-40",
+    "band": "dare",
+    "role": "dare",
+    "kind": "dare",
+    "text": "{P1}, let the room ask you one sex question. You have to answer honestly.",
+    "measures": ["flavour:dare"],
+    "coding": "friction",
     "asksTarget": true
   }
 ]

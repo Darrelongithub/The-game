@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { networkInterfaces } from "node:os";
 import { test } from "node:test";
-import { bootBanner, lanAddresses, selectLanAddress } from "../src/server.ts";
+import { bootBanner, joinUrlsFor, lanAddresses, selectLanAddress } from "../src/server.ts";
 
 const entry = (address: string, internal = false): NonNullable<ReturnType<typeof networkInterfaces>[string]>[number] => ({
   address, internal, family: "IPv4", cidr: `${address}/24`, netmask: "255.255.255.0", mac: "02:00:00:00:00:01",
@@ -58,4 +58,17 @@ test("R23: a loopback-only laptop still gets one usable PLAYER and HOST link", (
   assert.ok(text.includes("http://localhost:3001/host?token=tok"), text);
   assert.ok(!text.includes("3001:3001"), "the fallback URL must not repeat the port");
   assert.ok(text.includes("HOST is loopback-only"), "the laptop is told phones cannot reach it");
+});
+
+test("R23: the host page's LAN fallback keeps the port and never returns localhost", () => {
+  const interfaces: ReturnType<typeof networkInterfaces> = {
+    wifi: [entry("192.168.1.5")], hotspot: [entry("10.0.0.7")],
+  };
+  assert.deepEqual(joinUrlsFor("localhost:3111", interfaces), [
+    "http://192.168.1.5:3111", "http://10.0.0.7:3111",
+  ]);
+  assert.deepEqual(joinUrlsFor("127.0.0.1:8080", interfaces, "https"), [
+    "https://192.168.1.5:8080", "https://10.0.0.7:8080",
+  ]);
+  assert.deepEqual(joinUrlsFor("localhost", interfaces), ["http://192.168.1.5", "http://10.0.0.7"]);
 });

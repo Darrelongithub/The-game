@@ -3,8 +3,9 @@
 // Ship rules baked in here:
 //  • same-origin by default — the exported site is served BY the game server,
 //    so there is no CORS and never a localhost call from the browser;
-//  • polling-first (`["polling","websocket"]`) — flaky mobile data loves
-//    polling handshakes, then upgrades;
+//  • websocket-first (`["websocket","polling"]`) — a live socket is the lowest
+//    latency path on Wi-Fi; a network that blocks it still falls back to
+//    polling, so flaky mobile data keeps working;
 //  • auto-reconnect with capped backoff;
 //  • re-join with the stored session secret on `visibilitychange` and on every
 //    socket reconnect → full snapshot, no diff replay;
@@ -104,7 +105,7 @@ export class SocketTransport implements Transport {
   private connect(): void {
     if (this.socket) return;
     const socket: GameSocket = io(this.url(), {
-      transports: ["polling", "websocket"],
+      transports: ["websocket", "polling"],
       autoConnect: true,
       reconnection: true,
       reconnectionAttempts: Infinity,

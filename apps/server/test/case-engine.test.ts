@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { RoomManager } from "../src/room.ts";
 import {
+  buildCase,
   buildShipVoteCase,
   intoThisPerson,
   metricOf,
@@ -30,6 +31,7 @@ import {
   type Segment,
 } from "../src/game.ts";
 import type {
+  FinaleView,
   PlayerId,
   ProfileAnswers,
   Prompt,
@@ -184,6 +186,13 @@ describe("sign-up", () => {
     const result = manager.join(room.code, "x", adultProfile, true);
     assert.equal(result.ok, false);
   });
+
+  it("rejects a name already in the room, however it is cased", () => {
+    const { manager, room } = makeNight(["Wanjiru"]);
+    const result = manager.join(room.code, "  WANJIRU ", adultProfile, true);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /already in the room/i);
+  });
 });
 
 describe("a case", () => {
@@ -201,6 +210,32 @@ describe("a case", () => {
     const texts = pairSegments.map((s) => s.text);
     assert.equal(new Set(texts).size, texts.length, "two pairs got the same question");
     assert.ok(!texts.includes(subjectSegment.text), "the subject's question is a decoy");
+  });
+
+  it("puts the subject's name in a generated subject line, never an observer's", () => {
+    const { manager, room } = makeNight(["Wanjiru", "Dee", "Kofi", "Zuri"]);
+    const subject = room.order[0]!;
+    const prompt: Prompt = {
+      id: "generated-subject",
+      source: "ollama",
+      band: "spicy",
+      role: "subject",
+      kind: "pick",
+      text: "Who would {P1} kiss if nobody found out?",
+      measures: [],
+      coding: "couple",
+      asksTarget: true,
+    };
+    const built = buildCase({
+      room,
+      index: 0,
+      now: Date.now(),
+      aliasOf: (id) => manager.aliasOf(room, id),
+      draw: (role) => (role === "subject" ? [prompt] : []),
+    });
+    const own = built.segments.find((segment) => segment.players.includes(subject))!;
+    assert.match(own.text, new RegExp(manager.aliasOf(room, subject)));
+    assert.ok(!own.text.includes(manager.aliasOf(room, room.order[1]!)), "the observer's name is not on the subject's phone");
   });
 
   it("gives the odd player a solo spicy prompt", async () => {
@@ -259,6 +294,37 @@ describe("a case", () => {
     }
     const ids = room.cases.flatMap((c) => c.segments.map((s) => s.prompt.id));
     assert.equal(new Set(ids).size, ids.length, "a template repeated inside the night");
+  });
+});
+
+describe("dares", () => {
+  it("gives the dare to one or two people and asks everyone else to judge it", async () => {
+    const { manager, room } = makeNight(["Wanjiru", "Dee", "Kofi", "Zuri", "Tayo"]);
+    await manager.start(room.code);
+    const dareCase = room.cases.find((c) => c.segments.some((s) => s.kind === "dare"));
+    assert.ok(dareCase, "the night includes a dare");
+    const targets = dareCase!.segments.filter((s) => s.kind === "dare");
+    assert.equal(targets.length, 2, "two people get the dare");
+    const watchers = dareCase!.segments.filter((s) => s.kind !== "dare");
+    assert.equal(watchers.length, 1, "the rest of the room gets one watcher question");
+    assert.equal(watchers[0]!.players.length, room.order.length - 2);
+    assert.match(watchers[0]!.text, /just given a dare/i);
+    for (const target of targets) {
+      assert.ok(target.target, "a dare has a named target");
+      assert.match(target.text, new RegExp(manager.aliasOf(room, target.target!)), "the dare names its target");
+      assert.equal(target.players.length, 1, "only the target answers the dare");
+    }
+    const names = targets.map((s) => manager.aliasOf(room, s.target!)).join(" and ");
+    assert.ok(watchers[0]!.text.includes(names), "the watcher question names both targets");
+    assert.equal(dareCase!.required.size, room.order.length, "the case waits for watchers too");
+    assert.ok(!watchers[0]!.text.includes("{P"), "the watcher question is fully substituted");
+  });
+
+  it("uses the room's real denominator for the night", async () => {
+    const { manager, room } = makeNight();
+    await manager.start(room.code);
+    assert.equal(room.totalCases, room.cases.length);
+    assert.ok(room.totalCases > 0);
   });
 });
 
@@ -398,6 +464,10 @@ describe("the end of the night", () => {
     for (const socket of sockets.values()) {
       assert.ok(socket.payloads("finale").length > 0, "every phone sees the reveal");
     }
+    const finale = sockets.get("Wanjiru")!.last<FinaleView>("finale")!;
+    const share = JSON.stringify(finale.summary);
+    assert.ok(!/Player \d/.test(share), "the share card uses the room's names, not Player N");
+    assert.ok(!/Player \d/.test(JSON.stringify(finale.slides)), "the slides use the room's names");
   });
 
   it("gives a mutual crush card to exactly the two phones that earned it", async () => {

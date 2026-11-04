@@ -63,7 +63,7 @@ import {
 import { LOOK_CHAIN_VARIANTS } from "./lookchain.ts";
 import type { GameServices, PromptProvider } from "./services.ts";
 import { integratedServices } from "./integratedServices.ts";
-import { applyAliasesToDecks, applyAliasesToSlides } from "../../../packages/narrator/src/index.ts";
+import { applyAliasesToDecks, applyAliasesToSlides, swapPseudonyms } from "../../../packages/narrator/src/index.ts";
 
 type SocketData = { roomCode?: string; playerId?: string; isHost?: boolean };
 
@@ -216,13 +216,18 @@ export class RoomManager {
     if (room.deleted) return { ok: false, error: "That room has been deleted." };
     if (room.phase !== "lobby") return { ok: false, error: "This game has already started." };
     if (!isAlias(alias)) return { ok: false, error: "Pick a name between 2 and 14 characters." };
+    const trimmed = alias.trim();
+    const nameKey = (value: string): string => value.trim().normalize("NFC").toLowerCase();
+    if ([...room.players.values()].some((p) => nameKey(p.alias) === nameKey(trimmed))) {
+      return { ok: false, error: "That name is already in the room. Pick another." };
+    }
     if (!isProfileAnswers(profile)) return { ok: false, error: "Please answer every question." };
     if (room.players.size >= MAX_PLAYERS) return { ok: false, error: "This room is full." };
 
     const id = `p${room.players.size + 1}-${Math.floor(this.rand() * 1e6).toString(36)}`;
     const player: Player = {
       id,
-      alias: alias.trim(),
+      alias: trimmed,
       secret: makeToken(this.rand),
       connected: true,
       isBot: false,
@@ -335,8 +340,10 @@ export class RoomManager {
       : { done: prompts.length, total: GEN_TARGET_PROMPTS };
     this.broadcastState(room);
 
-    // Build the night's cases.
+    // Build the night's cases. `totalCases` is the host's real denominator:
+    // ordinary cases, ship votes, the best-couple pick, dares and chains.
     room.cases = this.planCases(room);
+    room.totalCases = room.cases.length;
     room.caseIndex = 0;
     room.phase = "play";
     this.broadcastState(room);
@@ -351,9 +358,12 @@ export class RoomManager {
     const cases: Case[] = [];
     const now = this.now();
     let chainIndex = 0;
+    let shipIndex = 0;
     // Players who have already acted in a chain — a second turn only after
     // everybody has had one.
     const chainActors = new Set<PlayerId>();
+    // Players who already had a dare — the other seats get the next one.
+    const dareTargets = new Set<PlayerId>();
     const shipCount = shipVotesFor(room.order.length);
     const dareCount = daresFor(room.order.length);
     const caseCount = room.totalCases;
@@ -400,14 +410,22 @@ export class RoomManager {
           now,
           rand: this.rand,
           draw: (role, count, opts) => this.drawPrompts(room, role, count, opts),
+          preferHypothetical: shipIndex === 0,
         });
+        shipIndex += 1;
       } else if (shape === "bestcouple") {
         built = buildBestCoupleCase({ room, index, aliasOf: (id) => this.aliasOf(room, id), now, rand: this.rand });
       } else if (shape === "dare") {
         // One dare per case — a dare template never repeats inside a night.
         const prompt = this.drawPrompts(room, "dare", 1)[0];
         if (prompt) {
-          built = buildDareCase({ room, index, aliasOf: (id) => this.aliasOf(room, id), now, rand: this.rand, prompt });
+          built = buildDareCase({
+            room, index, aliasOf: (id) => this.aliasOf(room, id), now, rand: this.rand, prompt,
+            avoid: dareTargets,
+          });
+          for (const segment of built?.segments ?? []) {
+            if (segment.target) dareTargets.add(segment.target);
+          }
         }
       } else if (shape === "lookchain") {
         // A fresh chain flavour every time — the copy never repeats tonight.
@@ -672,23 +690,26 @@ export class RoomManager {
       );
       slides = written.slides;
       finalDecks = written.decks;
-      // The headline lines are pseudonymised on purpose: the share card leaves
-      // this room, the slides do not.
       summary = written.summary ?? {};
     } catch {
       slides = skeleton;
     }
 
-    // Pseudonym → alias swap happens server-side, on the way out.
+    // Pseudonym → alias swap happens server-side, on the way out. The share
+    // card's summary lines get the same swap as the slides: a room that just
+    // played together should see the names it used all night.
     const publicSlides = applyAliasesToSlides(slides, roster);
     const aliasedDecks = applyAliasesToDecks(finalDecks, roster);
+    const publicSummary = Object.fromEntries(
+      Object.entries(summary).map(([key, line]) => [key, typeof line === "string" ? swapPseudonyms(line, roster) : line]),
+    ) as typeof summary;
 
     // Keep the last reveal so a host laptop or phone that reloads after the
     // night still gets the results instead of an empty results screen.
-    room.finale = { slides: publicSlides, summary };
+    room.finale = { slides: publicSlides, summary: publicSummary };
     room.finalDecks = aliasedDecks;
 
-    this.broadcastFinale(room, { slides: publicSlides, summary });
+    this.broadcastFinale(room, { slides: publicSlides, summary: publicSummary });
 
     // The secret decks go to ONE socket each.
     for (const [playerId, cards] of aliasedDecks) {

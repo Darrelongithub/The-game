@@ -6,12 +6,19 @@
 //   results    → the ONE ready gate
 //   finale     → the reveal, then this phone's secret deck
 import { motion } from "framer-motion";
+import dynamic from "next/dynamic";
 import type { UseRoom } from "@/lib/useRoom";
 import { QuestionScreen } from "./QuestionScreen";
-import { FinaleScreen } from "@/components/FinaleScreen";
 import { ReadyGate } from "@/components/ReadyGate";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { Flame } from "@/components/Flame";
+
+// The reveal is a large story player. Keep it out of the first download so a
+// phone joins and answers faster; the chunk streams in when the finale lands.
+const FinaleScreen = dynamic(
+  () => import("@/components/FinaleScreen").then((m) => m.FinaleScreen),
+  { loading: () => <main className="screen flex items-center justify-center" aria-busy="true">Loading the reveal…</main> },
+);
 
 export function PlayScreen({ room }: { room: UseRoom }) {
   const { view, you, round, beat, finale, secrets } = room;

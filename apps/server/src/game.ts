@@ -518,8 +518,9 @@ export function buildCase(input: BuildCaseInput): Case {
   const segments: Segment[] = [];
   const required = new Set<PlayerId>();
 
-  // Aliases of everyone except the subject. Used to fill any placeholder a
-  // subject/solo prompt might carry, so a phone never shows a raw "{P1}".
+  // Observer aliases in rotation order. The subject is prepended when a
+  // subject prompt needs a binding, so a generated line that names the subject
+  // still points at the subject rather than at the first observer.
   const otherAliases = observers.map((id) => aliasOf(id));
 
   /**
@@ -549,7 +550,10 @@ export function buildCase(input: BuildCaseInput): Case {
       players: [subjectId],
       prompt: subjectPrompt,
       kind: subjectPrompt.kind,
-      text: substitute(subjectPrompt.text, bindingFor(otherAliases)),
+      // {P1} is the subject on their own question. The bank's subject rows use
+      // "you", but a model rewrite can put a name in the line; binding it to
+      // the subject keeps the phone from naming the wrong person.
+      text: substitute(subjectPrompt.text, bindingFor([aliasOf(subjectId), ...otherAliases])),
       note: "Your answer stays between you and the results.",
       subjectId,
       trait: traitOf(subjectPrompt),
@@ -656,8 +660,10 @@ export function buildShipVoteCase(input: {
   rand: () => number;
   /** The night's pool, so the room's OWN hypothetical can be asked. */
   draw?: DrawFn;
+  /** The first ship vote asks the room's own "were gay" hypothetical. */
+  preferHypothetical?: boolean;
 }): Case | undefined {
-  const { room, index, aliasOf, now, rand, draw } = input;
+  const { room, index, aliasOf, now, rand, draw, preferHypothetical } = input;
   const candidates = allPairs(room.order).filter(([a, b]) => !room.shipPairsUsed.has(pairKey(a, b)));
   if (candidates.length === 0) return undefined;
 
@@ -668,7 +674,10 @@ export function buildShipVoteCase(input: {
   // is printed on every phone, so steering it away from out players would leak
   // exactly what the question is not allowed to say. The hypothetical is asked
   // of whatever pair the room's own rotation picked.
-  const drawn = draw?.("group", 1, { kinds: ["pair_vote"], metric: METRIC.gayHypothetical })[0];
+  const drawn = (preferHypothetical
+    ? draw?.("group", 1, { kinds: ["pair_vote"], metric: METRIC.gayHypothetical })[0]
+    : undefined)
+    ?? draw?.("group", 1, { kinds: ["pair_vote"] })[0];
   const [a, b] = candidates[Math.floor(rand() * candidates.length)]!;
   room.shipPairsUsed.add(pairKey(a, b));
 
@@ -911,30 +920,85 @@ export function buildDareCase(input: {
   now: number;
   rand: () => number;
   prompt: Prompt;
+  /** Players who already had a dare tonight — give the others a turn first. */
+  avoid?: ReadonlySet<PlayerId>;
 }): Case | undefined {
-  const { room, index, aliasOf, now, rand, prompt } = input;
+  const { room, index, aliasOf, now, rand, prompt, avoid } = input;
   if (room.order.length === 0) return undefined;
-  const target = room.order[Math.floor(rand() * room.order.length)]!;
-  const segment: Segment = {
-    id: `${room.code}-c${index}-dare`,
-    players: [target],
-    prompt,
-    kind: "dare",
-    text: substitute(prompt.text, new Map([[1, aliasOf(target)]])),
-    note: "Everyone is watching.",
-    target,
-    closesAt: now + ROUND_TIMERS_MS.dare,
-    answered: new Set(),
-    skipped: false,
-  };
+
+  // Dares go to one or two people, never the whole room. With four or more
+  // players the floor is a pair (D and E); the rest get the watcher question.
+  const targetCount = room.order.length >= 4 ? 2 : 1;
+  const fresh = room.order.filter((id) => !avoid?.has(id));
+  const pool = fresh.length >= targetCount ? fresh : room.order;
+  const shuffled = [...pool];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j]!, shuffled[i]!];
+  }
+  const targets = shuffled.slice(0, Math.min(targetCount, shuffled.length));
+  if (targets.length === 0) return undefined;
+
+  const id = `${room.code}-c${index}-dare`;
+  const segments: Segment[] = [];
+  for (let i = 0; i < targets.length; i++) {
+    const target = targets[i]!;
+    segments.push({
+      id: `${id}-${i}`,
+      players: [target],
+      // Two targets share the same dare, but each gets its own log identity.
+      prompt: { ...prompt, id: `${prompt.id}-t${i + 1}` },
+      kind: "dare",
+      text: substitute(prompt.text, new Map([[1, aliasOf(target)]])),
+      note: "Everyone is watching.",
+      target,
+      closesAt: now + ROUND_TIMERS_MS.dare,
+      answered: new Set(),
+      skipped: false,
+    });
+  }
+
+  // Everybody else watches the dare and answers about it. They must NOT get a
+  // dare of their own: a dare is something the room watches, not a group round.
+  const watchers = room.order.filter((playerId) => !targets.includes(playerId));
+  const about = targets.length === 1
+    ? aliasOf(targets[0]!)
+    : `${aliasOf(targets[0]!)} and ${aliasOf(targets[1]!)}`;
+  if (watchers.length > 0) {
+    const watcherPrompt: Prompt = {
+      id: `${id}-watch-prompt`,
+      source: "bank",
+      band: "spicy",
+      role: "group",
+      kind: "text",
+      text: `Look at ${about}. They were just given a dare. Do you think they will do it? If not, why?`,
+      measures: ["flavour:dare"],
+      coding: "tease",
+      asksTarget: true,
+    };
+    segments.push({
+      id: `${id}-watch`,
+      players: watchers,
+      prompt: watcherPrompt,
+      kind: "text",
+      text: watcherPrompt.text,
+      note: `About ${about}. They won't see this.`,
+      subjectId: targets.length === 1 ? targets[0] : undefined,
+      closesAt: now + ROUND_TIMERS_MS.text,
+      answered: new Set(),
+      skipped: false,
+    });
+  }
+
   return {
-    id: `${room.code}-c${index}`,
+    id,
     index,
-    subjectId: target,
-    segments: [segment],
-    required: new Set([target]),
+    subjectId: targets.length === 1 ? targets[0] : undefined,
+    segments,
+    required: new Set(room.order),
     startedAt: now,
     closed: false,
+    headline: `${about} just got a dare.`,
   };
 }
 

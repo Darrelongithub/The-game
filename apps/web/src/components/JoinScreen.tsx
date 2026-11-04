@@ -146,6 +146,15 @@ export function JoinScreen({
               <GlowButton type="submit" className="w-full" disabled={!canGo}>
                 {busy ? "Getting you in…" : "Join the room"}
               </GlowButton>
+              {!canGo && !busy && (
+                <p className="mt-2 text-center text-[11px] text-white/45" aria-live="polite">
+                  {code.length < 4
+                    ? "Enter the four-character room code."
+                    : !aliasOk
+                      ? "Pick the name you want the room to see."
+                      : "Add your age to join — the game is 18+."}
+                </p>
+              )}
             </form>
 
             {(localError || error) && <p className="mt-3 text-sm text-alert" role="alert">{localError ?? error}</p>}
@@ -154,7 +163,7 @@ export function JoinScreen({
         </motion.div>
 
         <motion.p variants={staggerItem} className="text-center text-[11px] text-white/40 max-w-xs leading-relaxed">
-          Your room is private. Any player can delete it when the night is over.
+          Your room is private. The host closes it when the night is over.
         </motion.p>
       </motion.div>
     </main>

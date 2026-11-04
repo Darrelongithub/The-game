@@ -33,12 +33,25 @@ export function HostScreen({
   onDelete: () => void;
 }) {
   const [origin, setOrigin] = useState("");
+  const [joinBase, setJoinBase] = useState("");
 
   useEffect(() => {
-    setOrigin(window.location.origin);
+    const here = window.location;
+    setOrigin(here.origin);
+    setJoinBase(here.origin);
+    // A QR opened on the host laptop must not encode localhost: the phone is
+    // on the Wi-Fi, not inside this machine. Ask the server for its LAN URLs.
+    if (/^(localhost|127\.0\.0\.1|\[::1\])$/i.test(here.hostname) && typeof fetch === "function") {
+      fetch("/api/network")
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data: { urls?: string[] } | null) => {
+          if (data?.urls?.[0]) setJoinBase(data.urls[0]);
+        })
+        .catch(() => { /* keep the origin; the terminal still prints the LAN link */ });
+    }
   }, []);
 
-  const joinUrl = view ? `${origin}/?room=${view.code}` : "";
+  const joinUrl = view ? `${joinBase || origin}/?room=${view.code}` : "";
   const qr = useMemo(() => (joinUrl ? qrMatrix(joinUrl) : null), [joinUrl]);
   const path = useMemo(() => (qr ? qrSvgPath(qr) : ""), [qr]);
 

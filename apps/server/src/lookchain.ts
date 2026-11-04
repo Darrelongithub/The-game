@@ -23,7 +23,7 @@ export interface LookChainVariant {
 }
 
 /**
- * Eight chain flavours. The night draws a fresh one per chain, so a chain
+ * Twelve chain flavours. The night draws a fresh one per chain, so a chain
  * never repeats its copy inside one night.
  */
 export const LOOK_CHAIN_VARIANTS: readonly LookChainVariant[] = [
@@ -36,7 +36,7 @@ export const LOOK_CHAIN_VARIANTS: readonly LookChainVariant[] = [
   {
     announce: "Everybody look at {A}.",
     act: "Look at the person you would text at 3am.",
-    guess: "Who is {A} looking at right now?",
+    guess: "Who has {A} been staring at?",
     why: "Why that one?",
   },
   {
@@ -48,25 +48,25 @@ export const LOOK_CHAIN_VARIANTS: readonly LookChainVariant[] = [
   {
     announce: "Everybody look at {A}.",
     act: "Look at the person you trust most in this room.",
-    guess: "Who is {A} looking at?",
+    guess: "Who does {A} trust enough to look at?",
     why: "Why do you trust them?",
   },
   {
     announce: "Everybody look at {A}.",
     act: "Look at someone you have a secret with.",
-    guess: "Who is {A} looking at?",
+    guess: "Who shares a secret with {A}?",
     why: "What is the secret?",
   },
   {
     announce: "Everybody look at {A}.",
     act: "Look at someone you would kiss if the lights went out.",
-    guess: "Who is {A} looking at?",
+    guess: "Who would {A} kiss in the dark?",
     why: "And why that one?",
   },
   {
     announce: "Everybody look at {A}.",
     act: "Look at the person you would call first if you were in trouble.",
-    guess: "Who is {A} looking at?",
+    guess: "Who would {A} call first in a crisis?",
     why: "Why them, of all people?",
   },
   {
@@ -74,6 +74,30 @@ export const LOOK_CHAIN_VARIANTS: readonly LookChainVariant[] = [
     act: "Look at someone you cannot stop thinking about.",
     guess: "Who is {A} looking at?",
     why: "What is going on there?",
+  },
+  {
+    announce: "Everybody look at {A}.",
+    act: "Look at someone you have already seen naked.",
+    guess: "Who has {A} already seen naked?",
+    why: "How did that happen?",
+  },
+  {
+    announce: "Everybody look at {A}.",
+    act: "Look at the person you would cheat with.",
+    guess: "Who would {A} cheat with?",
+    why: "Why would you risk it?",
+  },
+  {
+    announce: "Everybody look at {A}.",
+    act: "Look at someone you want to kiss right now.",
+    guess: "Who does {A} want to kiss right now?",
+    why: "What is stopping you?",
+  },
+  {
+    announce: "Everybody look at {A}.",
+    act: "Look at the person you would break a friendship for.",
+    guess: "Who is {A} willing to lose a friend over?",
+    why: "Say why, out loud.",
   },
 ];
 
