@@ -40,6 +40,31 @@ describe("join idempotency", () => {
     assert.equal(fresh.ok, false, "a genuinely new player is still blocked after Start");
   });
 
+  it("reclaims the same seat mid-game after a tab sleeps", async () => {
+    const clock = new ManualClock();
+    const manager = new RoomManager(null, {
+      now: clock.now,
+      services: testServices(),
+      setTimer: clock.setTimer,
+      clearTimer: clock.clearTimer,
+    });
+    const room = manager.createRoom();
+    const seats = ["Wanjiru", "Dee", "Kofi", "Zuri", "Tayo"].map((alias) => {
+      const result = manager.join(room.code, alias, adultProfile, true);
+      assert.equal(result.ok, true);
+      if (!result.ok) throw new Error("unreachable");
+      return { alias, player: result.player };
+    });
+    await manager.start(room.code);
+    const sleeping = seats[2]!;
+    const reclaimed = manager.reclaim(room.code, sleeping.player.id, sleeping.player.secret);
+    assert.ok(reclaimed, "a valid secret reclaims the seat after Start");
+    assert.equal(reclaimed!.id, sleeping.player.id);
+    assert.equal(room.players.size, 5, "reclaiming does not add a seat");
+    const fresh = manager.join(room.code, "Newcomer", adultProfile, true);
+    assert.equal(fresh.ok, false, "a new phone is still blocked after Start");
+  });
+
   it("refuses an unknown join id instead of inventing a seat", () => {
     const manager = new RoomManager(null, { services: testServices() });
     const room = manager.createRoom();
