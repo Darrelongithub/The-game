@@ -434,12 +434,19 @@ export function computeResults(
             if (share >= ENGINE_TUNING.percentMinShare) {
                 const name = pseudoOf(meta, best.target);
                 const strength = clamp01(share);
+                const tone = toneFor(strength);
+                const text =
+                    tone === "filthy"
+                        ? `The room's guess: ${name} — ${pct(share)} of the others picked them. Nobody even hesitated.`
+                        : tone === "spicy"
+                          ? `The room's guess: ${name} — ${pct(share)} of the others picked them. The rest are lying.`
+                          : `The room's guess: ${name} — ${pct(share)} of the others picked them.`;
                 push({
                     id: vid("gayguess", best.target),
                     kind: "gayguess",
                     subjects: [best.target],
-                    tone: toneFor(strength),
-                    text: `The room's guess: ${name} — ${pct(share)} of the others picked them.`,
+                    tone,
+                    text,
                     numbers: { voters: best.pickers.size, eligible: others, share: Number(share.toFixed(3)) },
                     strength,
                 });

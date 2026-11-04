@@ -252,8 +252,16 @@ describe("computeResults", () => {
     const guess = results.verdicts.find((v) => v.kind === "gayguess");
     assert.ok(guess, "the room's guess should reach the reveal");
     assert.deepEqual(guess!.subjects, ["p2"]);
-    assert.match(guess!.text, /^The room's guess: Player 2 — 75% of the others picked them\.$/);
+    assert.match(guess!.text, /^The room's guess: Player 2 — 75% of the others picked them\. The rest are lying\.$/);
     assert.doesNotMatch(guess!.text, /\bis gay\b/i);
+  });
+
+  it("gets harder when the room fully agrees", () => {
+    const log = ids.map((id) => pick(id, "p2", "gay-hypothetical"));
+    const results = computeResults(log, meta);
+    const guess = results.verdicts.find((v) => v.kind === "gayguess");
+    assert.ok(guess);
+    assert.match(guess!.text, /100% of the others picked them\. Nobody even hesitated\.$/);
   });
 
   it("does not make a free agent out of a gay-guess pick", () => {

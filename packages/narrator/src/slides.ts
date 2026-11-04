@@ -84,7 +84,7 @@ const BEAT_BY_KIND: Record<VerdictKind, FinaleSlide["beat"]> = {
   sex: "land",
   percent: "tease",
   gaycouple: "escalate",
-  gayguess: "tease",
+  gayguess: "escalate",
   bodycount: "escalate",
   bestinbed: "escalate",
   besties: "tease",
