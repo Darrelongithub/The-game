@@ -10,3 +10,6 @@ data/
 *.tsbuildinfo
 
 .test-results/
+
+# local probes and scratch runs
+.scratch/

@@ -43,3 +43,19 @@ test("R23: the requested three-interface example prints both usable addresses in
     "LAN:   http://192.168.1.5:3001", "LAN:   http://10.0.0.7:3001",
   ]);
 });
+
+
+test("R23: a loopback-only laptop still gets one usable PLAYER and HOST link", (t) => {
+  const interfaces: ReturnType<typeof networkInterfaces> = { loop: [entry("127.0.0.1", true)] };
+  assert.deepEqual(lanAddresses(interfaces), []);
+  const output: string[] = [];
+  t.mock.method(console, "log", (...args: unknown[]) => { output.push(args.join(" ")); });
+  t.mock.method(console, "warn", (...args: unknown[]) => { output.push(args.join(" ")); });
+  bootBanner(3001, "127.0.0.1", interfaces, { code: "ABCD", hostToken: "tok" });
+  const text = output.join("\n");
+  assert.ok(text.includes("PLAYER link"));
+  assert.ok(text.includes("http://localhost:3001/?room=ABCD"), text);
+  assert.ok(text.includes("http://localhost:3001/host?token=tok"), text);
+  assert.ok(!text.includes("3001:3001"), "the fallback URL must not repeat the port");
+  assert.ok(text.includes("HOST is loopback-only"), "the laptop is told phones cannot reach it");
+});
