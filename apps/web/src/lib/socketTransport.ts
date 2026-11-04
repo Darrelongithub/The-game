@@ -106,6 +106,9 @@ export class SocketTransport implements Transport {
     if (this.socket) return;
     const socket: GameSocket = io(this.url(), {
       transports: ["websocket", "polling"],
+      // If a network blocks the WebSocket handshake, fall through to polling
+      // instead of retrying a dead upgrade forever.
+      tryAllTransports: true,
       autoConnect: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
