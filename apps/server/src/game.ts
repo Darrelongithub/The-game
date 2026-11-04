@@ -436,19 +436,6 @@ export function intoThisPerson(
   }
 }
 
-/**
- * "If they were gay" is only a question for people it is a hypothetical for.
- * Someone who already told us is not put on the spot with it. The reason a
- * pair was preferred lives in this function and nowhere else — no client, log
- * or model payload ever sees it, and the answer to the question is itself never
- * printed as an identity (see results.ts).
- */
-export const hypotheticalFor = (profile: ProfileAnswers | undefined): boolean =>
-  profile === undefined ||
-  profile.sexuality === "straight" ||
-  profile.sexuality === "undisclosed" ||
-  profile.sexuality === "other";
-
 /** The segment open on this phone right now, if it has one. */
 export const segmentFor = (room: Room, playerId: PlayerId): Segment | undefined => {
   const current = room.current;
@@ -668,16 +655,14 @@ export function buildShipVoteCase(input: {
   if (candidates.length === 0) return undefined;
 
   // The bank's "if these two were a gay couple" prompts are pair votes like
-  // this one, so they are drawn here rather than left to rot in the deck. When
-  // one is available it is asked of a pair it is a HYPOTHETICAL for; when no
-  // such pair exists, or the pool is dry, the ship vote is an ordinary one.
+  // this one, so they are drawn here rather than left to rot in the deck.
+  //
+  // The pair is chosen WITHOUT looking at anyone's sign-up sexuality. The pair
+  // is printed on every phone, so steering it away from out players would leak
+  // exactly what the question is not allowed to say. The hypothetical is asked
+  // of whatever pair the room's own rotation picked.
   const drawn = draw?.("group", 1, { kinds: ["pair_vote"], metric: METRIC.gayHypothetical })[0];
-  const hypothetical = drawn !== undefined && metricOf(drawn) === METRIC.gayHypothetical;
-  const preferred = hypothetical
-    ? candidates.filter(([x, y]) => hypotheticalFor(room.players.get(x)?.profile) && hypotheticalFor(room.players.get(y)?.profile))
-    : [];
-  const from = preferred.length > 0 ? preferred : candidates;
-  const [a, b] = from[Math.floor(rand() * from.length)]!;
+  const [a, b] = candidates[Math.floor(rand() * candidates.length)]!;
   room.shipPairsUsed.add(pairKey(a, b));
 
   const voters = room.order.filter((id) => id !== a && id !== b);

@@ -22,7 +22,6 @@ import { RoomManager } from "../src/room.ts";
 import {
   buildShipVoteCase,
   intoThisPerson,
-  hypotheticalFor,
   metricOf,
   pickOptionsFor,
   roomViewFor,
@@ -723,10 +722,6 @@ describe("casting", () => {
     // one side missing a profile at all → nothing is filtered
     assert.equal(intoThisPerson(undefined, adult()), true);
     assert.equal(intoThisPerson(adult(), undefined), true);
-    assert.equal(hypotheticalFor(adult({ sexuality: "gay" })), false);
-    assert.equal(hypotheticalFor(adult({ sexuality: "bi" })), false);
-    assert.equal(hypotheticalFor(adult({ sexuality: "undisclosed" })), true);
-    assert.equal(hypotheticalFor(undefined), true);
   });
 
   it("narrows a phone's own want, and nobody else's list", () => {
@@ -774,16 +769,18 @@ describe("casting", () => {
     assert.deepEqual(pickOptionsFor(room, "p1").sort(), ["p2", "p3"]);
   });
 
-  it("asks the gay-hypothetical about a pair it is a hypothetical for", () => {
+  it("never uses sign-up sexuality to choose the hypothetical pair", () => {
     const room = fakeRoom(MIXED);
     const aliasOf = (id: PlayerId) => room.players.get(id)!.alias;
-    const built = buildShipVoteCase({ room, index: 0, aliasOf, now: 0, rand: () => 0.5, draw: () => [HYPOTHETICAL] });
+    // The last pair in the room's own order includes Dee, whose profile says
+    // queer. The pair is printed on every phone, so filtering it by what
+    // people wrote at sign-up would leak the very thing the question may not say.
+    const built = buildShipVoteCase({ room, index: 0, aliasOf, now: 0, rand: () => 0.999, draw: () => [HYPOTHETICAL] });
     assert.ok(built, "the case is built");
     const segment = built!.segments[0]!;
-    assert.ok(!segment.text.includes("Kofi"), `Kofi is not put on the spot: ${segment.text}`);
-    assert.ok(!segment.note.includes("Kofi"), "and not in the grey line either");
     assert.equal(metricOf(segment.prompt), "gay-hypothetical", "the answer feeds its own tally");
     assert.match(segment.note, /^About .+ and .+\. They won't see this\.$/, "the note is unchanged in shape");
+    assert.ok(segment.note.includes("Dee"), `the queer player stays in the visible pool: ${segment.note}`);
     assert.ok(!JSON.stringify(segment).includes("profile"), "no profile rides along on the segment");
   });
 

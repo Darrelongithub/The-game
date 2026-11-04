@@ -603,7 +603,16 @@ export function computeResults(
         // Everyone answers every case, so "answered a pick" is the right proxy.
         const asked = new Set<PlayerId>();
         for (const record of log) {
-            if (record.value.kind === "pick") asked.add(record.playerId);
+            // Only a desire pick says anything about who is claimed. A pick
+            // made in the gay hypothetical is a guess, not a claim, and must
+            // never help decide who "nobody is claiming".
+            if (
+                record.value.kind === "pick" &&
+                record.metric !== undefined &&
+                DESIRE_METRICS.has(record.metric)
+            ) {
+                asked.add(record.playerId);
+            }
         }
         const askedCount = asked.size;
         if (candidates.length > 0 && askedCount >= Math.max(2, Math.ceil(playerCount / 2))) {

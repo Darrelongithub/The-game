@@ -251,6 +251,16 @@ describe("computeResults", () => {
     }
   });
 
+  it("does not make a free agent out of a gay-guess pick", () => {
+    const log = ids.map((id) => pick(id, "p2", "gay-hypothetical"));
+    const results = computeResults(log, meta);
+    assert.equal(
+      results.verdicts.find((v) => v.kind === "freeagent"),
+      undefined,
+      "a hypothetical guess is not a desire claim",
+    );
+  });
+
   it("never prints a gay claim, whatever the log says", () => {
     const log = [
       ...ids.map((id) => pick(id, "p1", "gay-hypothetical")),

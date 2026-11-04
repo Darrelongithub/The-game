@@ -45,7 +45,7 @@ import { fillNames, ollamaConfig, restoreNames } from "../packages/prompts/src/o
 import { Provider } from "../packages/prompts/src/provider.ts";
 import { PURPOSE_SLOTS } from "../packages/prompts/src/guard.ts";
 import { LOOK_CHAIN_VARIANTS, lookChainsFor } from "../apps/server/src/lookchain.ts";
-import { hypotheticalFor, intoThisPerson } from "../apps/server/src/game.ts";
+import { intoThisPerson } from "../apps/server/src/game.ts";
 import { assertNoOrientationLeak } from "../packages/engine/src/results.ts";
 import {
   CLOSENESS_METRICS,
@@ -231,7 +231,6 @@ ok("a binary attraction only removes the opposite sex", intoThisPerson(man, woma
 ok("a nonbinary player is never filtered out", intoThisPerson(nonbinary, woman) && intoThisPerson(nonbinary, man));
 ok("everyone / nobody / undisclosed cast wide", intoThisPerson(man, { ...nonbinary, attractedTo: "undisclosed" }) && intoThisPerson(woman, { ...nonbinary, attractedTo: "nobody" }));
 ok("no profile, no filtering", intoThisPerson(undefined, woman) && intoThisPerson(man, undefined));
-ok("an out player is not put on the spot by a hypothetical", !hypotheticalFor(man) && hypotheticalFor(woman) && hypotheticalFor(undefined));
 
 console.log(
   fail === 0
