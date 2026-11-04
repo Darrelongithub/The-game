@@ -5,6 +5,7 @@
 //   play       → ONE question, one grey line, the answer controls
 //   results    → the ONE ready gate
 //   finale     → the reveal, then this phone's secret deck
+import { useEffect } from "react";
 import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
 import type { UseRoom } from "@/lib/useRoom";
@@ -22,6 +23,15 @@ const FinaleScreen = dynamic(
 
 export function PlayScreen({ room }: { room: UseRoom }) {
   const { view, you, round, beat, finale, secrets } = room;
+
+  // Warm the reveal chunk while the night is still playing, so the finale is
+  // instant when the ready gate opens instead of downloading at the best bit.
+  useEffect(() => {
+    if (view?.phase !== "play") return;
+    const timer = setTimeout(() => { void import("@/components/FinaleScreen"); }, 4_000);
+    return () => clearTimeout(timer);
+  }, [view?.phase]);
+
   if (!view) return null;
 
   // The reveal owns the screen once it lands.
