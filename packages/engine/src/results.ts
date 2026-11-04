@@ -437,10 +437,10 @@ export function computeResults(
                 const tone = toneFor(strength);
                 const text =
                     tone === "filthy"
-                        ? `The room's guess: ${name} — ${pct(share)} of the others picked them. Nobody even hesitated.`
+                        ? `The room's guess: ${name} — ${pct(share)} of the others picked them. Nobody hesitated. They'd all let ${name} fuck them senseless.`
                         : tone === "spicy"
-                          ? `The room's guess: ${name} — ${pct(share)} of the others picked them. The rest are lying.`
-                          : `The room's guess: ${name} — ${pct(share)} of the others picked them.`;
+                          ? `The room's guess: ${name} — ${pct(share)} of the others picked them. The rest are lying — they'd still let ${name} ruin them.`
+                          : `The room's guess: ${name} — ${pct(share)} of the others picked them. The rest are lying — they'd still let ${name} hit it.`;
                 push({
                     id: vid("gayguess", best.target),
                     kind: "gayguess",

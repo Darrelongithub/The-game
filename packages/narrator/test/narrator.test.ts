@@ -228,7 +228,7 @@ describe("the gay guess slide", () => {
       kind: "gayguess",
       subjects: ["p2"],
       tone: "spicy",
-      text: "The room's guess: Player 2 — 75% of the others picked them. The rest are lying.",
+      text: "The room's guess: Player 2 — 75% of the others picked them. The rest are lying — they'd still let Player 2 ruin them.",
       numbers: { voters: 3, eligible: 4, share: 0.75 },
       strength: 0.75,
     };
