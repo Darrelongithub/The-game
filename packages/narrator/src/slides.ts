@@ -84,6 +84,7 @@ const BEAT_BY_KIND: Record<VerdictKind, FinaleSlide["beat"]> = {
   sex: "land",
   percent: "tease",
   gaycouple: "escalate",
+  gayguess: "tease",
   bodycount: "escalate",
   bestinbed: "escalate",
   besties: "tease",
@@ -100,6 +101,7 @@ const TITLE_BY_KIND: Record<VerdictKind, string> = {
   sex: "Just do it",
   percent: "The numbers",
   gaycouple: "Hypothetically",
+  gayguess: "The gay question",
   bodycount: "Body count",
   bestinbed: "Best in bed",
   besties: "Besties",
@@ -116,6 +118,8 @@ export function slideForVerdict(verdict: Verdict, ps: Pseudonyms): FinaleSlide {
   const subject = verdict.subjects[0];
   // The "never" couple is the same verdict type, the other way round.
   const heading = isNeverCouple(verdict) ? "Never happening" : TITLE_BY_KIND[verdict.kind];
+  // Every naming verdict carries its subject in the heading, including the
+  // room's gay guess: a model rewrite of the body may not drop the name.
   const title = subject !== undefined && ps.byId.has(subject)
     ? `${heading} · ${ps.byId.get(subject)}`
     : heading;

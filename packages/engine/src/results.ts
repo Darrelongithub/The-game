@@ -62,6 +62,7 @@ const DEFAULTS_PER_KIND: Record<VerdictKind, number> = {
     sex: 1,
     percent: 3,
     gaycouple: 1,
+    gayguess: 1,
     bodycount: 1,
     bestinbed: 1,
     besties: 2,
@@ -412,6 +413,37 @@ export function computeResults(
                 numbers: { voters: best.n, share: Number(strength.toFixed(3)) },
                 strength,
             });
+        }
+    }
+
+    // ---------------- GAY GUESS: the room's pick, framed as a guess only ----
+    // Source: "If there were someone gay in this room, who would it be?"
+    // The owner asked for the pick to be shown, but it stays a GUESS: the
+    // text never says anyone is gay, only who the room picked and how many.
+    {
+        const tally = pickTally(log, "gay-hypothetical");
+        let best: { target: PlayerId; pickers: Set<PlayerId> } | undefined;
+        for (const [target, rawPickers] of tally) {
+            const pickers = new Set([...rawPickers].filter((id) => id !== target));
+            if (pickers.size < ENGINE_TUNING.percentMinVoters) continue;
+            if (!best || pickers.size > best.pickers.size) best = { target, pickers };
+        }
+        if (best) {
+            const others = Math.max(1, playerCount - 1);
+            const share = best.pickers.size / others;
+            if (share >= ENGINE_TUNING.percentMinShare) {
+                const name = pseudoOf(meta, best.target);
+                const strength = clamp01(share);
+                push({
+                    id: vid("gayguess", best.target),
+                    kind: "gayguess",
+                    subjects: [best.target],
+                    tone: toneFor(strength),
+                    text: `The room's guess: ${name} — ${pct(share)} of the others picked them.`,
+                    numbers: { voters: best.pickers.size, eligible: others, share: Number(share.toFixed(3)) },
+                    strength,
+                });
+            }
         }
     }
 

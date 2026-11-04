@@ -28,7 +28,7 @@ import type { VerdictKind } from "../../shared/src/contracts.ts";
 import { ids, meta, peerRate, pick, selfRate, text, vote, pairPick, look, lookGuess, lookWhy } from "./fixtures.ts";
 
 const ALLOWED: VerdictKind[] = [
-  "hates", "core", "couple", "sex", "percent", "gaycouple",
+  "hates", "core", "couple", "sex", "percent", "gaycouple", "gayguess",
   "bodycount", "bestinbed", "besties", "rivals", "freeagent", "blindspot",
 ];
 
@@ -242,13 +242,18 @@ describe("computeResults", () => {
     );
   });
 
-  it("never names the target of a gay-guess pick", () => {
-    const log = ids.map((id) => pick(id, "p2", "gay-hypothetical"));
+  it("shows the room's gay guess as a guess, naming the pick", () => {
+    const log = [
+      pick("p1", "p2", "gay-hypothetical"),
+      pick("p3", "p2", "gay-hypothetical"),
+      pick("p4", "p2", "gay-hypothetical"),
+    ];
     const results = computeResults(log, meta);
-    for (const verdict of results.verdicts) {
-      assert.ok(!verdict.text.includes("Player 2"), `a gay-guess pick leaked into: ${verdict.text}`);
-      assert.ok(!verdict.subjects.includes("p2"), `a gay-guess pick target is a subject: ${verdict.id}`);
-    }
+    const guess = results.verdicts.find((v) => v.kind === "gayguess");
+    assert.ok(guess, "the room's guess should reach the reveal");
+    assert.deepEqual(guess!.subjects, ["p2"]);
+    assert.match(guess!.text, /^The room's guess: Player 2 — 75% of the others picked them\.$/);
+    assert.doesNotMatch(guess!.text, /\bis gay\b/i);
   });
 
   it("does not make a free agent out of a gay-guess pick", () => {

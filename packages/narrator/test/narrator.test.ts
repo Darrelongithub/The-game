@@ -8,12 +8,14 @@ import {
   applyAliasesToSlides,
   buildSkeleton,
   derivePseudonyms,
+  findOrientationClaim,
   narrateNight,
+  slideForVerdict,
   summaryFor,
   validateBody,
   writeFinale,
 } from "../src/index.ts";
-import type { NightDigest, Results, SecretCard } from "../../shared/src/contracts.ts";
+import type { NightDigest, Results, SecretCard, Verdict } from "../../shared/src/contracts.ts";
 
 const cleanLimits = {
   numbers: new Set<string>(),
@@ -217,6 +219,25 @@ describe("narrateNight", () => {
   });
 });
 
+
+describe("the gay guess slide", () => {
+  it("names the room's pick as a guess, never as a claim", () => {
+    const ps = derivePseudonyms(results, digest, meta.players);
+    const verdict: Verdict = {
+      id: "gayguess-p2",
+      kind: "gayguess",
+      subjects: ["p2"],
+      tone: "spicy",
+      text: "The room's guess: Player 2 — 75% of the others picked them.",
+      numbers: { voters: 3, eligible: 4, share: 0.75 },
+      strength: 0.75,
+    };
+    const slide = slideForVerdict(verdict, ps);
+    assert.equal(slide.title, "The gay question · Player 2");
+    assert.match(slide.body ?? "", /Player 2/);
+    assert.equal(findOrientationClaim(slide.body ?? ""), undefined);
+  });
+});
 
 describe("orientation guard", () => {
   it("lets the room's own hypothetical through", () => {
