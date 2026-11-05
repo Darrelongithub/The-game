@@ -85,6 +85,39 @@ describe("a failed generation", () => {
     assert.equal(room.cases.length, 0);
     assert.equal(roomViewFor(room, room.order[0]!, clock.now()).generationError?.includes("GEN_BASE"), true);
   });
+
+  it("keeps the room in the lobby when the returned night cannot be dealt", async () => {
+    const clock = new ManualClock();
+    const services = {
+      ...testServices(),
+      createPromptProvider: () => ({
+        mode: () => "ollama" as const,
+        draw: () => [],
+        lookChains: () => [],
+        bestCouplePrompt: () => undefined,
+        watcherPrompt: () => undefined,
+        usedPromptIds: () => [],
+        async generate() {
+          return [];
+        },
+      }),
+    };
+    const manager = new RoomManager(null, {
+      now: clock.now,
+      services,
+      rand: () => 0.5,
+      setTimer: clock.setTimer,
+      clearTimer: clock.clearTimer,
+    });
+    const room = manager.createRoom();
+    for (const alias of ["Wanjiru", "Dee", "Kofi", "Zuri"]) {
+      assert.equal(manager.join(room.code, alias, adultProfile, true).ok, true);
+    }
+    await manager.start(room.code);
+    assert.equal(room.phase, "lobby");
+    assert.match(room.generationError ?? "", /look-chain copy/);
+    assert.equal(room.cases.length, 0);
+  });
 });
 
 
@@ -123,5 +156,42 @@ describe("a generated night", () => {
     assert.ok(segments.some((segment) => segment.kind === "dare"), "a generated dare is planned");
     assert.ok(segments.some((segment) => segment.id.endsWith("-watch")), "a generated watcher segment is planned");
     assert.ok(segments.some((segment) => segment.kind === "pair_pick"), "the generated best-couple pick is planned");
+  });
+
+  it("gives the leftover seat a solo question in every even-room case", async () => {
+    const aliases = ["Wanjiru", "Dee", "Kofi", "Zuri", "Tayo", "Amara"];
+    const provider = createPromptProvider({
+      playerCount: aliases.length,
+      seed: 8,
+      aliases,
+      fetchImpl: async (_url: string, init?: { body?: string }) => ({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          message: { role: "assistant", content: fakeOllamaContent(String(init?.body ?? "{}")) },
+        }),
+      }),
+    });
+    const clock = new ManualClock();
+    const services = { ...testServices(), createPromptProvider: () => provider };
+    const manager = new RoomManager(null, {
+      now: clock.now,
+      services,
+      rand: () => 0.41,
+      setTimer: clock.setTimer,
+      clearTimer: clock.clearTimer,
+    });
+    const room = manager.createRoom();
+    for (const alias of aliases) assert.equal(manager.join(room.code, alias, adultProfile, true).ok, true);
+    await manager.start(room.code);
+    assert.equal(room.phase, "play", room.generationError);
+    const ordinary = room.cases.filter((c) => c.segments.some((s) => s.id.endsWith("-subject")));
+    assert.ok(ordinary.length >= 9, `only ${ordinary.length} ordinary cases`);
+    for (const built of ordinary) {
+      const covered = new Set(built.segments.flatMap((s) => s.players));
+      assert.deepEqual([...covered].sort(), [...room.order].sort(), "one seat was left without a question");
+      assert.ok(built.segments.some((s) => s.id.endsWith("-solo")), "the leftover got a solo question");
+      assert.ok(built.segments.every((s) => s.prompt.source === "ollama"), "a bank line slipped into an even room");
+    }
   });
 });

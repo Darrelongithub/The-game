@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { RoomManager } from "../src/room.ts";
 import {
+  buildBestCoupleCase,
   buildCase,
   buildShipVoteCase,
   intoThisPerson,
@@ -911,6 +912,27 @@ describe("casting", () => {
     });
     assert.ok(built, "the case still happens");
     assert.equal(metricOf(built!.segments[0]!.prompt), "gay-hypothetical");
+  });
+
+  it("refuses to invent bank copy in a generated room", () => {
+    const room = fakeRoom(MIXED);
+    const aliasOf = (id: PlayerId) => room.players.get(id)!.alias;
+    assert.throws(
+      () => buildShipVoteCase({
+        room, index: 0, aliasOf, now: 0, rand: () => 0.5, draw: () => [], allowFallback: false,
+      }),
+      /missing a ship-vote question/,
+    );
+    assert.throws(
+      () => buildBestCoupleCase({
+        room, index: 0, aliasOf, now: 0, rand: () => 0.5, allowFallback: false,
+      }),
+      /missing the best-couple question/,
+    );
+    assert.throws(
+      () => buildCase({ room, index: 0, aliasOf, now: 0, draw: () => [], strict: true }),
+      /missing a subject question/,
+    );
   });
 
   it("is an ordinary ship vote when the pool has no hypothetical", () => {

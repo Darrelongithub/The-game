@@ -1,5 +1,12 @@
 # Spec — "The Reveal Game" v2 (Oct 2026)
 
+> **Superseded 2026-11-05 (owner decision).** The night is now written by Ollama:
+> every question, dare, ship vote, best-couple question and look-chain line is
+> generated for the room, and a room refuses to start if generation is short or
+> Ollama is unreachable (the host sees the error and retries). The handwritten
+> bank is a test/offline fixture and is never drawn in a real night. Sections
+> below that describe a bank-carried night or no-key play are historical.
+
 Night-length party game for 4–11 friends, one phone each, room code, no install.
 Escalating prompts — forced-choice "pick someone here", deep questions, shouting
 rounds, mini-games, dares with an "I can't" escape that demands a reason. Every

@@ -47,9 +47,12 @@ outside it was edited except one append to `NOTES/contract - requests.md`.
   verbatim.
 * Every `rating` prompt carries `trait:<TraitId>` as its first measure, so the UI
   knows what it is rating (contract gap → request 1).
-* The bank alone plays a complete night (warmup → spicy → deep → dare incl.
-  `pair_dare` + `debrief`) for 4 and 11 players, with `SPICY_TIER` on or off —
-  proven by `test/night.test.ts`.
+* The bank is a **fixture**, not a production path. It still plays a complete
+  night for 4 and 11 players with `SPICY_TIER` on or off (`test/night.test.ts`),
+  which is how tests and the offline smoke stay deterministic. Production rooms
+  now generate every question, dare and look-chain line through Ollama and
+  refuse to start if generation is short or unreachable; see
+  `packages/prompts/src/generate.ts` and `test/ollama.test.ts`.
 
 ## Tests + output
 

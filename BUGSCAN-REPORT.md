@@ -5,6 +5,16 @@ Baseline: `3fb73f2` · Report tip: `f41aaa3`
 Date: 2026-11-04
 Method: read the code, reproduce each defect, fix the root cause, pin it with a test that fails without the fix, then play the game live.
 
+> **UPDATE 2026-11-05 — strict Ollama generation.** The owner's final rule is
+> that *every* question and dare comes from Ollama, not the bank. The bank is
+> now a test/offline fixture only. A production room generates role-planned
+> original prompts (subject, observer, solo, ship vote, best couple, dares,
+> watcher questions, look-chain copy) and refuses to start if Ollama is down or
+> returns too few usable lines; the host sees the error and can retry. Any row
+> below that describes a bank fallback or an offline night is historical and has
+> been superseded by this change. The bank's ``dare.json`` content is no longer
+> played in a real room.
+
 The brief file `GAME-BRIEF-v3.2.md` is **not present** in this repository or its git
 history. I used `packages/shared/src/contracts.ts` as the v3.2 source of truth and
 `spec/spec.md` only where it agrees with the contracts. `spec/spec.md` is stale for
@@ -86,7 +96,7 @@ override the contracts.
 
 ## 5. STEP 3 — simulated nights (final code)
 
-All three ran against the live server with a closed `GEN_BASE` (Ollama off), no API keys, real Socket.IO clients from `scripts/bots.ts`, and the acceptance checks in that script.
+All three ran against the live server with a closed `GEN_BASE` (Ollama off), no API keys, real Socket.IO clients from `scripts/bots.ts`, and the acceptance checks in that script. These runs predate the strict Ollama rule; the same bots now run against the local fake Ollama model (`GEN_BASE` set) so the night is generated end to end.
 
 | Players | Duration | Round events / phone | Result | Terminal |
 |---|---|---|---|---|
@@ -119,7 +129,7 @@ All three ran against the live server with a closed `GEN_BASE` (Ollama off), no 
 
 ## 7. GO / NO-GO
 
-**GO** for a friends' game night, after a two-minute pre-flight on the actual host laptop: run `npm run host`, open the PLAYER link on one real phone on the same Wi-Fi/hotspot, join the lobby, and only then invite the room (keep Ollama optional; the bank carries the night).
+**GO** for a friends' game night, after a two-minute pre-flight on the actual host laptop: start Ollama with the configured model, run `npm run host`, open the PLAYER link on one real phone on the same Wi-Fi/hotspot, join the lobby, and only then invite the room. The night is written by Ollama; if it is down or short the host sees the error and the room stays in the lobby. The bank is a fixture, not a fallback.
 
 **Single biggest risk:** real-device networking on the Windows host — firewall profile, Private vs Public Wi-Fi, hotspot client isolation and multiple adapters. It is the one mandatory path that could not be exercised here; everything downstream of a phone reaching the server is covered by the three simulated nights and 300+ tests.
 
@@ -132,8 +142,8 @@ Scope: the owner's "everything is a bit slow" — latency after Start, inter-cas
 | Change | Before | After |
 |---|---|---|
 | A phone submits an answer | Server rebuilt and emitted a full room snapshot to **every** socket, every answer | The seat that answered gets one snapshot; other phones get nothing until the next case. Covered by `case-engine.test.ts` (actor +1, watcher +0) |
-| Ollama is down / unreachable | All four bands attempted; each waits out its own network failure (worst case ~4× the cap) | The first `network` / `disabled` / `timeout` band ends the run; the bank carries the night. Covered by `ollama.test.ts` (`batches.length === 1`) |
-| `npm run smoke` (5 phones, offline) | 4 Ollama batches, 40 prompts asked | 1 batch, 15 prompts asked; night unchanged (31–32 events/phone, finale on every phone) |
+| Ollama is down / unreachable | All four bands attempted; each waits out its own network failure (worst case ~4× the cap) | The first `network` / `disabled` / `timeout` band ends the run; no bank fallback, the host gets a retryable error and the room stays in the lobby. Covered by `ollama.test.ts` |
+| `npm run smoke` (5 phones, offline) | 4 Ollama batches, 40 prompts asked | 1 batch, 15 prompts asked; night unchanged (31–32 events/phone, finale on every phone). The offline smoke is a fixture path only. |
 | Guest phone | `delete_room` accepted from any seated player | Host-only at the socket; the phone's "Delete this room" button is gone. Two socket tests: guest delete refused, host delete works |
 | Dead `add_bot` path | Socket event, manager method, transport/hook/mocks | Removed end to end (no UI ever called it in v3.2) |
 

@@ -230,8 +230,8 @@ substitute for deleting room logs.
 ## Verified no-key smoke game
 
 The following independent in-process oracle exercises the actual production
-adapter, using synthetic players, no API keys, a temporary data directory and
-no public debug endpoint:
+adapter, using synthetic players, a local fake Ollama model, no cloud API keys,
+a temporary data directory and no public debug endpoint:
 
 ```sh
 npm run smoke:verified

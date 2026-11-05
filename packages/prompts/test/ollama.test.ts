@@ -26,6 +26,7 @@ import {
   createPromptProvider,
 } from "../src/index.ts";
 import { generateNight } from "../src/generate.ts";
+import { fakeOllamaContent } from "../../../scripts/fake-ollama.ts";
 
 describe("the config", () => {
   it("defaults to a local Ollama on dolphin-mistral", () => {
@@ -279,6 +280,31 @@ describe("the generated night", () => {
     });
     for (const name of names) assert.ok(!sent.includes(name), `the request leaked ${name}`);
     assert.match(sent, /\{P1\}/);
+  });
+
+  it("retries a short reply instead of reaching for the bank", async () => {
+    let subjectCalls = 0;
+    const report = await generateNight({
+      playerCount: 5,
+      seed: 11,
+      fetchImpl: async (_url, init) => {
+        const body = String(init?.body ?? "");
+        const isSubject = body.includes("PLAN: subject");
+        if (isSubject) subjectCalls += 1;
+        let content = fakeOllamaContent(body);
+        if (isSubject && subjectCalls === 1) {
+          content = content.split("\n").slice(0, 3).join("\n");
+        } else if (isSubject) {
+          content = content.split("\n").map((line) => line.replace("Number", "Retry Number")).join("\n");
+        }
+        return { ok: true, status: 200, text: async () => JSON.stringify({ message: { content } }) };
+      },
+    });
+    assert.equal(report.error, undefined);
+    assert.ok(subjectCalls >= 2, "the short subject batch was retried");
+    assert.ok(report.prompts.every((p) => p.source === "ollama"));
+    const subjectBatch = report.batches.find((b) => b.label === "subject");
+    assert.ok(subjectBatch && subjectBatch.asked > 13, "the retry asked for the missing lines");
   });
 
   it("refuses to start from the bank when Ollama is down", async () => {

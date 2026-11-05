@@ -282,8 +282,8 @@ export class RoomManager {
 
   /**
    * The host presses Start. Ollama generates the night's prompts while every
-   * phone shows the loading screen. The safety cap means the night always
-   * starts.
+   * phone shows the loading screen. If generation fails (or is short), the room
+   * stays in the lobby and the host sees the error; nothing is dealt.
    */
   async start(code: RoomCode): Promise<void> {
     const room = this.rooms.get(code);
@@ -351,7 +351,20 @@ export class RoomManager {
 
     // Build the night's cases. `totalCases` is the host's real denominator:
     // ordinary cases, ship votes, the best-couple pick, dares and chains.
-    room.cases = this.planCases(room);
+    let cases: Case[];
+    try {
+      cases = this.planCases(room);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      room.phase = "lobby";
+      room.cases = [];
+      room.generationError = message;
+      room.generation = undefined;
+      this.log(`Generation failed while dealing: ${message}`);
+      this.broadcastState(room);
+      return;
+    }
+    room.cases = cases;
     room.totalCases = room.cases.length;
     room.caseIndex = 0;
     room.phase = "play";
@@ -368,6 +381,10 @@ export class RoomManager {
     const now = this.now();
     const provider = this.providers.get(room.code);
     const chainCopies = provider?.lookChains?.() ?? [];
+    const strict = provider?.mode?.() === "ollama";
+    if (strict && chainCopies.length === 0) {
+      throw new Error("The generated night is missing its look-chain copy. Press Start again so Ollama can rewrite it.");
+    }
     const chainVariants = chainCopies.length > 0 ? chainCopies : LOOK_CHAIN_VARIANTS;
     let chainIndex = 0;
     let dareIndex = 0;
@@ -424,6 +441,7 @@ export class RoomManager {
           rand: this.rand,
           draw: (role, count, opts) => this.drawPrompts(room, role, count, opts),
           preferHypothetical: shipIndex === 0,
+          ...(strict ? { allowFallback: false } : {}),
         });
         shipIndex += 1;
       } else if (shape === "bestcouple") {
@@ -431,15 +449,20 @@ export class RoomManager {
         built = buildBestCoupleCase({
           room, index, aliasOf: (id) => this.aliasOf(room, id), now, rand: this.rand,
           ...(bestPrompt ? { prompt: bestPrompt } : {}),
+          ...(strict ? { allowFallback: false } : {}),
         });
       } else if (shape === "dare") {
         // One dare per case — a dare template never repeats inside a night.
         const prompt = this.drawPrompts(room, "dare", 1)[0];
+        if (!prompt && strict) {
+          throw new Error("The generated night is missing a dare. Press Start again so Ollama can rewrite it.");
+        }
         if (prompt) {
           built = buildDareCase({
             room, index, aliasOf: (id) => this.aliasOf(room, id), now, rand: this.rand, prompt,
             ...(provider?.watcherPrompt?.(dareIndex) ? { watchPrompt: provider.watcherPrompt(dareIndex)! } : {}),
             avoid: dareTargets,
+            ...(strict ? { strict: true } : {}),
           });
           dareIndex += 1;
           for (const segment of built?.segments ?? []) {
@@ -463,6 +486,7 @@ export class RoomManager {
           aliasOf: (id) => this.aliasOf(room, id),
           now,
           ...(pairings[ordinaryIndex] ? { pairing: pairings[ordinaryIndex]! } : {}),
+          ...(strict ? { strict: true } : {}),
         });
         ordinaryIndex += 1;
       }

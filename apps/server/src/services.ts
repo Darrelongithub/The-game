@@ -38,6 +38,8 @@ export interface LookChainCopy {
 export interface PromptProvider {
   /** Draw prompts for a case slot. Never blocks, never throws. */
   draw(request: DrawRequest): Prompt[];
+  /** `bank` only for the test/offline fixture; production is `ollama`. */
+  mode?(): "bank" | "ollama";
   /** The generated look-chain flavours for tonight, in order. */
   lookChains?(): readonly LookChainCopy[];
   /** The generated best-couple question. */

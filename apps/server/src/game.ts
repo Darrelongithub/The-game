@@ -502,6 +502,8 @@ export interface BuildCaseInput {
    * falls back to the plain rotation (used by direct/unit callers).
    */
   pairing?: PairingRound;
+  /** Production: a missing generated prompt is an error, never a bank line. */
+  strict?: boolean;
 }
 
 /**
@@ -510,6 +512,7 @@ export interface BuildCaseInput {
  */
 export function buildCase(input: BuildCaseInput): Case {
   const { room, index, draw, aliasOf, now } = input;
+  const strict = input.strict === true;
   const players = room.order;
   const subjectId = input.pairing?.subjectId ?? players[index % players.length]!;
   const observers = observersFor(players, subjectId);
@@ -546,6 +549,9 @@ export function buildCase(input: BuildCaseInput): Case {
   // ---- the subject's own real question ----
   const nextSubject = makeQueue("subject");
   const subjectPrompt = nextSubject();
+  if (!subjectPrompt && strict) {
+    throw new Error("The generated night is missing a subject question. Press Start again so Ollama can rewrite it.");
+  }
   if (subjectPrompt) {
     segments.push({
       id: `${room.code}-c${index}-subject`,
@@ -579,7 +585,10 @@ export function buildCase(input: BuildCaseInput): Case {
     let prompt = preferPair ? nextPairPrompt() : nextObserver();
     if (!prompt) prompt = nextObserver();
     if (!prompt) prompt = nextPairPrompt();
-    if (!prompt) continue;
+    if (!prompt) {
+      if (strict) throw new Error("The generated night is missing an observer question. Press Start again so Ollama can rewrite it.");
+      continue;
+    }
 
     // A prompt about ANOTHER pair gets the other pair's names. A prompt about
     // the subject gets the subject's name. The prompt's own role decides.
@@ -623,6 +632,9 @@ export function buildCase(input: BuildCaseInput): Case {
   if (leftover) {
     const nextSolo = makeQueue("solo");
     const soloPrompt = nextSolo();
+    if (!soloPrompt && strict) {
+      throw new Error("The generated night is missing a solo question. Press Start again so Ollama can rewrite it.");
+    }
     if (soloPrompt) {
       segments.push({
         id: `${room.code}-c${index}-solo`,
@@ -664,8 +676,11 @@ export function buildShipVoteCase(input: {
   draw?: DrawFn;
   /** The first ship vote asks the room's own "were gay" hypothetical. */
   preferHypothetical?: boolean;
+  /** Production: never invent a bank ship-vote line. */
+  allowFallback?: boolean;
 }): Case | undefined {
   const { room, index, aliasOf, now, rand, draw, preferHypothetical } = input;
+  const allowFallback = input.allowFallback !== false;
   const candidates = allPairs(room.order).filter(([a, b]) => !room.shipPairsUsed.has(pairKey(a, b)));
   if (candidates.length === 0) return undefined;
 
@@ -680,6 +695,9 @@ export function buildShipVoteCase(input: {
     ? draw?.("group", 1, { kinds: ["pair_vote"], metric: METRIC.gayHypothetical })[0]
     : undefined)
     ?? draw?.("group", 1, { kinds: ["pair_vote"] })[0];
+  if (!drawn && !allowFallback) {
+    throw new Error("The generated night is missing a ship-vote question. Press Start again so Ollama can rewrite it.");
+  }
   const [a, b] = candidates[Math.floor(rand() * candidates.length)]!;
   room.shipPairsUsed.add(pairKey(a, b));
 
@@ -735,8 +753,11 @@ export function buildBestCoupleCase(input: {
   rand: () => number;
   /** Ollama's best-couple question for tonight. */
   prompt?: Prompt;
+  /** Production: never invent a bank best-couple line. */
+  allowFallback?: boolean;
 }): Case | undefined {
   const { room, index, aliasOf, now, rand, prompt: generated } = input;
+  const allowFallback = input.allowFallback !== false;
   if (room.order.length < 2) return undefined;
   const pairs = allPairs(room.order);
   // A shortlist of candidate couples, in a different order every night.
@@ -751,6 +772,9 @@ export function buildBestCoupleCase(input: {
     label: `${aliasOf(a)} & ${aliasOf(b)}`,
   }));
   if (options.length === 0) return undefined;
+  if (!generated && !allowFallback) {
+    throw new Error("The generated night is missing the best-couple question. Press Start again so Ollama can rewrite it.");
+  }
   const prompt: Prompt = generated
     ? {
         ...generated,
@@ -938,8 +962,11 @@ export function buildDareCase(input: {
   watchPrompt?: Prompt;
   /** Players who already had a dare tonight — give the others a turn first. */
   avoid?: ReadonlySet<PlayerId>;
+  /** Production: a missing generated watcher question is an error. */
+  strict?: boolean;
 }): Case | undefined {
   const { room, index, aliasOf, now, rand, prompt, watchPrompt, avoid } = input;
+  const strict = input.strict === true;
   if (room.order.length === 0) return undefined;
 
   // Dares go to one or two people, never the whole room. With four or more
@@ -981,6 +1008,9 @@ export function buildDareCase(input: {
     ? aliasOf(targets[0]!)
     : `${aliasOf(targets[0]!)} and ${aliasOf(targets[1]!)}`;
   if (watchers.length > 0) {
+    if (strict && !watchPrompt) {
+      throw new Error("The generated night is missing a dare-watch question. Press Start again so Ollama can rewrite it.");
+    }
     // A generated watcher question is bound to the two targets; the code line
     // is the test/offline fallback only.
     const canBindGenerated = Boolean(watchPrompt)

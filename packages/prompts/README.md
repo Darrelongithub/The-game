@@ -66,7 +66,7 @@ A candidate is dropped for exactly four reasons, and nothing else:
 | reason | means |
 |---|---|
 | `not-in-room` | after the names go back to slots, nobody in the room is named |
-| `repeat` | says the same thing as a line already accepted, or is the bank line unchanged |
+| `repeat` | says the same thing as a line already accepted |
 | `too-long` | over `MAX_PROMPT_CHARS` (160) |
 | `refusal` | empty, "as an AI", or commentary instead of a question |
 
@@ -77,8 +77,11 @@ and prints one line per batch to the host terminal:
 Ollama: asked 15, accepted 12, dropped 3 (not-in-room:1, repeat:2)
 ```
 
-Anything not accepted is served from the bank, unchanged. `GEN_TARGET_PROMPTS`
-(40) is what the loading screen counts toward.
+A short batch is retried once for the missing lines. If the night is still short,
+`generateNight` reports `error`, `PromptProvider.generate()` throws
+`GenerationError`, and the room stays in the lobby with the error on the host
+screen. Nothing is filled from the bank. `GEN_TARGET_PROMPTS` (40) is the
+loading-screen target; the real count depends on room size.
 
 ## The remote lane (Gemini)
 
@@ -121,7 +124,7 @@ const provider = createPromptProvider({
   log: (line) => terminal(line),          // the "Ollama: asked …" lines
 });
 
-await provider.generate();                // Ollama first, bank under it
+await provider.generate();                // throws if Ollama is short/down
 provider.draw({ role: "observer_subject", count: 2, kinds: ["pick"] });
 ```
 

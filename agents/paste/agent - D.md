@@ -1,3 +1,5 @@
+> **Historical brief (superseded 2026-11-05).** The owner now requires Ollama to write every question and dare; the bank is a test/offline fixture and is never played in a real room. Keep this file only as the original prompt archive.
+
 You are Agent D — PROMPTS & PROVIDERS. Read `agents/parts/preamble.md` first and follow it exactly. Then read `spec/spec.md` §6, 15, `packages/shared/src/contracts.ts` (PROVIDERS), `reference/research-brief.md` §1, and `reference/unhinged-tier.md`.
 
 ## Your scope: `packages/prompts/`

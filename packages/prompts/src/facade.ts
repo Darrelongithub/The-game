@@ -95,8 +95,8 @@ export class PromptProvider {
     /**
      * Generate the night's prompts with Ollama, then play.
      *
-     * The returned list always contains a full night's worth of prompts:
-     * Ollama's accepted rephrases first, the bank behind them.
+     * The returned list is the night the model wrote. If it is short this
+     * throws `GenerationError`; there is no bank backfill.
      */
     async generate(): Promise<Prompt[]> {
         this.stateValue = { running: true, ready: 0, target: GEN_TARGET_PROMPTS, done: false };
@@ -233,6 +233,11 @@ export class PromptProvider {
     /** The generated best-couple question for the room-wide pair pick. */
     bestCouplePrompt(): Prompt | undefined {
         return this.bestCouple;
+    }
+
+    /** `bank` only for the offline fixture; a real room is `ollama`. */
+    mode(): "bank" | "ollama" {
+        return this.opts.offline ? "bank" : "ollama";
     }
 
     /** The generated watcher question for a dare (bound to its two targets). */

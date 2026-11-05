@@ -93,7 +93,7 @@ export interface GenerateBatchReport {
     missing: string[];
 }
 
-type SlotRule = "none" | "any" | "p1" | "p1p2";
+type SlotRule = "none" | "never" | "any" | "p1" | "p1p2";
 
 interface PromptPlan {
     key: string;
@@ -145,7 +145,10 @@ export function planNight(playerCount: number): PromptPlan[] {
     // split is floor(pairs / 2), not a 50/50 guess.
     const observerPair = ordinary * Math.floor(pairsPerCase(playerCount) / 2);
     const observerSubject = observerTotal - observerPair;
-    const solo = playerCount % 2 === 0 ? 1 : 0;
+    // An even room has an odd number of observers, so EVERY ordinary case
+    // leaves one player over. That seat needs its own solo question each time,
+    // not once a night; without this the leftover sat idle from case 2 onward.
+    const solo = playerCount % 2 === 0 ? ordinary : 0;
     const ships = shipVotesFor(playerCount);
     const dares = daresFor(playerCount);
 
@@ -157,8 +160,8 @@ export function planNight(playerCount: number): PromptPlan[] {
             required: ordinary,
             count: ordinary + 2,
             kinds: ["pick", "rating", "text"],
-            slotRule: "none",
-            brief: "The phone reading this belongs to the subject. Write to \"you\". They may choose, rate or talk about other people in the room. Never name the subject. Use {P1}, {P2} ... only for other people.",
+            slotRule: "never",
+            brief: "The phone reading this belongs to the subject. Write to \"you\". They may choose, rate or talk about other people in the room. Do NOT use {P1} slots and never name the subject; say \"someone in this room\" when you need a target.",
             metricGoals: ["body-count", "sex-desire", "best-in-bed", "trust", "crush", "is-fake", "liar", "weirdest", "ex", "money"] as MetricKey[],
         },
         {
@@ -192,8 +195,8 @@ export function planNight(playerCount: number): PromptPlan[] {
             count: solo + 2,
             kinds: ["text"],
             fixedKind: "text",
-            slotRule: "none",
-            brief: "One person reads this alone. Ask a spicy, personal question to \"you\". No name slots are needed; do not name anyone.",
+            slotRule: "never",
+            brief: "One person reads this alone. Ask a spicy, personal question to \"you\". Do NOT use {P1} slots and do not name anyone.",
         },
         {
             key: "ship-vote",
@@ -215,7 +218,7 @@ export function planNight(playerCount: number): PromptPlan[] {
             count: 2,
             kinds: ["pair_pick"],
             fixedKind: "pair_pick",
-            slotRule: "none",
+            slotRule: "never",
             brief: "The whole room picks the best couple from a list of pairs. Write one question. Do NOT use any {P1} slots; the list of pairs is supplied by the app.",
         },
         {
@@ -271,11 +274,13 @@ function userPromptFor(plan: PromptPlan, want: number): string {
         ...(plan.metricGoals?.length
             ? [`If a line measures one of these signals, add "metric" to its JSON: ${plan.metricGoals.join(", ")}. Spread them across the lines.`]
             : []),
-        plan.slotRule === "p1p2"
-            ? "Every line must contain both {P1} and {P2}."
-            : plan.slotRule === "p1"
-                ? "Every line must contain {P1}."
-                : "Use a slot only when it makes the question sharper.",
+        plan.slotRule === "never"
+            ? "Do not use any {P1} slots in these lines."
+            : plan.slotRule === "p1p2"
+                ? "Every line must contain both {P1} and {P2}."
+                : plan.slotRule === "p1"
+                    ? "Every line must contain {P1}."
+                    : "Use a slot only when it makes the question sharper.",
         labeledPlan(plan)
             ? "Return one JSON object per line, exactly: {\"kind\":\"pick\",\"text\":\"...\"}"
             : "Return one JSON object per line, exactly: {\"text\":\"...\"}",
@@ -401,10 +406,19 @@ function slotCheck(text: string, plan: PromptPlan, playerCount: number): boolean
     // The best-couple question is followed by a list of pairs; a raw slot in
     // the question itself would leak the placeholder on every phone.
     if (plan.key === "best-couple" && indexes.length > 0) return false;
+    if (plan.slotRule === "never") {
+        if (indexes.length > 0) return false;
+        if (plan.role === "subject" || plan.role === "solo") {
+            return /\b(?:you|your|yours|yourself|this room|everyone here|who here)\b/i.test(text);
+        }
+        return true;
+    }
     if (plan.slotRule === "none" || plan.slotRule === "any") {
-        // A subject/solo question has to be about the person answering or the
-        // room. A generic "favourite colour" line is not a party question.
-        if ((plan.role === "subject" || plan.role === "solo") && indexes.length === 0) {
+        // Subject/solo questions are about the person answering. A name slot
+        // here would either name the subject on their own phone or point at a
+        // person the question did not mean; keep these two roles slot-free.
+        if (plan.role === "subject" || plan.role === "solo") {
+            if (indexes.length > 0) return false;
             return /\b(?:you|your|yours|yourself|this room|everyone here|who here)\b/i.test(text);
         }
         return true;
