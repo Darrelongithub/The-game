@@ -14,6 +14,8 @@ import { LOOK_CHAIN_CASES, LOOK_CHAIN_CASES_MAX, MAX_PLAYERS, MIN_PLAYERS } from
 export interface LookChainVariant {
   /** What the room is told. */
   announce: string;
+  /** Where the copy came from (Ollama for a production night). */
+  source?: "bank" | "ollama";
   /** What the actor's phone says. */
   act: string;
   /** What everybody else's phone says. */

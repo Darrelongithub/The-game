@@ -61,9 +61,8 @@ the phones; ignore `172.*` VPN/WSL bridges unless that is your LAN.
 `npm run dev` and `npm run dev:mock` work in PowerShell and cmd; the mock
 command sets its environment variable in Node instead of POSIX shell syntax.
 
-No `.env` is required. With neither API key set, the finished game uses the
-bank and templates without internet after installation. Prompt generation also
-tries local Ollama, with no key required. Optional settings:
+A local Ollama is required to start a night: it writes every question and
+dare. There is no bank fallback in a real room. Gemini is optional. Settings:
 
 ```sh
 cp .env.example .env
@@ -97,11 +96,11 @@ phones talk only to the game server on port 3001. `localhost` here means the
 server laptop. If the server is containerized, localhost is the container, so
 configure `GEN_BASE` to a host-reachable address instead.
 
-If Ollama is stopped, the model is missing, a request times out, or returned
-prompts fail validation, bank prompts keep the game running. Generation remains
-background-only with the existing eight-second request deadline; a slow laptop
-may therefore use mostly bank prompts. No successful generation is required to
-start or finish a night. Download dependencies and the model before going offline.
+If Ollama is stopped, the model is missing, a request times out, or it returns
+too few usable lines, generation fails and the room stays in the lobby. The
+host screen prints the error; press Start again after fixing `GEN_BASE` /
+`GEN_MODEL`. No bank prompts are played in a real room. Download dependencies
+and the model before going offline.
 
 ## Solo test
 

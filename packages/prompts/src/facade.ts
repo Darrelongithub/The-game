@@ -1,10 +1,9 @@
 // packages/prompts/src/facade.ts
 // THE PROMPT FACADE — one object the server talks to.
 //
-// v3.2: the night is a flat sequence of CASES, not phases. The facade hands
-// the case engine whatever prompts it needs, from Ollama's rephrases when
-// they exist and the bank otherwise. It never blocks the game: generation
-// happens AFTER Start, and the safety cap means the night always starts.
+// v3.2: the night is a flat sequence of CASES, not phases. Ollama writes the
+// whole question set for the night; the bank is a test-only fixture. If the
+// model cannot write enough, generation throws and the room does not start.
 import {
     BAND_ORDER,
     type Band,
@@ -14,7 +13,13 @@ import {
     type RoundKind,
 } from "../../shared/src/contracts.ts";
 import { BANK, loadBank, metricOf, promptTypeKey, seededShuffle, selectFromBank } from "./bank/index.ts";
-import { GEN_TARGET_PROMPTS, generateNight, type GenerateBatchReport } from "./generate.ts";
+import {
+    GenerationError,
+    GEN_TARGET_PROMPTS,
+    generateNight,
+    type GenerateBatchReport,
+    type NightChain,
+} from "./generate.ts";
 
 /**
  * How many of the night's opening prompts come from the spicy tier.
@@ -39,7 +44,7 @@ export interface PromptProviderOptions {
     fetchImpl?: Parameters<typeof generateNight>[0]["fetchImpl"];
     /** Print the per-batch report to the terminal. */
     log?: (line: string) => void;
-    /** Skip the model entirely (tests, offline). */
+    /** Skip the model entirely (tests only; a real room never uses the bank). */
     offline?: boolean;
 }
 
@@ -66,6 +71,9 @@ export class PromptProvider {
     private stateValue: GenerationState = { running: false, ready: 0, target: 0, done: false };
     private pool: Prompt[] = [];
     private report: GenerateBatchReport | undefined;
+    private chains: NightChain[] = [];
+    private bestCouple: Prompt | undefined;
+    private watchers: Prompt[] = [];
     /** The type of the last prompt handed out — never repeated back to back. */
     private lastType = "";
     /** How many opening prompts are still owed to the spicy tier. */
@@ -73,7 +81,7 @@ export class PromptProvider {
 
     constructor(opts: PromptProviderOptions) {
         this.opts = opts;
-        this.pool = loadBank();
+        this.pool = opts.offline ? loadBank() : [];
     }
 
     get state(): GenerationState {
@@ -111,15 +119,21 @@ export class PromptProvider {
         });
         this.report = report;
         this.pool = report.prompts;
+        this.chains = report.chains;
+        this.bestCouple = report.bestCouple;
+        this.watchers = report.watchers;
         this.stateValue = {
             running: false,
             ready: report.accepted,
             target: report.target,
             lastLine: report.batches.length
-                ? `Ollama: asked ${report.batches.reduce((s, b) => s + b.asked, 0)}, accepted ${report.accepted}, dropped ${report.dropped}`
+                ? `Ollama: accepted ${report.accepted}, dropped ${report.dropped}`
                 : undefined,
             done: true,
         };
+        // NO BANK FALLBACK. If the model did not write the night, the caller
+        // keeps the room in the lobby and shows the error.
+        if (report.error) throw new GenerationError(report.error, report.missing);
         return this.pool;
     }
 
@@ -161,9 +175,10 @@ export class PromptProvider {
         const chosen = candidates.length > 0
             ? this.pickSpread(candidates, opts.count)
             : [];
-        // If the night's pool is exhausted for this role, fall back to the whole
-        // bank so a round is never left without a question.
-        if (chosen.length < opts.count) {
+        // The bank is a TEST/OFFLINE fixture only. A production night never
+        // refills from it: the generation plan leaves a buffer for every role,
+        // and a shortfall is a generation error, not a silent bank question.
+        if (this.opts.offline && chosen.length < opts.count) {
             const fallback = selectFromBank(opts.count - chosen.length, {
                 role: opts.role,
                 kinds: opts.kinds,
@@ -208,6 +223,22 @@ export class PromptProvider {
             taken.add(p.id);
         }
         return picked;
+    }
+
+    /** The generated look-chain flavours, one per chain tonight. */
+    lookChains(): NightChain[] {
+        return this.chains;
+    }
+
+    /** The generated best-couple question for the room-wide pair pick. */
+    bestCouplePrompt(): Prompt | undefined {
+        return this.bestCouple;
+    }
+
+    /** The generated watcher question for a dare (bound to its two targets). */
+    watcherPrompt(index: number): Prompt | undefined {
+        if (this.watchers.length === 0) return undefined;
+        return this.watchers[index % this.watchers.length];
     }
 
     /** How many prompts are left in the pool for a role. */

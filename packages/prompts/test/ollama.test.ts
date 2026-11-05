@@ -19,12 +19,11 @@ import {
   fillNames,
   parseLines,
   parseOllamaText,
-  rephraseSystemPrompt,
-  rephraseUserPrompt,
   resolveGeminiModel,
   restoreNames,
   validateGenerated,
   Provider,
+  createPromptProvider,
 } from "../src/index.ts";
 import { generateNight } from "../src/generate.ts";
 
@@ -171,151 +170,171 @@ describe("the response parsing", () => {
   });
 });
 
+describe("the generated night", () => {
+  const names = ["Wanjiru", "Kamau", "Dee", "Otieno", "Zawadi"];
+
+  /**
+   * A stand-in model: it reads the role and line count from the request and
+   * returns exactly that many valid lines. Nothing here comes from the bank.
+   */
+  function fakeModel(init?: { body?: string }): string {
+    const body = JSON.parse(String(init?.body ?? "{}")) as {
+      messages?: { role: string; content: string }[];
+    };
+    const user = body.messages?.find((m) => m.role === "user")?.content ?? "";
+    const role = /PLAN: ([a-z-]+)/.exec(user)?.[1] ?? /ROLE: ([a-z_-]+)/.exec(user)?.[1] ?? "";
+    const want = Number(/exactly (\d+)(?: JSON)? lines/.exec(user)?.[1] ?? 0);
+    const lines: string[] = [];
+    for (let i = 0; i < want; i++) {
+      const n = i + 1;
+      if (role === "look-chain") {
+        lines.push(JSON.stringify({
+          announce: "Everybody look at {A}.",
+          act: `Look at someone you would call at 3am. Flavour ${n}.`,
+          guess: `Who is {A} calling at 3am? Flavour ${n}.`,
+          why: `Why that one? Flavour ${n}.`,
+        }));
+      } else if (role === "subject") {
+        if (i % 3 === 0) lines.push(JSON.stringify({ kind: "pick", metric: "sex-desire", text: `Who would you take home tonight? Number ${n}.` }));
+        else if (i % 3 === 1) lines.push(JSON.stringify({ kind: "rating", metric: "trust", text: `Rate your own patience from 1 to 10. Number ${n}.` }));
+        else lines.push(JSON.stringify({ kind: "text", metric: "liar", text: `What is the worst lie you told this week? Number ${n}.` }));
+      } else if (role === "observer-subject") {
+        lines.push(JSON.stringify({ kind: "pick", metric: "would-cheat", text: `Who is {P1} most likely to text at 2am? Number ${n}.` }));
+      } else if (role === "observer-pair") {
+        lines.push(JSON.stringify({ kind: "text", metric: "couple-fit", text: `What do you think {P1} and {P2} fight about? Number ${n}.` }));
+      } else if (role === "solo") {
+        lines.push(JSON.stringify({ kind: "text", text: `What is the filthiest thought you had today? Number ${n}.` }));
+      } else if (role === "ship-vote") {
+        lines.push(JSON.stringify({ kind: "pair_vote", metric: "gay-hypothetical", text: `If {P1} and {P2} were gay, would they make a good couple? Number ${n}.` }));
+      } else if (role === "best-couple") {
+        lines.push(JSON.stringify({ kind: "pair_pick", text: `Who do you think would make the best couple here? Number ${n}.` }));
+      } else if (role === "dare") {
+        lines.push(JSON.stringify({ kind: "dare", text: `{P1}, read your last text out loud. Dare ${n}.` }));
+      } else if (role === "dare-watch") {
+        lines.push(JSON.stringify({ kind: "text", text: `Look at {P1} and {P2}. They were just given a dare. Do you think they will do it? Number ${n}.` }));
+      }
+    }
+    return JSON.stringify({ choices: [{ message: { content: lines.join("\n") } }] });
+  }
+
+  const fakeFetch = async (_url: string, init?: { body?: string }) => ({
+    ok: true,
+    status: 200,
+    text: async () => fakeModel(init),
+  });
+
+  it("writes every question and dare itself, with no bank lines", async () => {
+    const report = await generateNight({
+      playerCount: 5,
+      seed: 4,
+      aliases: names,
+      fetchImpl: fakeFetch,
+    });
+    assert.equal(report.error, undefined);
+    assert.ok(report.prompts.length >= 30, "a full night of questions");
+    assert.ok(report.prompts.every((p) => p.source === "ollama"), "no bank line is played");
+    assert.ok(report.prompts.every((p) => p.id.endsWith("-ollama")));
+    assert.equal(report.chains.length, 6, "six generated look chains");
+    assert.ok(report.chains.every((chain) => chain.guess.includes("{A}")));
+    assert.ok(report.bestCouple, "a generated best-couple question");
+    assert.equal(report.bestCouple!.source, "ollama");
+    assert.equal(report.watchers.length, 2, "a generated watcher question per dare");
+    for (const role of ["subject", "observer_subject", "observer_pair", "group", "dare"]) {
+      assert.ok(report.prompts.some((p) => p.role === role), `no ${role} question was generated`);
+    }
+    for (const dare of report.prompts.filter((p) => p.role === "dare")) {
+      assert.match(dare.text, /\{P1\}/, "a generated dare names its target slot");
+    }
+    for (const watcher of report.watchers) {
+      assert.match(watcher.text, /\{P1\}/);
+      assert.match(watcher.text, /\{P2\}/);
+    }
+  });
+
+  it("writes enough for every room size, including the pair split", async () => {
+    for (const playerCount of [4, 5, 6, 7, 8, 11]) {
+      const report = await generateNight({
+        playerCount,
+        seed: 10 + playerCount,
+        fetchImpl: fakeFetch,
+      });
+      assert.equal(report.error, undefined, `${playerCount} players: ${report.error ?? ""}`);
+      assert.ok(report.prompts.length > 20, `${playerCount} players got a night`);
+      assert.ok(report.chains.length >= 6, `${playerCount} players got chains`);
+      assert.equal(report.watchers.length, Math.max(1, Math.min(2, playerCount - 3)), `${playerCount} players got watcher questions`);
+      assert.ok(report.bestCouple, `${playerCount} players got the best-couple question`);
+    }
+  });
+
+  it("does not send the room's real names to the model", async () => {
+    let sent = "";
+    await generateNight({
+      playerCount: 5,
+      seed: 5,
+      aliases: names,
+      fetchImpl: async (_url, init) => {
+        sent = String(init?.body ?? "");
+        return { ok: true, status: 200, text: async () => fakeModel(init) };
+      },
+    });
+    for (const name of names) assert.ok(!sent.includes(name), `the request leaked ${name}`);
+    assert.match(sent, /\{P1\}/);
+  });
+
+  it("refuses to start from the bank when Ollama is down", async () => {
+    const report = await generateNight({
+      playerCount: 5,
+      seed: 6,
+      fetchImpl: async () => { throw new Error("connection refused"); },
+    });
+    assert.equal(report.offline, true);
+    assert.equal(report.prompts.length, 0);
+    assert.ok(report.error);
+    assert.match(report.error!, /Ollama is unreachable/);
+    assert.match(report.error!, /press Start again/i);
+  });
+
+  it("reports progress while it writes", async () => {
+    const counts: number[] = [];
+    const report = await generateNight({
+      playerCount: 5,
+      seed: 7,
+      fetchImpl: fakeFetch,
+      onProgress: (accepted) => counts.push(accepted),
+    });
+    assert.ok(counts.length > 0);
+    assert.deepEqual([...counts].sort((a, b) => a - b), counts, "progress never goes backwards");
+    assert.equal(counts[counts.length - 1], report.accepted);
+  });
+
+  it("throws instead of starting with a bank night", async () => {
+    const provider = createPromptProvider({
+      playerCount: 5,
+      seed: 8,
+      aliases: names,
+      fetchImpl: async () => { throw new Error("down"); },
+    });
+    await assert.rejects(() => provider.generate(), /Ollama is unreachable/);
+  });
+
+  it("still lets tests use the bank explicitly, without calling a model", async () => {
+    const provider = createPromptProvider({ playerCount: 5, seed: 9, offline: true });
+    const prompts = await provider.generate();
+    assert.ok(prompts.length > 100);
+    assert.ok(prompts.every((p) => p.source === "bank"));
+  });
+});
+
 describe("the room's real names", () => {
   it("fills the slots on the way in and puts them back on the way out", () => {
     const names = ["Wanjiru", "Kamau", "Dee"];
     assert.equal(fillNames("Who here would kiss {P1}?", names), "Who here would kiss Wanjiru?");
     assert.equal(restoreNames("Would Kamau text Dee at 3am?", names), "Would {P2} text {P3} at 3am?");
-    // a name inside an unrelated word is not a player
     assert.equal(restoreNames("Is orange the worst flavour?", names), "Is orange the worst flavour?");
-    // case-insensitive, and the long name wins over the short one it hides in
     assert.equal(restoreNames("WANJIRU likes Kamau", names), "{P1} likes {P2}");
-    // a slot beyond the roster stays a slot, so the validator can reject it
     assert.equal(fillNames("Kiss {P9}?", names), "Kiss {P9}?");
   });
-
-  it("tells the model to keep every name it was given", () => {
-    const system = rephraseSystemPrompt();
-    assert.match(system, /names real people in this room/);
-    assert.doesNotMatch(system, /Never write anything cruel/);
-    const user = rephraseUserPrompt(["Who in this room has a crush on {P1}?"]);
-    assert.match(user, /\{P1\}/);
-    assert.match(user, /keep every person's name/);
-  });
-
-  it("asks with real names and stores the slots back", async () => {
-    let sent = "";
-    const report = await generateNight({
-      playerCount: 5,
-      seed: 7,
-      aliases: ["Wanjiru", "Kamau", "Dee", "Otieno", "Zawadi"],
-      fetchImpl: async (_url, init) => {
-        sent = String(init?.body ?? "");
-        return {
-          ok: true,
-          status: 200,
-          text: async () =>
-            JSON.stringify({ choices: [{ message: { content: "Would Zawadi take home Wanjiru tonight?" } }] }),
-        };
-      },
-    });
-    assert.ok(sent.includes("Wanjiru"), "the local lane reads real names");
-    const accepted = report.prompts.find((p) => p.source === "ollama");
-    assert.ok(accepted, "a valid line is accepted");
-    assert.ok(!accepted!.text.includes("Wanjiru"), "the bank stores slots, not names");
-    assert.ok(accepted!.text.includes("{P1}") && accepted!.text.includes("{P5}"));
-  });
-
-  it("drops a line that names nobody in the room", async () => {
-    const report = await generateNight({
-      playerCount: 5,
-      seed: 8,
-      aliases: ["Wanjiru", "Kamau", "Dee", "Otieno", "Zawadi"],
-      fetchImpl: async () => ({
-        ok: true,
-        status: 200,
-        text: async () =>
-          JSON.stringify({ choices: [{ message: { content: "Who in the next flat has the best legs?" } }] }),
-      }),
-    });
-    assert.equal(report.accepted, 0, "a stranger is not a prompt");
-  });
 });
-
-describe("the generation run", () => {
-  it("falls back to the bank when Ollama is not reachable", async () => {
-    const lines: string[] = [];
-    const report = await generateNight({
-      playerCount: 5,
-      seed: 1,
-      fetchImpl: async () => { throw new Error("connection refused"); },
-      log: (line) => lines.push(line),
-    });
-    assert.ok(report.prompts.length > 100, "the bank must carry the night");
-    assert.equal(report.accepted, 0);
-    assert.equal(report.offline, true);
-    assert.ok(lines.some((l) => l.startsWith("Ollama: asked ")), "the terminal must report per batch");
-    assert.equal(report.batches.length, 1, "an unreachable model is asked once, not once per band");
-  });
-
-  it("uses the model's lines when they pass, and the bank for the rest", async () => {
-    const report = await generateNight({
-      playerCount: 5,
-      seed: 2,
-      fetchImpl: async () => ({
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({
-          choices: [{ message: { content: "Who in this room would you take home tonight?" } }],
-        }),
-      }),
-    });
-    assert.ok(report.accepted > 0, "a valid line should be accepted");
-    assert.ok(report.prompts.some((p) => p.source === "ollama"), "the model's line should be used");
-    assert.ok(report.prompts.some((p) => p.source === "bank"), "the bank must backfill the rest");
-    assert.equal(report.target, GEN_TARGET_PROMPTS);
-  });
-
-  it("reports the running accepted count after every batch", async () => {
-    const counts: number[] = [];
-    const report = await generateNight({
-      playerCount: 5,
-      seed: 12,
-      fetchImpl: async () => ({
-        ok: true,
-        status: 200,
-        text: async () =>
-          JSON.stringify({ choices: [{ message: { content: "Who in this room would you take home tonight?" } }] }),
-      }),
-      onProgress: (accepted) => counts.push(accepted),
-    });
-    assert.ok(counts.length > 0, "progress must be reported while generating");
-    assert.deepEqual([...counts].sort((a, b) => a - b), counts, "progress never goes backwards");
-    assert.equal(counts[counts.length - 1], report.accepted, "the last count is the run's total");
-  });
-
-  it("prints a per-batch report with the reasons", async () => {
-    const lines: string[] = [];
-    await generateNight({
-      playerCount: 5,
-      seed: 3,
-      // A refusal for every candidate.
-      fetchImpl: async () => ({
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({
-          choices: [{ message: { content: "I'm sorry, but I can't help with that." } }],
-        }),
-      }),
-      log: (line) => lines.push(line),
-    });
-    const batchLines = lines.filter((l) => l.startsWith("Ollama: asked "));
-    assert.ok(batchLines.length >= 1);
-    assert.match(batchLines[0]!, /^Ollama: asked \d+, accepted \d+, dropped \d+ \(.+\)$/);
-    assert.match(batchLines[0]!, /refusal:\d+/);
-  });
-
-  it("formats the reasons the way the terminal prints them", () => {
-    assert.equal(formatReasons({ "not-in-room": 1, repeat: 2 }), "not-in-room:1, repeat:2");
-    assert.equal(formatReasons({}), "none");
-  });
-
-  it("asks the model to keep every placeholder", () => {
-    const user = rephraseUserPrompt(["Who in this room has a crush on {P1}?"]);
-    assert.match(user, /\{P1\}/);
-  });
-});
-
 
 describe("the model ids", () => {
   it("defaults to the safe Gemini model when GEMINI_MODEL is empty", () => {

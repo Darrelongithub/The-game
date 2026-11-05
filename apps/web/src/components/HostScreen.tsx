@@ -137,6 +137,11 @@ export function HostScreen({
           </GlassCard>
 
           {/* controls */}
+          {view?.generationError && (
+            <p role="alert" className="rounded-2xl border border-alert/40 bg-alert/10 px-4 py-3 text-sm text-alert">
+              Couldn&apos;t start: {view.generationError}
+            </p>
+          )}
           <div className="flex flex-wrap gap-3">
             <GlowButton onClick={onStart} disabled={view?.phase !== "lobby"} data-testid="host-start">
               {view?.phase === "lobby" ? "Start the night" : "Started"}

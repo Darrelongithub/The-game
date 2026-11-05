@@ -26,8 +26,9 @@
 //     MAX_PROMPT_CHARS.
 //
 // Reading the answers and writing the reveal is NOT this lane's job: that is
-// Gemini (provider.ts, called by the narrator). ON ANY FAILURE the bank prompt
-// is used unchanged — the bank carries the night, Ollama only sharpens it.
+// Gemini (provider.ts, called by the narrator). The original-generation path
+// is generate.ts; the rephrase driver below is kept only for older tests and
+// is not used by a production night.
 import {
   BAND_ORDER,
   MAX_PROMPT_CHARS,
@@ -419,7 +420,7 @@ export interface OllamaRunReport {
   dropped: number;
   /** True when the safety cap cut the run short. */
   capped: boolean;
-  /** True when Ollama was not reachable at all — the bank carries the night. */
+  /** True when Ollama was not reachable at all. */
   offline: boolean;
 }
 

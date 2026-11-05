@@ -1,26 +1,28 @@
 # `@reveal/prompts` — the bank and the two lanes
 
-The prompt bank, the local generator, the remote analyst, and the call ledger
-that keeps both of them on a budget. **Everything here is code-first**: with no
-model and no key the handwritten bank carries the whole night, offline. A
-provider only ever *sharpens* the wording — it never produces a number the
-engine scores, and nothing in this package decides who wins anything.
+The local generator, the remote analyst, the prompt bank used by tests, and
+the call ledger that keeps both lanes on a budget. **Ollama writes every
+question and dare for a real night.** If it cannot, the room does not start;
+the bank is a deterministic fixture for tests, never a production fallback.
+No model produces a number the engine scores, and nothing here decides who
+wins anything.
 
 ```
-src/bank/*.json  warmup 36 · spicy 63 · deep 37 · dare 28 · unhinged 30 = 194
+src/bank/*.json  warmup 36 · spicy 63 · deep 37 · dare 34 · unhinged 30 = 200
 src/bank/index.ts  the loader (unhinged FIRST, then the bands), the seeded
                  shuffle, and the spread-out selection
 src/ollama.ts    THE LOCAL LANE — fillNames/restoreNames, the rephrase prompt,
                  the four drop reasons, the per-band batch, the terminal report
-src/generate.ts  `generateNight` — the whole run: bands, safety cap, backfill
+src/generate.ts  `generateNight` — role-planned original generation, no bank
 src/provider.ts  THE GEMINI LANE — the analyst: pseudonyms in, reveal copy out
 src/guard.ts     ONE per-room in-memory call ledger for BOTH lanes (cap 8)
-src/facade.ts    `PromptProvider` — bank-first, never blocks the game
+src/facade.ts    `PromptProvider` — Ollama only; a shortfall throws
 src/index.ts     the public surface
 ```
 
 There is no content filter, and no `filter.ts`. This is a party for the people
-in the room, not an app that ships.
+in the room, not an app that ships. Every real prompt is generated with the
+room's names as `{P1}` slots and bound at deal time.
 
 ## The bank
 
@@ -30,7 +32,7 @@ in the room, not an app that ships.
 | spicy.json | 63 | the night opens here (`BAND_ORDER[0] === "spicy"`) |
 | warmup.json | 36 | includes 10+ that are already about kissing / sleeping with / body counts |
 | deep.json | 37 | feelings, but never a therapy label |
-| dare.json | 28 | the ones you have to actually do |
+| dare.json | 34 | the ones you have to actually do; generated dares are what a real night uses |
 
 `bankCounts()` counts the unhinged tier inside `spicy` (93), because that is the
 band its entries carry.
@@ -41,7 +43,7 @@ band its entries carry.
 * `selectFromBank(n, opts)` is deterministic per seed, never repeats a template
   inside a night, and never puts two prompts of the same kind + metric back to
   back when the pool can avoid it.
-* The floor the brief asks for is 150; the bank has 194.
+* The floor the brief asks for is 150; the bank has 200. A real night does not play the bank; Ollama writes every line.
 
 ## The local lane (Ollama)
 

@@ -26,9 +26,24 @@ export interface DrawRequest {
   metric?: string;
 }
 
+/** The structural copy of a look-chain flavour (generated or code fallback). */
+export interface LookChainCopy {
+  announce: string;
+  act: string;
+  guess: string;
+  why: string;
+  source?: "bank" | "ollama";
+}
+
 export interface PromptProvider {
   /** Draw prompts for a case slot. Never blocks, never throws. */
   draw(request: DrawRequest): Prompt[];
+  /** The generated look-chain flavours for tonight, in order. */
+  lookChains?(): readonly LookChainCopy[];
+  /** The generated best-couple question. */
+  bestCouplePrompt?(): Prompt | undefined;
+  /** The generated watcher question for a dare, by dare index. */
+  watcherPrompt?(index: number): Prompt | undefined;
   /** Every prompt id used tonight. */
   usedPromptIds(): string[];
   /** Run the generation (Ollama). Resolves when the run is done or capped. */

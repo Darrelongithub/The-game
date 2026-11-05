@@ -14,6 +14,7 @@
 import { spawn } from "node:child_process";
 import { createGameServer } from "../apps/server/src/server.ts";
 import { createProductionServices } from "../apps/server/src/integratedServices.ts";
+import { startFakeOllama } from "./fake-ollama.ts";
 import { assertNoOrientationLeak, computeResults, orientationLeak } from "../packages/engine/src/index.ts";
 import type { LogRecord, SecretDeckView, VerdictKind } from "../packages/shared/src/contracts.ts";
 
@@ -26,34 +27,48 @@ const ALLOWED_KINDS: VerdictKind[] = [
   "bodycount", "bestinbed", "besties", "rivals", "freeagent", "blindspot",
 ];
 
-const services = createProductionServices();
-const server = createGameServer({ services });
-
 /** Every "secrets" frame, with the socket that received it. */
 const secretFrames: { recipient: string; isHost: boolean; deck: SecretDeckView }[] = [];
 /** Every "finale" frame. */
 const finales: { slides: { title: string; body?: string }[] }[] = [];
-
-server.io.on("connection", (socket) => {
-  socket.onAnyOutgoing((event, ...args) => {
-    if (event === "secrets") {
-      secretFrames.push({
-        recipient: String(socket.data.playerId ?? "unknown"),
-        isHost: Boolean(socket.data.isHost),
-        deck: structuredClone(args[0]) as SecretDeckView,
-      });
-    }
-    if (event === "finale") {
-      finales.push(structuredClone(args[0]) as { slides: { title: string; body?: string }[] });
-    }
-  });
-});
 
 function check(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`verified smoke: ${message}`);
 }
 
 async function main(): Promise<void> {
+  // The smoke runs the production wiring, with a deterministic local model in
+  // place of the real Ollama. It writes a full night, so this exercises the
+  // same strict generation path and never touches the bank.
+  const fakeOllama = await startFakeOllama();
+  process.env.GEN_BASE = fakeOllama.url;
+  process.env.GEN_MODEL = "fake-ollama";
+  const services = createProductionServices();
+  const server = createGameServer({ services });
+  server.io.on("connection", (socket) => {
+    socket.onAnyOutgoing((event, ...args) => {
+      if (event === "secrets") {
+        secretFrames.push({
+          recipient: String(socket.data.playerId ?? "unknown"),
+          isHost: Boolean(socket.data.isHost),
+          deck: structuredClone(args[0]) as SecretDeckView,
+        });
+      }
+      if (event === "finale") {
+        finales.push(structuredClone(args[0]) as { slides: { title: string; body?: string }[] });
+      }
+    });
+  });
+
+  try {
+    await runSmoke(server, fakeOllama);
+  } finally {
+    await server.close();
+    await fakeOllama.close();
+  }
+}
+
+async function runSmoke(server: ReturnType<typeof createGameServer>, fakeOllama: Awaited<ReturnType<typeof startFakeOllama>>): Promise<void> {
   const port = await server.listen(0, "127.0.0.1", false);
   const room = server.rooms.nightRoom!;
 
@@ -137,6 +152,4 @@ void main()
     console.error(error);
     process.exitCode = 1;
   })
-  .finally(async () => {
-    await server.close();
-  });
+  ;

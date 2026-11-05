@@ -14,16 +14,18 @@ reference/unhinged-tier.md        the spicy/sexual tier — always on, no switch
 reference/ui-system.md            THE UI (paste your UI code here verbatim)
 reference/ui-system-FIXES.md      7 fixes that must be applied to it
 NOTES/contract-requests.md        agents append; Agent Z resolves
-.env.example                      copy to .env — every key optional
+.env.example                      copy to .env — Ollama config; Gemini key optional
 
 ## Setup (2 minutes)
 1. Put the UI code in `reference/ui-system.md` (the paste from your UI agent).
 2. Run `npx -y tsx scripts/selfcheck.ts` — must print ALL CHECKS PASSED.
-3. Copy `.env.example` → `.env`. Every key is OPTIONAL — no keys at all =
-   the handwritten bank (194 prompts) runs the whole night, fully offline:
+3. Copy `.env.example` → `.env`. Gemini is optional; **Ollama is required to
+   start a night** because it writes every question and dare:
    - Ollama (`GEN_BASE` / `GEN_MODEL`, default `dolphin-mistral`) — the local
-     model that rewrites the night's questions and dares, with the room's real
-     names in them. `ollama pull dolphin-mistral` once and it stays offline.
+     model that writes the night's questions and dares. `ollama pull
+     dolphin-mistral` once and it stays offline. If it is down or returns too
+     few valid lines, the room stays in the lobby and the host sees the error;
+     the handwritten bank is never played in a real room.
    - `GEMINI_API_KEY` (aistudio.google.com/apikey) — the analyst: it reads the
      night's data and writes the reveal and the secret-card copy.
 
@@ -48,5 +50,5 @@ doesn't slow the merge down.
 ## The four rules
 1. `packages/shared` is frozen — requests go to `NOTES/contract-requests.md`.
 2. Code against contracts + MockTransport, never another agent's WIP.
-3. Fully playable with no API keys — the bank runs the whole night, offline.
+3. Ollama writes every question and dare; Gemini is optional for the reveal copy.
 4. The LLM never produces a number — scoring is deterministic code.

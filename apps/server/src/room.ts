@@ -8,7 +8,7 @@
 //   • Players join, fill a short profile, tick ready.
 //   • The host presses Start. Ollama generates the night's prompts (spicy
 //     first) while every phone shows the loading screen. The safety cap cuts
-//     it off and the bank carries the night.
+//     it off. There is no bank fallback: the room stays in the lobby.
 //   • Cases play one after another. A case closes the INSTANT the last
 //     required person answers; a 1–2s "locked in" beat follows, then the next
 //     case.
@@ -97,7 +97,7 @@ export interface GameOptions {
   clearTimer?: (handle: unknown) => void;
 }
 
-/** How long the loading screen waits before the bank carries the night. */
+/** How long the loading screen waits before generation is treated as failed. */
 const GENERATION_SAFETY_CAP_MS = 180_000;
 
 export class RoomManager {
@@ -291,6 +291,7 @@ export class RoomManager {
     if (room.players.size < MIN_PLAYERS) return;
 
     room.phase = "generating";
+    room.generationError = undefined;
     room.totalCases = totalCasesFor(room.order.length);
     room.generation = { done: 0, total: GEN_TARGET_PROMPTS };
     this.broadcastState(room);
@@ -327,8 +328,16 @@ export class RoomManager {
     let prompts: Awaited<ReturnType<NonNullable<PromptProvider["generate"]>>> = [];
     try {
       prompts = (await provider.generate?.()) ?? [];
-    } catch {
-      prompts = [];
+    } catch (error) {
+      polling = false;
+      this.clearTimer(pollTimer);
+      const message = error instanceof Error ? error.message : String(error);
+      room.phase = "lobby";
+      room.generationError = message;
+      room.generation = undefined;
+      this.log(`Generation failed: ${message}`);
+      this.broadcastState(room);
+      return;
     } finally {
       polling = false;
       this.clearTimer(pollTimer);
@@ -357,7 +366,11 @@ export class RoomManager {
   private planCases(room: Room): Case[] {
     const cases: Case[] = [];
     const now = this.now();
+    const provider = this.providers.get(room.code);
+    const chainCopies = provider?.lookChains?.() ?? [];
+    const chainVariants = chainCopies.length > 0 ? chainCopies : LOOK_CHAIN_VARIANTS;
     let chainIndex = 0;
+    let dareIndex = 0;
     let shipIndex = 0;
     // Players who have already acted in a chain — a second turn only after
     // everybody has had one.
@@ -414,22 +427,28 @@ export class RoomManager {
         });
         shipIndex += 1;
       } else if (shape === "bestcouple") {
-        built = buildBestCoupleCase({ room, index, aliasOf: (id) => this.aliasOf(room, id), now, rand: this.rand });
+        const bestPrompt = provider?.bestCouplePrompt?.();
+        built = buildBestCoupleCase({
+          room, index, aliasOf: (id) => this.aliasOf(room, id), now, rand: this.rand,
+          ...(bestPrompt ? { prompt: bestPrompt } : {}),
+        });
       } else if (shape === "dare") {
         // One dare per case — a dare template never repeats inside a night.
         const prompt = this.drawPrompts(room, "dare", 1)[0];
         if (prompt) {
           built = buildDareCase({
             room, index, aliasOf: (id) => this.aliasOf(room, id), now, rand: this.rand, prompt,
+            ...(provider?.watcherPrompt?.(dareIndex) ? { watchPrompt: provider.watcherPrompt(dareIndex)! } : {}),
             avoid: dareTargets,
           });
+          dareIndex += 1;
           for (const segment of built?.segments ?? []) {
             if (segment.target) dareTargets.add(segment.target);
           }
         }
       } else if (shape === "lookchain") {
-        // A fresh chain flavour every time — the copy never repeats tonight.
-        const variant = LOOK_CHAIN_VARIANTS[chainIndex % LOOK_CHAIN_VARIANTS.length]!;
+        // A fresh chain flavour every time — Ollama's copy for a real night.
+        const variant = chainVariants[chainIndex % chainVariants.length]!;
         chainIndex += 1;
         built = buildLookChainCase({
           room, index, aliasOf: (id) => this.aliasOf(room, id), now, rand: this.rand, variant,

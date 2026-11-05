@@ -380,6 +380,8 @@ export interface RoomView {    // PUBLIC — contains nothing private
     progress?: { index: number; total: number } | undefined;
     /** Generation progress, shown on the loading screen. */
     generation?: { done: number; total: number } | undefined;
+    /** Why the night could not start. The host sees this in the lobby. */
+    generationError?: string | undefined;
     /**
      * The public one-liner for the case that is open — the look chain's
      * "Everybody look at X." The laptop shows it; it is never private.
@@ -509,7 +511,7 @@ export const CONFIDENCE_RULES = {
 } as const;
 
 /** The provider cap for one night (both lanes share one ledger). */
-export const MAX_PROVIDER_CALLS_PER_NIGHT = 8;
+export const MAX_PROVIDER_CALLS_PER_NIGHT = 24;
 
 /**
  * The provider lanes. Ollama is the ONLY generator — it writes the night's

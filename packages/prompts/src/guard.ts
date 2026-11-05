@@ -1,8 +1,8 @@
 // packages/prompts/src/guard.ts
 // ONE shared call counter for BOTH provider lanes, counted per room, in memory.
 //
-// Spec §6: "Hard cap: ≤ MAX_PROVIDER_CALLS_PER_NIGHT provider calls per night."
-// The night spends: generation 4 (one batch per band) + the reveal 1 = 5.
+// The night spends: generation (one call per role plan, plus the look chains)
+// + the reveal 1. The cap leaves headroom for a retry or two.
 // So the guard enforces two things:
 //   1. a per-room TOTAL cap (MAX_PROVIDER_CALLS_PER_NIGHT), and
 //   2. per-purpose slot caps (batching IS the budget: one generation batch per
@@ -13,10 +13,10 @@ import { MAX_PROVIDER_CALLS_PER_NIGHT } from "../../shared/src/contracts.ts";
 
 export type CallPurpose = "generate" | "reveal";
 
-/** Per-room, per-night slot caps. Sum = 5, well under the hard cap of 8. */
+/** Per-room, per-night slot caps. */
 export const PURPOSE_SLOTS: Readonly<Record<CallPurpose, number>> = Object.freeze({
-  generate: 4, // ONE batch per band (spicy / warmup / deep / dare)
-  reveal: 1,   // finale slides + secret cards, ONE Gemini call
+  generate: 20, // role plans + chains (and retries)
+  reveal: 1,    // finale slides + secret cards, ONE Gemini call
 });
 
 export interface GuardSnapshot {

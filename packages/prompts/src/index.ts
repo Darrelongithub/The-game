@@ -7,7 +7,7 @@
 //   • provider.ts the Gemini lane, which reads the night's data and writes
 //               the reveal
 //   • generate.ts the batched generation run, spicy first, safety-capped
-//   • facade.ts PromptProvider — bank-first, never blocks the game
+//   • facade.ts PromptProvider — Ollama writes every prompt; no bank fallback
 //
 // There is no content filter. This is a party for the people in the room, not
 // an app that ships: the only things that stop a line being played are that it
@@ -93,11 +93,13 @@ export {
 } from "./ollama.ts";
 
 export {
+  GenerationError,
   generateNight,
-  seedPromptsForBand,
+  planNight,
   type GenerateBatchInput,
   type GenerateBatchReport,
-  type GenerateDrop,
+  type GenerationBatch,
+  type NightChain,
 } from "./generate.ts";
 
 export {

@@ -156,7 +156,7 @@ export interface Room {
   log: LogRecord[];
   /** Prompt ids already used tonight — no template repeats. */
   usedPromptIds: Set<string>;
-  /** Prompts available for the night (bank + anything Ollama wrote). */
+  /** Prompts Ollama wrote for the night (the bank is never used in a real room). */
   pool: Prompt[];
   /** Players who said "Ready for the results". */
   finalReady: Set<PlayerId>;
@@ -170,6 +170,8 @@ export interface Room {
   totalCases: number;
   /** Generation progress for the loading screen. */
   generation?: { done: number; total: number };
+  /** Why Start failed. Present only when the room stayed in the lobby. */
+  generationError?: string;
   /** The pairs already used for ship votes — no pair twice. */
   shipPairsUsed: Set<string>;
   /** Look chains played tonight. */
@@ -731,8 +733,10 @@ export function buildBestCoupleCase(input: {
   aliasOf: (id: PlayerId) => string;
   now: number;
   rand: () => number;
+  /** Ollama's best-couple question for tonight. */
+  prompt?: Prompt;
 }): Case | undefined {
-  const { room, index, aliasOf, now, rand } = input;
+  const { room, index, aliasOf, now, rand, prompt: generated } = input;
   if (room.order.length < 2) return undefined;
   const pairs = allPairs(room.order);
   // A shortlist of candidate couples, in a different order every night.
@@ -747,17 +751,27 @@ export function buildBestCoupleCase(input: {
     label: `${aliasOf(a)} & ${aliasOf(b)}`,
   }));
   if (options.length === 0) return undefined;
-  const prompt: Prompt = {
-    id: `${room.code}-bestcouple-${index}`,
-    source: "bank",
-    band: "spicy",
-    role: "group",
-    kind: "pair_pick",
-    text: "Who do you think would make the best couple here?",
-    measures: ["metric:couple-fit"],
-    coding: "couple",
-    asksTarget: true,
-  };
+  const prompt: Prompt = generated
+    ? {
+        ...generated,
+        // The engine's couple verdict needs the metric even when the model
+        // wrote a perfect question but left the signal out.
+        measures: generated.measures.some((m) => m.startsWith("metric:"))
+          ? generated.measures
+          : [...generated.measures, "metric:couple-fit"],
+        coding: "couple",
+      }
+    : {
+        id: `${room.code}-bestcouple-${index}`,
+        source: "bank",
+        band: "spicy",
+        role: "group",
+        kind: "pair_pick",
+        text: "Who do you think would make the best couple here?",
+        measures: ["metric:couple-fit"],
+        coding: "couple",
+        asksTarget: true,
+      };
   const segment: Segment = {
     id: `${room.code}-c${index}-bestcouple`,
     players: [...room.order],
@@ -824,7 +838,7 @@ export function buildLookChainCase(input: {
     players: [actor],
     prompt: {
       id: `${id}-act-prompt`,
-      source: "bank",
+      source: variant.source ?? "bank",
       band: "spicy",
       role: "subject",
       kind: "pick",
@@ -849,7 +863,7 @@ export function buildLookChainCase(input: {
     players: guessers,
     prompt: {
       id: `${id}-guess-prompt`,
-      source: "bank",
+      source: variant.source ?? "bank",
       band: "spicy",
       role: "group",
       kind: "pick",
@@ -874,7 +888,7 @@ export function buildLookChainCase(input: {
     players: [actor],
     prompt: {
       id: `${id}-why-prompt`,
-      source: "bank",
+      source: variant.source ?? "bank",
       band: "spicy",
       role: "subject",
       kind: "text",
@@ -920,10 +934,12 @@ export function buildDareCase(input: {
   now: number;
   rand: () => number;
   prompt: Prompt;
+  /** Ollama's watcher question for the people who were not dared. */
+  watchPrompt?: Prompt;
   /** Players who already had a dare tonight — give the others a turn first. */
   avoid?: ReadonlySet<PlayerId>;
 }): Case | undefined {
-  const { room, index, aliasOf, now, rand, prompt, avoid } = input;
+  const { room, index, aliasOf, now, rand, prompt, watchPrompt, avoid } = input;
   if (room.order.length === 0) return undefined;
 
   // Dares go to one or two people, never the whole room. With four or more
@@ -965,17 +981,33 @@ export function buildDareCase(input: {
     ? aliasOf(targets[0]!)
     : `${aliasOf(targets[0]!)} and ${aliasOf(targets[1]!)}`;
   if (watchers.length > 0) {
-    const watcherPrompt: Prompt = {
-      id: `${id}-watch-prompt`,
-      source: "bank",
-      band: "spicy",
-      role: "group",
-      kind: "text",
-      text: `Look at ${about}. They were just given a dare. Do you think they will do it? If not, why?`,
-      measures: ["flavour:dare"],
-      coding: "tease",
-      asksTarget: true,
-    };
+    // A generated watcher question is bound to the two targets; the code line
+    // is the test/offline fallback only.
+    const canBindGenerated = Boolean(watchPrompt)
+      && (targets.length === 2 || !/\{P2\}/.test(watchPrompt!.text));
+    const watcherPrompt: Prompt = canBindGenerated
+      ? {
+          ...watchPrompt!,
+          id: `${id}-watch-prompt`,
+          text: substitute(watchPrompt!.text, new Map([[1, aliasOf(targets[0]!)]])),
+        }
+      : {
+          id: `${id}-watch-prompt`,
+          source: "bank",
+          band: "spicy",
+          role: "group",
+          kind: "text",
+          text: `Look at ${about}. They were just given a dare. Do you think they will do it? If not, why?`,
+          measures: ["flavour:dare"],
+          coding: "tease",
+          asksTarget: true,
+        };
+    if (canBindGenerated && targets[1]) {
+      watcherPrompt.text = substitute(watchPrompt!.text, new Map([
+        [1, aliasOf(targets[0]!)],
+        [2, aliasOf(targets[1]!)],
+      ]));
+    }
     segments.push({
       id: `${id}-watch`,
       players: watchers,
@@ -1111,6 +1143,7 @@ export function roomView(room: Room, now: number): RoomView {
   };
   if (room.phase === "results") view.ready = [...room.finalReady];
   if (room.generation) view.generation = room.generation;
+  if (room.generationError) view.generationError = room.generationError;
   if (room.phase === "play" && room.current?.headline) view.headline = room.current.headline;
   return view;
 }

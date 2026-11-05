@@ -3,8 +3,10 @@
 //
 // Two lanes, two jobs, and neither one decides a score.
 //
-//   • Ollama is the GENERATOR: the night's questions and dares, with the room's
-//     real names written into them. Bank-first — it is never on the critical path.
+//   • Ollama is the GENERATOR: every question and dare for the night, written
+//     from role briefs. It IS the critical path now — if Ollama cannot write
+//     the night, the room stays in the lobby and the host sees the error. The
+//     bank is never used for a real room.
 //   • Gemini is the ANALYST: at the end of the night it gets the whole pseudonymised
 //     result set and writes the reveal and the secret-card copy. One call, and if
 //     it fails or says something the validator dislikes, the engine's own line
@@ -100,6 +102,18 @@ class IntegratedPromptProvider implements PromptProvider {
       config: this.provider.ollama,
       fetchImpl: this.network.fetch as FetchLike,
     });
+  }
+
+  lookChains(): readonly { announce: string; act: string; guess: string; why: string; source?: "bank" | "ollama" }[] {
+    return this.facade.lookChains();
+  }
+
+  bestCouplePrompt(): Prompt | undefined {
+    return this.facade.bestCouplePrompt();
+  }
+
+  watcherPrompt(index: number): Prompt | undefined {
+    return this.facade.watcherPrompt(index);
   }
 
   draw(request: { role: Prompt["role"]; count: number; kinds?: readonly import("../../../packages/shared/src/contracts.ts").RoundKind[]; metric?: string }): Prompt[] {
