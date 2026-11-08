@@ -18,18 +18,18 @@ export function fakeOllamaContent(requestBody: string): string {
     if (plan === "look-chain") {
       lines.push(JSON.stringify({
         announce: "Everybody look at {A}.",
-        act: `Look at someone you would call at 3am. Flavour ${n}.`,
-        guess: `Who is {A} calling at 3am? Flavour ${n}.`,
+        act: `Look at someone you would sleep with tonight. Flavour ${n}.`,
+        guess: `Who is {A} sleeping with tonight? Flavour ${n}.`,
         why: `Why that one? Flavour ${n}.`,
       }));
     } else if (plan === "subject") {
       if (i % 3 === 0) lines.push(JSON.stringify({ kind: "pick", metric: "sex-desire", text: `Who would you take home tonight? Number ${n}.` }));
-      else if (i % 3 === 1) lines.push(JSON.stringify({ kind: "rating", metric: "trust", text: `Rate your own patience from 1 to 10. Number ${n}.` }));
+      else if (i % 3 === 1) lines.push(JSON.stringify({ kind: "rating", metric: "trust", text: `Rate your own sex appeal from 1 to 10. Number ${n}.` }));
       else lines.push(JSON.stringify({ kind: "text", metric: "liar", text: `What is the worst lie you told this week? Number ${n}.` }));
     } else if (plan === "observer-subject") {
-      lines.push(JSON.stringify({ kind: "pick", metric: "would-cheat", text: `Who is {P1} most likely to text at 2am? Number ${n}.` }));
+      lines.push(JSON.stringify({ kind: "pick", metric: "would-cheat", text: `Who would {P1} most likely sleep with tonight? Number ${n}.` }));
     } else if (plan === "observer-pair") {
-      lines.push(JSON.stringify({ kind: "text", metric: "couple-fit", text: `What do you think {P1} and {P2} fight about? Number ${n}.` }));
+      lines.push(JSON.stringify({ kind: "text", metric: "couple-fit", text: `Which of {P1} and {P2} would cheat first? Number ${n}.` }));
     } else if (plan === "solo") {
       lines.push(JSON.stringify({ kind: "text", text: `What is the filthiest thought you had today? Number ${n}.` }));
     } else if (plan === "ship-vote") {
@@ -37,7 +37,7 @@ export function fakeOllamaContent(requestBody: string): string {
     } else if (plan === "best-couple") {
       lines.push(JSON.stringify({ kind: "pair_pick", text: `Who do you think would make the best couple here? Number ${n}.` }));
     } else if (plan === "dare") {
-      lines.push(JSON.stringify({ kind: "dare", text: `{P1}, read your last text out loud. Dare ${n}.` }));
+      lines.push(JSON.stringify({ kind: "dare", text: `{P1}, text your ex the filthiest thing you ever thought about them. Dare ${n}.` }));
     } else if (plan === "dare-watch") {
       lines.push(JSON.stringify({ kind: "text", text: `Look at {P1} and {P2}. They were just given a dare. Do you think they will do it? Number ${n}.` }));
     }

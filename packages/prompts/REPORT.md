@@ -17,7 +17,7 @@ outside it was edited except one append to `NOTES/contract - requests.md`.
 | `src/bank/index.ts` | Loader (JSON per phase), `SPICY_TIER`/env resolution, placeholder parsing, deterministic `selectFromBank` (kind spread, player-count + used-id aware). |
 | `src/text.ts` | Tokenizer, token-set Jaccard (blank inputs score zero; missing data is not midpoint-imputed), dedupe normaliser, `clamp01`. |
 | `src/filter.ts` | Schema + banned patterns + hard blocks + placeholder hygiene + dedupe + DATA-OR-DEAD. Every drop carries a `DropReason`. |
-| `src/guard.ts` | `CallGuard` — ONE per-room in-memory ledger for both lanes: total cap 8, purpose slots `generate 4 / tag 1 / analyze 1 / reveal 1`, `forget(room)`. |
+| `src/guard.ts` | `CallGuard` — ONE per-room in-memory ledger for both lanes: total cap 24, purpose slots `generate 20 / reveal 1`, `forget(room)`. |
 | `src/provider.ts` | Grok lane (OpenAI-compatible `/chat/completions`, Bearer, JSON mode with one retry without `response_format`), Gemini lane (classic `generateContent`, `SAFETY_OFF` → `BLOCK_NONE` + literal-`OFF` retry), 8 s `AbortController`, failure reasons, alias scrubbing. |
 | `src/analyze.ts` | Tag taxonomy + keyword lexicon (`tagText`), `contemptDensity`, token-Jaccard `debriefSimilarity`, ONE-call `tagBatch` / `debriefBatch` refinements (validated, clamped, row-by-row fallback). |
 | `src/generate.ts` | ONE batched Grok call per phase → callback integrity check → deterministic filter → ~1-in-3 verbatim callback top-up. Never throws; returns `[]` on refusal/timeout/429/garbage. |
@@ -93,7 +93,7 @@ Acceptance coverage (from the scope file):
   and the analysis layer.
 * **Call-count guard trips at the cap** — 3-call custom guard: 4th logical call
   returns `budget` with no HTTP request; another room still has its own budget.
-  Default ledger: cap 8 with batch slots (2nd tag batch in a room → `budget`,
+  Default ledger: cap 24 with generation slots (a short batch retries once, then the room refuses;
   another room → allowed).
 * **Callbacks** — an invented quote is dropped (`invented-quote`), a `callback:
   true` without a quote is dropped (`no-quote`), a verbatim quote survives; the

@@ -22,6 +22,8 @@ import { RoomManager } from "../src/room.ts";
 import {
   buildBestCoupleCase,
   buildCase,
+  buildDareCase,
+  buildLookChainCase,
   buildShipVoteCase,
   intoThisPerson,
   metricOf,
@@ -932,6 +934,42 @@ describe("casting", () => {
     assert.throws(
       () => buildCase({ room, index: 0, aliasOf, now: 0, draw: () => [], strict: true }),
       /missing a subject question/,
+    );
+  });
+
+  it("refuses to deal a raw name slot in a generated question", () => {
+    const room = fakeRoom(MIXED);
+    const aliasOf = (id: PlayerId) => room.players.get(id)!.alias;
+    const withThirdSlot: Prompt = { ...HYPOTHETICAL, text: "Would {P1} and {P2} sleep with {P3}?" };
+    assert.throws(
+      () => buildShipVoteCase({
+        room, index: 0, aliasOf, now: 0, rand: () => 0.5, draw: () => [withThirdSlot], allowFallback: false,
+      }),
+      /name slot/,
+    );
+    const dare: Prompt = {
+      ...HYPOTHETICAL,
+      role: "dare",
+      kind: "dare",
+      text: "{P1}, kiss {P2}.",
+      measures: ["flavour:dare"],
+    };
+    assert.throws(
+      () => buildDareCase({ room, index: 0, aliasOf, now: 0, rand: () => 0.5, prompt: dare, strict: true }),
+      /name slot/,
+    );
+    assert.throws(
+      () => buildLookChainCase({
+        room, index: 0, aliasOf, now: 0, rand: () => 0.5,
+        variant: {
+          source: "ollama",
+          announce: "Everybody look at {A}.",
+          act: "Look at {P2}.",
+          guess: "Who is {A} looking at?",
+          why: "Why them?",
+        },
+      }),
+      /name slot/,
     );
   });
 

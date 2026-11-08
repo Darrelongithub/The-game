@@ -155,6 +155,18 @@ describe("a generated night", () => {
     assert.ok(segments.every((segment) => segment.prompt.source === "ollama"), "a bank prompt was played");
     assert.ok(segments.some((segment) => segment.kind === "dare"), "a generated dare is planned");
     assert.ok(segments.some((segment) => segment.id.endsWith("-watch")), "a generated watcher segment is planned");
+    const dareCase = room.cases.find((c) => c.segments.some((s) => s.kind === "dare"))!;
+    const dareTargets = dareCase.segments.filter((s) => s.kind === "dare");
+    assert.equal(dareTargets.length, 2, "two people get the dare");
+    for (const target of dareTargets) {
+      assert.ok(target.target, "the dare has a target");
+      assert.ok(target.text.includes(room.players.get(target.target!)!.alias), "the dare names its own target");
+      assert.ok(!/\{P\d+\}/.test(target.text), "the dare left a raw slot");
+    }
+    const watch = dareCase.segments.find((s) => s.id.endsWith("-watch"))!;
+    for (const target of dareTargets) {
+      assert.ok(watch.text.includes(room.players.get(target.target!)!.alias), "the watcher question names both targets");
+    }
     assert.ok(segments.some((segment) => segment.kind === "pair_pick"), "the generated best-couple pick is planned");
   });
 

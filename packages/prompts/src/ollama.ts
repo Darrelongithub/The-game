@@ -6,22 +6,18 @@
 //   GEN_MODEL      default dolphin-mistral
 //   GEN_TIMEOUT_MS default 120000
 //
-// THE ROOM'S REAL NAMES ARE IN THE PROMPT. The bank writes {P1}..{Pn} slots;
-// fillNames() writes the actual display names into them before the request, so
-// the model reads "Do you think Wanjiru would sleep with Kofi?" — this is a
-// party, not a form — and restoreNames() puts the slots back before a line is
-// kept, so the deal can still bind it to whoever the case is about. A line that
-// ends up naming nobody in the room is dropped. The name the model reads is
-// the roster's own; the SLOT is what is stored, so the question stays true
-// whoever it finally lands on — tonight the model is here for the wording, not
-// for the casting.
+// THE PRODUCTION PATH IS generate.ts. A real request sends only {P1}..{Pn}
+// slots and the role brief: the room's display names never leave the server.
+// The fillNames/restoreNames helpers below belong to the legacy rephrase path,
+// which is kept for older tests and is not called by a production night.
 //
-// WHAT THE MODEL IS ALLOWED TO DO (and nothing else):
-//   1. REPHRASE a bank prompt — the night's questions and its dares.
+// WHAT THE LEGACY PATH DOES:
+//   • Rephrase a bank prompt for tests. Production generate.ts writes original
+//     role-planned questions and dares instead.
 //
-// WHAT IT MAY NOT DO:
-//   • Invent a kind of question the bank does not play.
-//   • Name a person who is not in the room.
+// WHAT NEITHER PATH MAY DO:
+//   • Invent a kind of question the plan does not play.
+//   • Name a person who is not in the room, or leave a slot unbound.
 //   • Emit a refusal, an "as an AI" disclaimer, a repeat, or a line over
 //     MAX_PROMPT_CHARS.
 //
@@ -44,7 +40,7 @@ export const OLLAMA_DEFAULT_BASE = "http://127.0.0.1:11434";
 export const OLLAMA_DEFAULT_MODEL = "dolphin-mistral";
 export const OLLAMA_DEFAULT_TIMEOUT_MS = 120_000;
 
-/** The safety cap on the WHOLE generation run. After this we start anyway. */
+/** The safety cap on the WHOLE generation run. After this the night is refused. */
 export const GEN_SAFETY_CAP_MS = 180_000;
 
 /** How many prompts the loading screen counts towards ("14/40 ready"). */
@@ -145,7 +141,8 @@ export function normalizeForMatch(text: string): string {
 }
 
 /**
- * Validate one generated line. ONLY these four reasons may drop it.
+ * Validate one line for the legacy rephrase path. (Production generate.ts
+ * additionally rejects tame lines and bad slot bindings; see README.)
  */
 export function validateGenerated(input: OllamaValidationInput): OllamaValidation {
   const raw = (input.text ?? "").trim();

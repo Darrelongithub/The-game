@@ -21,6 +21,7 @@ import {
     type PromptCoding,
     type PromptRole,
     type RoundKind,
+    type TraitId,
 } from "../../shared/src/contracts.ts";
 import { placeholderIndexes } from "./bank/index.ts";
 import {
@@ -34,7 +35,6 @@ import {
     isRefusal,
     normalizeForMatch,
     ollamaConfig,
-    restoreNames,
 } from "./ollama.ts";
 
 export class GenerationError extends Error {
@@ -161,7 +161,7 @@ export function planNight(playerCount: number): PromptPlan[] {
             count: ordinary + 2,
             kinds: ["pick", "rating", "text"],
             slotRule: "never",
-            brief: "The phone reading this belongs to the subject. Write to \"you\". They may choose, rate or talk about other people in the room. Do NOT use {P1} slots and never name the subject; say \"someone in this room\" when you need a target.",
+            brief: "The phone reading this belongs to the subject. Write to \"you\". Ask a filthy, specific question about their own desire, body count, a secret, cheating, or who in this room they want. Do NOT use {P1} slots and never name the subject; say \"someone in this room\" when you need a target. No safe personality questions.",
             metricGoals: ["body-count", "sex-desire", "best-in-bed", "trust", "crush", "is-fake", "liar", "weirdest", "ex", "money"] as MetricKey[],
         },
         {
@@ -172,7 +172,7 @@ export function planNight(playerCount: number): PromptPlan[] {
             count: observerSubject + 2,
             kinds: ["pick", "rating", "text"],
             slotRule: "p1",
-            brief: "An observer pair reads this about {P1}, another player in the room. The question must be about {P1}. Use {P1} literally; {P2} and up may be other people. Never write a real name.",
+            brief: "An observer pair reads this about {P1}, another player in the room. Ask something spicy and specific about {P1}: who they would sleep with, whether they would cheat, their body count, or the secret they are hiding. The question must be about {P1}. Use {P1} literally; {P2} and up may be other people. Never write a real name.",
             metricGoals: ["would-cheat", "would-snitch", "body-count", "best-in-bed", "sex-desire", "trust", "liar", "betrayal", "is-fake", "crush"] as MetricKey[],
         },
         {
@@ -184,7 +184,7 @@ export function planNight(playerCount: number): PromptPlan[] {
             kinds: ["text", "pick"],
             fixedKind: "text",
             slotRule: "p1p2",
-            brief: "An observer pair reads this about two other people, {P1} and {P2}. It must include both slots. Ask for a short opinion or prediction, not a rating.",
+            brief: "An observer pair reads this about two other people, {P1} and {P2}. Ask a spicy prediction: who would cheat first, who is secretly into whom, who would be the hottest couple, or what they would do behind someone's back. It must include both slots. Ask for a short opinion or prediction, not a rating.",
             metricGoals: ["couple-fit", "would-cheat", "trust"] as MetricKey[],
         },
         {
@@ -196,7 +196,7 @@ export function planNight(playerCount: number): PromptPlan[] {
             kinds: ["text"],
             fixedKind: "text",
             slotRule: "never",
-            brief: "One person reads this alone. Ask a spicy, personal question to \"you\". Do NOT use {P1} slots and do not name anyone.",
+            brief: "One person reads this alone. Ask a filthy, personal confession or desire question to \"you\": sex, cheating, a secret crush, the last person they thought about naked. Do NOT use {P1} slots and do not name anyone. No safe questions.",
         },
         {
             key: "ship-vote",
@@ -207,7 +207,7 @@ export function planNight(playerCount: number): PromptPlan[] {
             kinds: ["pair_vote"],
             fixedKind: "pair_vote",
             slotRule: "p1p2",
-            brief: "The whole room votes on a hypothetical couple, {P1} and {P2}. Ask whether they would make a good couple (or a gay couple, if the room's humour runs that way). Include both slots.",
+            brief: "The whole room votes on a hypothetical couple, {P1} and {P2}. Ask whether they would be a hot couple, who would cheat first, who would top, or how long they would last. Include both slots and make it spicy.",
             metricGoals: ["gay-hypothetical", "couple-fit", "best-in-bed"] as MetricKey[],
         },
         {
@@ -219,7 +219,7 @@ export function planNight(playerCount: number): PromptPlan[] {
             kinds: ["pair_pick"],
             fixedKind: "pair_pick",
             slotRule: "never",
-            brief: "The whole room picks the best couple from a list of pairs. Write one question. Do NOT use any {P1} slots; the list of pairs is supplied by the app.",
+            brief: "The whole room picks the best couple from a list of pairs, but make the question filthy: most likely to hook up, best sex, most likely to cheat, or the couple that would break the group. Write one question. Do NOT use any {P1} slots; the list of pairs is supplied by the app.",
         },
         {
             key: "dare",
@@ -230,7 +230,7 @@ export function planNight(playerCount: number): PromptPlan[] {
             kinds: ["dare"],
             fixedKind: "dare",
             slotRule: "p1",
-            brief: "A single named player is dared. Start the line with {P1}, then give a spicy, funny dare they can do in the room or a confession they must make. One line. Filthy is fine.",
+            brief: "A single named player is dared. Start the line with {P1}, then give a filthy, funny dare they can do in the room or an explicit confession they must make: send a sext, read their last dirty text, confess who they would sleep with, show their search history. One line. No PG tasks, no 'sing a song'.",
         },
         {
             key: "dare-watch",
@@ -241,7 +241,7 @@ export function planNight(playerCount: number): PromptPlan[] {
             kinds: ["text"],
             fixedKind: "text",
             slotRule: "p1p2",
-            brief: "The rest of the room reads this about {P1} and {P2}, who were just given a dare. Ask whether they think the two will do it, and if not, why. Include both slots.",
+            brief: "The rest of the room reads this about {P1} and {P2}, who were just given a dare. Ask whether they think the two will actually do it, who will chicken out first, and what they are hiding. Include both slots.",
         },
     ];
     return plans;
@@ -251,7 +251,8 @@ function systemPrompt(): string {
     return [
         "You are the question writer for an adults-only party game played by friends who all know each other.",
         "Every question is original. Never mention the bank, a template, an AI, a policy, or that you are a model.",
-        "Be blunt, funny, nosy and a little filthy. The players are adults and consented to the game.",
+        "Be blunt, funny, nosy and filthy. The players are adults and consented to the game.",
+        "Every question must be unmistakably adult: sex, desire, cheating, body counts, secrets, jealousy, lies or money. No safe icebreakers, no trivia, no 'favourite colour' questions.",
         "Never write a real person's name. Use the literal slots {P1}, {P2} ... when a question needs a player; the app replaces them.",
         "Output only the requested lines. No numbering, no bullets, no quotes, no explanation.",
         `Each question is at most ${MAX_PROMPT_CHARS} characters.`,
@@ -299,6 +300,9 @@ function cleanLine(raw: string): string {
         .replace(/^```(?:json|jsonl)?/i, "")
         .replace(/```$/g, "")
         .replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "")
+        .replace(/^\s*#{1,6}\s*/, "")
+        .replace(/\*\*|__|`/g, "")
+        .replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g, "")
         .trim();
 }
 
@@ -311,6 +315,11 @@ function parseGenerated(raw: string, plan: PromptPlan): ParsedLine[] {
             const array = JSON.parse(text) as unknown;
             if (Array.isArray(array)) {
                 for (const item of array) {
+                    if (typeof item === "string") {
+                        const line = cleanLine(item);
+                        if (line) out.push({ text: line, kind: inferKind(line, plan) });
+                        continue;
+                    }
                     const parsed = objectLine(item, plan);
                     if (parsed) out.push(parsed);
                 }
@@ -341,9 +350,7 @@ function objectLine(value: unknown, plan: PromptPlan): ParsedLine | null {
     const text = cleanLine(rawText).replace(/^["']|["']$/g, "").trim();
     if (!text) return null;
     const rawKind = typeof record.kind === "string" ? record.kind : "";
-    const kind = isRoundKind(rawKind) && plan.kinds.includes(rawKind)
-        ? rawKind
-        : plan.fixedKind ?? inferKind(text, plan);
+    const kind = kindFor(text, rawKind, plan);
     const rawMetric = typeof record.metric === "string" ? record.metric : "";
     const metric = isMetricKey(rawMetric) ? rawMetric : undefined;
     return { text, kind, ...(metric ? { metric } : {}) };
@@ -358,6 +365,16 @@ function isMetricKey(value: string): value is MetricKey {
 function isRoundKind(value: string): value is RoundKind {
     return value === "pick" || value === "text" || value === "longtext" || value === "rating"
         || value === "dare" || value === "pair_vote" || value === "pair_pick";
+}
+
+function kindFor(text: string, requested: string, plan: PromptPlan): RoundKind {
+    if (plan.fixedKind) return plan.fixedKind;
+    // The text wins over a wrong label. A model that calls "Who would you take
+    // home?" a text question must still get the picker, and a "Rate ... 1-10"
+    // question must still get the 1-10 control.
+    const hinted = inferKind(text, plan);
+    if (hinted === "pick" || hinted === "rating") return hinted;
+    return isRoundKind(requested) && plan.kinds.includes(requested) ? requested : hinted;
 }
 
 function inferKind(text: string, plan: PromptPlan): RoundKind {
@@ -385,6 +402,17 @@ function inferMetric(text: string): MetricKey | undefined {
     return undefined;
 }
 
+/** A rating needs a trait for the UI and the engine; derive one from the line. */
+function inferTrait(metric: MetricKey | undefined, text: string): TraitId {
+    if (/spice|sex|kiss|body|desire|hook|sleep|bed|naked|hot|attract/i.test(text)
+        || metric === METRIC.sexDesire || metric === METRIC.bestInBed || metric === METRIC.crush) return "spice";
+    if (/honest|liar|lie|truth|fake|trust/i.test(text) || metric === METRIC.liar || metric === METRIC.trust) return "honesty";
+    if (/loyal|cheat|betray|snitch/i.test(text) || metric === METRIC.wouldCheat || metric === METRIC.betrayal) return "loyalty";
+    if (/reliab|depend|late|flaky/i.test(text)) return "reliability";
+    if (/warm|kind|friend|nice|care/i.test(text)) return "warmth";
+    return "chaos";
+}
+
 function codingFor(metric: MetricKey | undefined, text: string): PromptCoding {
     if (metric === METRIC.coupleFit || /couple|kiss|date/i.test(text)) return "couple";
     if (metric === METRIC.trust || /trust/i.test(text)) return "trust";
@@ -395,6 +423,35 @@ function codingFor(metric: MetricKey | undefined, text: string): PromptCoding {
     return "tease";
 }
 
+/**
+ * Is this actually adult party content, not a safe icebreaker? The model is
+ * told to be filthy; this is the check that stops a bland line slipping into a
+ * spicy round. The list is deliberately broad: desire, bodies, cheating,
+ * secrets, lies, jealousy, risk and sex-adjacent social heat all count.
+ */
+const HEAT_PATTERN = /\b(?:sex|sexy|sexual|sexuality|kiss(?:ed|ing)?|ma(?:ke|de|king)\s*out|hook(?:ed|ing)?\s*up|hookup|take\s+home|sleep(?:ing)?\s+(?:with|together)|slept\s+with|body\s*count|naked|nude\w*|nudity|bed|cheat(?:ing|er)?|affair|desire|desirable|crush|attract(?:ed|ion|ive)?|turn(?:s|ed)?[\s-]?on|horny|thirst\w*|date|dating|romance|romantic|love|lover|jealous\w*|ex(?:es)?|secret\w*|lie|liar|lying|betray\w*|loyal\w*|honest\w*|reliab\w*|depend\w*|flaky|warm\w*|chill|calm|drama|messy|wild|unpredict\w*|spont\w*|trust|snitch|toxic|red\s*flag|green\s*flag|fake|two-faced|pretend\w*|weirdest|money|cash|broke|debt|owe|body|text(?:ing|ed)?\s+(?:at\s+)?[23]\s*am|2\s*am|3\s*am|kink\w*|fetish\w*|moan\w*|orgasm\w*|oral|top|bottom|sub|dom|threesome|three-?some|virgin\w*|porn\w*|sext\w*|fuck\w*|smash|bang|flirt\w*|hot|ripped|abs|boobs|ass|dick|cock|pussy|tits|balls|butt|breasts|underwear|shower|bathtub|massage|lap|ride|grind\w*|sneaky\s*link|situationship|ship|chemistry|friend\s+with\s+benefits|fwb|one[-\s]night|naughty|dirty|filth\w*|wild|caught|confess\w*|admit\w*|hid(?:e|ing)|deny|last\s+text|search\s+history|screenshot|inbox|dating\s+app|tinder|bumble|hinge|embarrass\w*|shame\w*|regret\w*|worst\s+thing|illegal|rule\s*break|break\s+the\s+rules|gossip|fight|swinger|orgy|mile\s*high|couple)\b/i;
+
+export function isSpicy(text: string): boolean {
+    return HEAT_PATTERN.test(text);
+}
+
+/** A dare has a higher bar than a question: it must be actually filthy or risky. */
+export function isFilthyDare(text: string): boolean {
+    if (!isSpicy(text)) return false;
+    return /\b(?:sex|sexy|kiss|hook(?:ed|ing)?\s*up|sleep(?:ing)?\s+(?:with|together)|slept\s+with|naked|nude\w*|body\s*count|cheat|desire|crush|fuck\w*|smash\w*|bang\w*|sext\w*|filth\w*|dirty|horny|thirst\w*|attract\w*|bed|lap|rid(?:e|ing)|grind\w*|porn\w*|orgasm\w*|moan\w*|top|bottom|threesome|three-?some|kink\w*|fetish\w*|underwear|bra|panties|dick|cock|pussy|ass|boobs|tits|balls|nude|orgy|mile\s*high|one[-\s]night|fwb|sneaky\s*link|situationship|risk\w*|secret\w*|search\s*history|screenshot|inbox)\b/i.test(text);
+}
+
+/** Roles whose whole point is spice. A tame line is rejected, not played. */
+function needsHeat(plan: PromptPlan): boolean {
+    return plan.key === "subject"
+        || plan.key === "observer-subject"
+        || plan.key === "observer-pair"
+        || plan.key === "solo"
+        || plan.key === "ship-vote"
+        || plan.key === "best-couple"
+        || plan.key === "dare";
+}
+
 function slotCheck(text: string, plan: PromptPlan, playerCount: number): boolean {
     const indexes = placeholderIndexes(text);
     // placeholderIndexes() hides out-of-range slots; inspect the raw text so a
@@ -403,6 +460,8 @@ function slotCheck(text: string, plan: PromptPlan, playerCount: number): boolean
         const n = Number(match[1]);
         if (!Number.isInteger(n) || n < 1 || n > playerCount) return false;
     }
+    // Any other brace would reach a phone raw. Only {Pn} is ours.
+    if (/[{}]/.test(text.replace(/\{P\d+\}/g, ""))) return false;
     // The best-couple question is followed by a list of pairs; a raw slot in
     // the question itself would leak the placeholder on every phone.
     if (plan.key === "best-couple" && indexes.length > 0) return false;
@@ -423,8 +482,17 @@ function slotCheck(text: string, plan: PromptPlan, playerCount: number): boolean
         }
         return true;
     }
+    // A single-target dare is delivered with only {P1} bound; a second slot
+    // would reach both dared phones as a raw {P2}.
+    if (plan.key === "dare") return indexes.length > 0 && indexes.every((i) => i === 1);
+    // Pair roles are delivered with exactly two bindings. A third slot would
+    // reach the room raw, so reject it here rather than at the phone.
+    if (plan.slotRule === "p1p2") {
+        return indexes.includes(1) && indexes.includes(2)
+            && indexes.every((i) => i === 1 || i === 2);
+    }
     if (plan.slotRule === "p1") return indexes.includes(1);
-    return indexes.includes(1) && indexes.includes(2);
+    return false;
 }
 
 interface PlanResult {
@@ -442,7 +510,6 @@ async function runPlan(
     context: {
         config: OllamaConfig;
         fetchImpl: OllamaFetch | null;
-        aliases: readonly string[];
         playerCount: number;
         room: string;
         seed: number;
@@ -494,7 +561,10 @@ async function runPlan(
         let acceptedHere = 0;
         for (let i = 0; i < parsed.length; i++) {
             const item = parsed[i]!;
-            const candidate = restoreNames(item.text, context.aliases).trim();
+            // A production request sends no real names, so do not turn a
+            // player's name back into a slot here: a question that happens to
+            // contain a word like "Will" or "Grace" is not naming that player.
+            const candidate = item.text.trim();
             if (!candidate) { dropped += 1; continue; }
             if (candidate.length > MAX_PROMPT_CHARS) {
                 reasons["too-long"] = (reasons["too-long"] ?? 0) + 1;
@@ -503,6 +573,12 @@ async function runPlan(
             }
             if (isRefusal(candidate) || isMetaCommentary(candidate)) {
                 reasons.refusal = (reasons.refusal ?? 0) + 1;
+                dropped += 1;
+                continue;
+            }
+            if ((needsHeat(plan) && !isSpicy(candidate))
+                || (plan.key === "dare" && !isFilthyDare(candidate))) {
+                reasons.tame = (reasons.tame ?? 0) + 1;
                 dropped += 1;
                 continue;
             }
@@ -519,16 +595,26 @@ async function runPlan(
             }
             context.seen.add(norm);
             const metric = item.metric ?? inferMetric(candidate);
+            const kind = plan.fixedKind ?? item.kind;
+            const trait = kind === "rating" ? inferTrait(metric, candidate) : undefined;
             accepted.push({
                 id: `${context.room}-${plan.key}-${accepted.length + 1}-ollama`,
                 source: "ollama",
                 band: plan.band,
                 role: plan.role,
-                kind: plan.fixedKind ?? item.kind,
+                kind,
                 text: candidate,
-                measures: [...(metric ? [`metric:${metric}`] : []), `flavour:${plan.key}`],
+                measures: [
+                    ...(trait ? [`trait:${trait}`] : []),
+                    ...(metric ? [`metric:${metric}`] : []),
+                    `flavour:${plan.key}`,
+                ],
                 coding: codingFor(metric, candidate),
-                asksTarget: plan.role !== "subject" || (plan.fixedKind ?? item.kind) === "pick",
+                asksTarget: plan.role === "observer_subject"
+                    || plan.role === "observer_pair"
+                    || plan.role === "dare"
+                    || plan.role === "group"
+                    || (plan.role === "subject" && kind === "pick"),
             });
             acceptedHere += 1;
             if (accepted.length >= plan.required) break;
@@ -556,11 +642,29 @@ function chainUserPrompt(want: number): string {
         "PLAN: look-chain",
         "ROLE: look-chain",
         "A look chain is a three-beat live moment. The actor looks at someone they choose; the room guesses who; the actor says why.",
-        "Write original flavours. For each line return one JSON object: {\"announce\":\"Everybody look at {A}.\",\"act\":\"Look at ...\",\"guess\":\"Who is {A} ...?\",\"why\":\"Why ...?\"}",
+        "Write original, adult flavours: desire, cheating, secret crushes, exes, bodies, jealousy, a secret. No safe friendship prompts, no repeats.",
+        "For each line return one JSON object: {\"announce\":\"Everybody look at {A}.\",\"act\":\"Look at ...\",\"guess\":\"Who is {A} ...?\",\"why\":\"Why ...?\"}",
         "act is read by the actor (start with \"Look at\"). guess is read by everyone else and MUST contain {A}. why is read by the actor and must be a short question.",
         "Keep the three lines about the same flavour. No real names. No two flavours the same.",
         `Write exactly ${want} JSON lines.`,
     ].join("\n");
+}
+
+/** Only the {A} placeholder may survive into a chain line. */
+function chainBraces(text: string): string[] {
+    return text.match(/\{[^}]*\}/g) ?? [];
+}
+
+function validChainCopy(act: string, announce: string, guess: string, why: string): boolean {
+    if (!announce.includes("{A}") || !guess.includes("{A}")) return false;
+    if (chainBraces(announce).some((slot) => slot !== "{A}")) return false;
+    if (chainBraces(guess).some((slot) => slot !== "{A}")) return false;
+    // A half-written brace is just as raw as a {P2}.
+    if (/[{}]/.test(announce.replace(/\{A\}/g, "")) || /[{}]/.test(guess.replace(/\{A\}/g, ""))) return false;
+    if (/[{}]/.test(act) || /[{}]/.test(why)) return false;
+    if (!/^\s*look at\b/i.test(act)) return false;
+    if (!isSpicy(act)) return false;
+    return true;
 }
 
 async function runChains(
@@ -579,6 +683,10 @@ async function runChains(
     let dropped = 0;
     let offline = false;
     let capped = false;
+    const chainSeen = new Set<string>();
+    const actSeen = new Set<string>();
+    const guessSeen = new Set<string>();
+    const whySeen = new Set<string>();
     for (let attempt = 0; attempt < 2 && chains.length < want; attempt++) {
         if (context.now() - context.started >= context.cap) { capped = true; break; }
         const need = want - chains.length;
@@ -619,14 +727,35 @@ async function runChains(
             const act = typeof record.act === "string" ? cleanLine(record.act) : "";
             const guess = typeof record.guess === "string" ? cleanLine(record.guess) : "";
             const why = typeof record.why === "string" ? cleanLine(record.why) : "";
-            const announce = typeof record.announce === "string" && record.announce.includes("{A}")
-                ? cleanLine(record.announce)
-                : "Everybody look at {A}.";
-            if (!act || !guess || !why || !guess.includes("{A}")) { dropped += 1; continue; }
-            if ([act, guess, why, announce].some((line) => line.length > MAX_PROMPT_CHARS || isRefusal(line))) {
+            const announce = typeof record.announce === "string" ? cleanLine(record.announce) : "";
+            if (!act || !guess || !why || !announce) {
+                reasons["missing-copy"] = (reasons["missing-copy"] ?? 0) + 1;
                 dropped += 1;
                 continue;
             }
+            if ([act, guess, why, announce].some((line) => line.length > MAX_PROMPT_CHARS || isRefusal(line) || isMetaCommentary(line))) {
+                reasons.refusal = (reasons.refusal ?? 0) + 1;
+                dropped += 1;
+                continue;
+            }
+            if (!validChainCopy(act, announce, guess, why)) {
+                reasons["bad-copy"] = (reasons["bad-copy"] ?? 0) + 1;
+                dropped += 1;
+                continue;
+            }
+            const actNorm = normalizeForMatch(act);
+            const guessNorm = normalizeForMatch(guess);
+            const whyNorm = normalizeForMatch(why);
+            const signature = normalizeForMatch([announce, act, guess, why].join(" "));
+            if (chainSeen.has(signature) || actSeen.has(actNorm) || guessSeen.has(guessNorm) || whySeen.has(whyNorm)) {
+                reasons.repeat = (reasons.repeat ?? 0) + 1;
+                dropped += 1;
+                continue;
+            }
+            chainSeen.add(signature);
+            actSeen.add(actNorm);
+            guessSeen.add(guessNorm);
+            whySeen.add(whyNorm);
             chains.push({ announce, act, guess, why, source: "ollama" });
             if (chains.length >= want) break;
         }
@@ -674,7 +803,6 @@ export async function generateNight(input: GenerateBatchInput): Promise<Generate
         const results = await Promise.all(wave.map((plan) => runPlan(plan, {
             config,
             fetchImpl: input.fetchImpl ?? null,
-            aliases: input.aliases ?? [],
             playerCount,
             room,
             seed: input.seed,

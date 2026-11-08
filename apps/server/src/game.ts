@@ -219,6 +219,24 @@ export function substitute(text: string, binding: Map<number, string>): string {
   });
 }
 
+/** Any placeholder still in a delivered line. */
+function hasRawPlaceholder(text: string): boolean {
+  return /[{}]/.test(text);
+}
+
+/** Production dealing: a raw slot must stop the night, not reach a phone. */
+function assertDeliverable(text: string, strict: boolean, where: string): void {
+  if (!strict) return;
+  if (hasRawPlaceholder(text)) {
+    throw new Error(`The generated night left a name slot in the ${where}. Press Start again so Ollama can rewrite it.`);
+  }
+}
+
+function deliverable(text: string, strict: boolean, where: string): string {
+  assertDeliverable(text, strict, where);
+  return text;
+}
+
 /** The observers of a case — everyone but the subject. */
 export function observersFor(order: readonly PlayerId[], subjectId: PlayerId): PlayerId[] {
   return order.filter((id) => id !== subjectId);
@@ -561,7 +579,7 @@ export function buildCase(input: BuildCaseInput): Case {
       // {P1} is the subject on their own question. The bank's subject rows use
       // "you", but a model rewrite can put a name in the line; binding it to
       // the subject keeps the phone from naming the wrong person.
-      text: substitute(subjectPrompt.text, bindingFor([aliasOf(subjectId), ...otherAliases])),
+      text: deliverable(substitute(subjectPrompt.text, bindingFor([aliasOf(subjectId), ...otherAliases])), strict, "subject question"),
       note: "Your answer stays between you and the results.",
       subjectId,
       trait: traitOf(subjectPrompt),
@@ -602,12 +620,12 @@ export function buildCase(input: BuildCaseInput): Case {
         [1, aliasOf(otherPair[0]!)],
         [2, aliasOf(otherPair[1]!)],
       ]);
-      text = substitute(prompt.text, binding);
+      text = deliverable(substitute(prompt.text, binding), strict, "observer question");
       note = noteFor(undefined, [aliasOf(otherPair[0]!), aliasOf(otherPair[1]!)]);
       pairRef = [otherPair[0]!, otherPair[1]!];
     } else {
       const binding = bindingFor([aliasOf(subjectId), ...otherAliases]);
-      text = substitute(prompt.text, binding);
+      text = deliverable(substitute(prompt.text, binding), strict, "observer question");
       note = noteFor(aliasOf(subjectId));
     }
 
@@ -641,7 +659,7 @@ export function buildCase(input: BuildCaseInput): Case {
         players: [leftover],
         prompt: soloPrompt,
         kind: soloPrompt.kind,
-        text: substitute(soloPrompt.text, bindingFor([aliasOf(subjectId), ...otherAliases])),
+        text: deliverable(substitute(soloPrompt.text, bindingFor([aliasOf(subjectId), ...otherAliases])), strict, "solo question"),
         note: "Just for you. Nobody else sees this.",
         closesAt: now + ROUND_TIMERS_MS[soloPrompt.kind],
         answered: new Set(),
@@ -703,7 +721,7 @@ export function buildShipVoteCase(input: {
 
   const voters = room.order.filter((id) => id !== a && id !== b);
   const prompt: Prompt = drawn
-    ? { ...drawn, text: substitute(drawn.text, bindingFor([aliasOf(a), aliasOf(b)])) }
+    ? { ...drawn, text: deliverable(substitute(drawn.text, bindingFor([aliasOf(a), aliasOf(b)])), !allowFallback, "ship-vote question") }
     : {
         id: `${room.code}-ship-${index}`,
         source: "bank",
@@ -796,6 +814,7 @@ export function buildBestCoupleCase(input: {
         coding: "couple",
         asksTarget: true,
       };
+  assertDeliverable(prompt.text, !allowFallback, "best-couple question");
   const segment: Segment = {
     id: `${room.code}-c${index}-bestcouple`,
     players: [...room.order],
@@ -854,8 +873,11 @@ export function buildLookChainCase(input: {
   if (guessers.length === 0) return undefined;
 
   const id = `${room.code}-c${index}-chain`;
-  const announce = variant.announce.replace(/\{A\}/g, actorAlias);
-  const guess = variant.guess.replace(/\{A\}/g, actorAlias);
+  const generatedChain = variant.source === "ollama";
+  const announce = deliverable(variant.announce.replace(/\{A\}/g, () => actorAlias), generatedChain, "look-chain announce");
+  const guess = deliverable(variant.guess.replace(/\{A\}/g, () => actorAlias), generatedChain, "look-chain guess");
+  deliverable(variant.act, generatedChain, "look-chain act");
+  deliverable(variant.why, generatedChain, "look-chain why");
 
   const actSegment: Segment = {
     id: `${id}-act`,
@@ -992,7 +1014,7 @@ export function buildDareCase(input: {
       // Two targets share the same dare, but each gets its own log identity.
       prompt: { ...prompt, id: `${prompt.id}-t${i + 1}` },
       kind: "dare",
-      text: substitute(prompt.text, new Map([[1, aliasOf(target)]])),
+      text: deliverable(substitute(prompt.text, new Map([[1, aliasOf(target)]])), strict, "dare"),
       note: "Everyone is watching.",
       target,
       closesAt: now + ROUND_TIMERS_MS.dare,
@@ -1015,6 +1037,9 @@ export function buildDareCase(input: {
     // is the test/offline fallback only.
     const canBindGenerated = Boolean(watchPrompt)
       && (targets.length === 2 || !/\{P2\}/.test(watchPrompt!.text));
+    if (strict && !canBindGenerated) {
+      throw new Error("The generated night's dare-watch question cannot be bound to both targets. Press Start again so Ollama can rewrite it.");
+    }
     const watcherPrompt: Prompt = canBindGenerated
       ? {
           ...watchPrompt!,
@@ -1038,6 +1063,7 @@ export function buildDareCase(input: {
         [2, aliasOf(targets[1]!)],
       ]));
     }
+    assertDeliverable(watcherPrompt.text, strict, "dare-watch question");
     segments.push({
       id: `${id}-watch`,
       players: watchers,

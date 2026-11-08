@@ -2,11 +2,11 @@
 // The Ollama lane.
 //
 // The rules under test:
-//   • The model may ONLY rephrase a bank prompt — and it is handed the room's
-//     real names, which are turned back into {Pn} slots before anything is kept.
-//   • Exactly four drop reasons exist: not-in-room, repeat, too-long, refusal.
-//   • Every accepted line names a player in the room.
-//   • On failure the bank prompt is used unchanged.
+//   • Production generation sends no real names; it writes from slots.
+//   • Every accepted line is adult enough, names a player in the room, and has
+//     its slots bound exactly.
+//   • Tame lines, unbound slots, repeats and refusals are dropped.
+//   • On failure the night is refused; the bank is never used.
 //   • The terminal report says "asked N, accepted N, dropped N (reasons)".
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -25,7 +25,7 @@ import {
   Provider,
   createPromptProvider,
 } from "../src/index.ts";
-import { generateNight } from "../src/generate.ts";
+import { generateNight, isFilthyDare, isSpicy } from "../src/generate.ts";
 import { fakeOllamaContent } from "../../../scripts/fake-ollama.ts";
 
 describe("the config", () => {
@@ -191,18 +191,18 @@ describe("the generated night", () => {
       if (role === "look-chain") {
         lines.push(JSON.stringify({
           announce: "Everybody look at {A}.",
-          act: `Look at someone you would call at 3am. Flavour ${n}.`,
-          guess: `Who is {A} calling at 3am? Flavour ${n}.`,
+          act: `Look at someone you would sleep with tonight. Flavour ${n}.`,
+          guess: `Who is {A} sleeping with tonight? Flavour ${n}.`,
           why: `Why that one? Flavour ${n}.`,
         }));
       } else if (role === "subject") {
         if (i % 3 === 0) lines.push(JSON.stringify({ kind: "pick", metric: "sex-desire", text: `Who would you take home tonight? Number ${n}.` }));
-        else if (i % 3 === 1) lines.push(JSON.stringify({ kind: "rating", metric: "trust", text: `Rate your own patience from 1 to 10. Number ${n}.` }));
+        else if (i % 3 === 1) lines.push(JSON.stringify({ kind: "rating", metric: "trust", text: `Rate your own sex appeal from 1 to 10. Number ${n}.` }));
         else lines.push(JSON.stringify({ kind: "text", metric: "liar", text: `What is the worst lie you told this week? Number ${n}.` }));
       } else if (role === "observer-subject") {
-        lines.push(JSON.stringify({ kind: "pick", metric: "would-cheat", text: `Who is {P1} most likely to text at 2am? Number ${n}.` }));
+        lines.push(JSON.stringify({ kind: "pick", metric: "would-cheat", text: `Who would {P1} most likely sleep with tonight? Number ${n}.` }));
       } else if (role === "observer-pair") {
-        lines.push(JSON.stringify({ kind: "text", metric: "couple-fit", text: `What do you think {P1} and {P2} fight about? Number ${n}.` }));
+        lines.push(JSON.stringify({ kind: "text", metric: "couple-fit", text: `Which of {P1} and {P2} would cheat first? Number ${n}.` }));
       } else if (role === "solo") {
         lines.push(JSON.stringify({ kind: "text", text: `What is the filthiest thought you had today? Number ${n}.` }));
       } else if (role === "ship-vote") {
@@ -210,7 +210,7 @@ describe("the generated night", () => {
       } else if (role === "best-couple") {
         lines.push(JSON.stringify({ kind: "pair_pick", text: `Who do you think would make the best couple here? Number ${n}.` }));
       } else if (role === "dare") {
-        lines.push(JSON.stringify({ kind: "dare", text: `{P1}, read your last text out loud. Dare ${n}.` }));
+        lines.push(JSON.stringify({ kind: "dare", text: `{P1}, text your ex the filthiest thing you ever thought about them. Dare ${n}.` }));
       } else if (role === "dare-watch") {
         lines.push(JSON.stringify({ kind: "text", text: `Look at {P1} and {P2}. They were just given a dare. Do you think they will do it? Number ${n}.` }));
       }
@@ -235,8 +235,16 @@ describe("the generated night", () => {
     assert.ok(report.prompts.length >= 30, "a full night of questions");
     assert.ok(report.prompts.every((p) => p.source === "ollama"), "no bank line is played");
     assert.ok(report.prompts.every((p) => p.id.endsWith("-ollama")));
+    for (const prompt of report.prompts) {
+      if (prompt.measures.includes("flavour:dare-watch")) continue;
+      assert.ok(isSpicy(prompt.text), `tame line was played: ${prompt.text}`);
+    }
     assert.equal(report.chains.length, 6, "six generated look chains");
     assert.ok(report.chains.every((chain) => chain.guess.includes("{A}")));
+    assert.ok(report.chains.every((chain) => isSpicy(chain.act)), "a tame chain act was played");
+    const rating = report.prompts.find((p) => p.kind === "rating");
+    assert.ok(rating, "a rating question was generated");
+    assert.ok(rating!.measures.some((m) => m.startsWith("trait:")), "a generated rating has a trait for the UI");
     assert.ok(report.bestCouple, "a generated best-couple question");
     assert.equal(report.bestCouple!.source, "ollama");
     assert.equal(report.watchers.length, 2, "a generated watcher question per dare");
@@ -305,6 +313,94 @@ describe("the generated night", () => {
     assert.ok(report.prompts.every((p) => p.source === "ollama"));
     const subjectBatch = report.batches.find((b) => b.label === "subject");
     assert.ok(subjectBatch && subjectBatch.asked > 13, "the retry asked for the missing lines");
+  });
+
+  it("rejects tame questions instead of playing a safe night", async () => {
+    const report = await generateNight({
+      playerCount: 5,
+      seed: 12,
+      fetchImpl: async (_url, init) => {
+        const body = String(init?.body ?? "");
+        let content = fakeOllamaContent(body);
+        if (body.includes("PLAN: subject")) {
+          content = content
+            .replace(/Who would you take home tonight\?/g, "What is your favourite colour?")
+            .replace(/Rate your own sex appeal from 1 to 10\./g, "Rate your own patience from 1 to 10.")
+            .replace(/What is the worst lie you told this week\?/g, "What is your favourite season?");
+        }
+        return { ok: true, status: 200, text: async () => JSON.stringify({ message: { content } }) };
+      },
+    });
+    assert.ok(report.error);
+    assert.match(report.error!, /subject/);
+    assert.equal(report.prompts.filter((p) => p.role === "subject").length, 0);
+    assert.equal(isSpicy("What is your favourite colour?"), false);
+    assert.equal(isSpicy("Who would you take home tonight?"), true);
+    assert.equal(isFilthyDare("Text your ex hello."), false);
+    assert.equal(isFilthyDare("Text your ex the filthiest thing you ever thought about them."), true);
+    assert.equal(isFilthyDare("{P1}, do ten push-ups."), false);
+  });
+
+  it("turns a mislabelled pick into a real pick question", async () => {
+    const report = await generateNight({
+      playerCount: 5,
+      seed: 13,
+      fetchImpl: async (_url, init) => {
+        const body = String(init?.body ?? "");
+        let content = fakeOllamaContent(body);
+        if (body.includes("PLAN: subject")) {
+          content = content.split("\n").map((line) => line.includes("Who would you take home")
+            ? line.replace('"kind":"pick"', '"kind":"text"')
+            : line).join("\n");
+        }
+        return { ok: true, status: 200, text: async () => JSON.stringify({ message: { content } }) };
+      },
+    });
+    assert.equal(report.error, undefined);
+    const pick = report.prompts.find((p) => p.role === "subject" && /take home/.test(p.text));
+    assert.ok(pick);
+    assert.equal(pick!.kind, "pick");
+  });
+
+  it("rejects a dare or pair question with an unbound third slot", async () => {
+    const report = await generateNight({
+      playerCount: 5,
+      seed: 14,
+      fetchImpl: async (_url, init) => {
+        const body = String(init?.body ?? "");
+        let content = fakeOllamaContent(body);
+        if (body.includes("PLAN: dare")) {
+          content = content.replace(/\{P1\},/g, "{P1}, look at {P2},");
+        }
+        if (body.includes("PLAN: ship-vote")) {
+          content = content.replace(/\{P2\}/g, "{P2} and {P3}");
+        }
+        return { ok: true, status: 200, text: async () => JSON.stringify({ message: { content } }) };
+      },
+    });
+    assert.ok(report.error);
+    assert.match(report.error!, /dare/);
+    assert.match(report.error!, /ship-vote/);
+    assert.ok(!report.prompts.some((p) => /\{P3\}/.test(p.text)));
+    assert.equal(report.prompts.filter((p) => p.role === "dare").length, 0);
+  });
+
+  it("drops a look-chain line that omits the announcement instead of inventing one", async () => {
+    const report = await generateNight({
+      playerCount: 5,
+      seed: 15,
+      fetchImpl: async (_url, init) => {
+        const body = String(init?.body ?? "");
+        let content = fakeOllamaContent(body);
+        if (body.includes("PLAN: look-chain")) {
+          content = content.replace(/"announce":"Everybody look at \{A\}\."/g, '"announce":"Everybody look."');
+        }
+        return { ok: true, status: 200, text: async () => JSON.stringify({ message: { content } }) };
+      },
+    });
+    assert.ok(report.error);
+    assert.match(report.error!, /look-chain/);
+    assert.equal(report.chains.length, 0);
   });
 
   it("refuses to start from the bank when Ollama is down", async () => {

@@ -1,18 +1,19 @@
 // packages/prompts/src/index.ts
 // Public surface of @reveal/prompts.
 //
-//   • bank/     193 prompts, band + role tagged; the unhinged tier loads FIRST
-//   • ollama.ts the local model that writes the night's questions and dares —
-//               and the only place a prompt may be dropped (four reasons)
+//   • bank/     200 prompts, band + role tagged; the unhinged tier loads FIRST
+//               and the bank is a test/offline fixture, never a real night
+//   • ollama.ts the HTTP client and the legacy rephrase helpers
 //   • provider.ts the Gemini lane, which reads the night's data and writes
 //               the reveal
-//   • generate.ts the batched generation run, spicy first, safety-capped
+//   • generate.ts the role-planned generation run: heat, slots and chain copy
 //   • facade.ts PromptProvider — Ollama writes every prompt; no bank fallback
 //
-// There is no content filter. This is a party for the people in the room, not
-// an app that ships: the only things that stop a line being played are that it
-// names nobody in the room, repeats one already accepted, runs past
-// MAX_PROMPT_CHARS, or is a refusal.
+// There is no curator. This is a party for the people in the room, not an app
+// that ships: the things that stop a line being played are that it is not adult
+// enough, names nobody in the room, leaves a slot unbound, repeats one already
+// accepted, runs past MAX_PROMPT_CHARS, or is a refusal. A real night never
+// falls back to the bank.
 export {
   CallGuard,
   PURPOSE_SLOTS,
@@ -95,6 +96,8 @@ export {
 export {
   GenerationError,
   generateNight,
+  isFilthyDare,
+  isSpicy,
   planNight,
   type GenerateBatchInput,
   type GenerateBatchReport,

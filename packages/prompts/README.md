@@ -11,18 +11,21 @@ wins anything.
 src/bank/*.json  warmup 36 · spicy 63 · deep 37 · dare 34 · unhinged 30 = 200
 src/bank/index.ts  the loader (unhinged FIRST, then the bands), the seeded
                  shuffle, and the spread-out selection
-src/ollama.ts    THE LOCAL LANE — fillNames/restoreNames, the rephrase prompt,
-                 the four drop reasons, the per-band batch, the terminal report
-src/generate.ts  `generateNight` — role-planned original generation, no bank
+src/ollama.ts    THE LOCAL LANE — the HTTP client, refusals and the legacy
+                 rephrase helpers (not used by a production night)
+src/generate.ts  `generateNight` — role-planned original generation, heat,
+                 slot and chain validation, no bank
 src/provider.ts  THE GEMINI LANE — the analyst: pseudonyms in, reveal copy out
-src/guard.ts     ONE per-room in-memory call ledger for BOTH lanes (cap 8)
+src/guard.ts     ONE per-room in-memory call ledger for BOTH lanes (cap 24)
 src/facade.ts    `PromptProvider` — Ollama only; a shortfall throws
 src/index.ts     the public surface
 ```
 
-There is no content filter, and no `filter.ts`. This is a party for the people
-in the room, not an app that ships. Every real prompt is generated with the
-room's names as `{P1}` slots and bound at deal time.
+There is no curator, and no `filter.ts`. This is a party for the people in the
+room, not an app that ships. Every real prompt is generated with `{P1}` slots
+and bound at deal time. The generator does reject lines that are not adult
+enough, name nobody in the room, leave a slot unbound, or repeat an earlier
+line — that is correctness, not censorship.
 
 ## The bank
 
@@ -53,28 +56,35 @@ GEN_MODEL       dolphin-mistral
 GEN_TIMEOUT_MS  120000
 ```
 
-The model gets ONE job: rephrase the night's questions and dares. It is handed
-the room's **real names** (`fillNames`) — the questions are about these people,
-and a local model has nothing to be careful about — and every name it writes
-back is turned into its `{Pn}` slot again (`restoreNames`) before the line is
-kept. The slot is what the night stores, so the case engine still does the
-casting: a line the model rewrote against roster player 1 may be dealt to
-anyone, and it reads the same either way.
+The model gets ONE job: write the night's questions and dares from role plans.
+A production request sends **no real names** — only `{P1}` slots and the role
+brief. The model writes original lines; `restoreNames` is still used for the
+legacy rephrase path, but the generated night binds its slots at deal time and
+never needs names in the request.
 
-A candidate is dropped for exactly four reasons, and nothing else:
+A candidate is dropped when it is:
 
 | reason | means |
 |---|---|
-| `not-in-room` | after the names go back to slots, nobody in the room is named |
+| `not-in-room` | a slot is missing, out of range, or the line names nobody |
+| `tame` | no adult heat (sex, desire, cheating, secrets, lies, risk, bodies); a dare must clear a stricter filthy-or-risky bar |
 | `repeat` | says the same thing as a line already accepted |
 | `too-long` | over `MAX_PROMPT_CHARS` (160) |
 | `refusal` | empty, "as an AI", or commentary instead of a question |
 
-The run walks the bands in `BAND_ORDER`, stops at `GEN_SAFETY_CAP_MS` (180 s)
-and prints one line per batch to the host terminal:
+Every role has an exact slot contract: subject/solo/best-couple use no slots;
+a dare uses only `{P1}`; pair roles use exactly `{P1}` and `{P2}`; an
+observer-subject question may use extra slots because the deal binds the whole
+roster. A stray brace, a third pair slot or a half-written slot is refused, so
+a phone never shows a raw placeholder. Look-chain copy must carry `{A}` in the
+announcement and guess, no other braces, start the act with "Look at", and be
+original; there is no code-written fallback announcement.
+
+The run is role-planned, three calls at a time, and stops at
+`GEN_SAFETY_CAP_MS` (180 s). It prints one line per plan to the host terminal:
 
 ```
-Ollama: asked 15, accepted 12, dropped 3 (not-in-room:1, repeat:2)
+Ollama: subject asked 12, accepted 11, dropped 0 (none)
 ```
 
 A short batch is retried once for the missing lines. If the night is still short,
@@ -107,9 +117,10 @@ name that is not on the slide is dropped in favour of the engine's line.
 | Gemini | `GEMINI_API_KEY` | the analysis: reveal + secret-card copy | once, at the reveal |
 
 Both spend from one `CallGuard` per room: total ≤
-`MAX_PROVIDER_CALLS_PER_NIGHT` (8), with slots `generate 4 / reveal 1`. A
+`MAX_PROVIDER_CALLS_PER_NIGHT` (24), with slots `generate 20 / reveal 1`. A
 missing key returns `no-key` and the network is never touched; a timeout, a 429
-or garbage returns a reason and the caller falls back, silently. No retry, ever.
+or garbage returns a reason. A short generation batch retries once, then the
+room refuses to start rather than filling from the bank.
 
 ## Use it (the server)
 
